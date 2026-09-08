@@ -13,6 +13,7 @@ import com.makemission.folio.data.model.Book
 @Composable
 fun BookGrid(
     books: List<Book>,
+    onBookClick: (Book) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     LazyVerticalGrid(
@@ -23,7 +24,7 @@ fun BookGrid(
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         items(books, key = { it.id }) { book ->
-            BookCoverCard(book = book)
+            BookCoverCard(book = book, onClick = { onBookClick(book) })
         }
     }
 }

@@ -7,6 +7,48 @@ Active coding branch: `main`.
 
 ---
 
+## Session 5 — 2026-09-08 — Core Reading screen (EPUB, Room, adaptive layout)
+
+Branch: `main`.
+
+### Built
+
+- **EPUB parsing (§6)** — native `data/epub/EpubParser.kt` (ZIP + `container.xml` → OPF manifest/spine → `toc.ncx` → Jsoup paragraph extraction); no network/AI. Loads `assets/sample.epub` if present, else curated fallback chapters.
+- **ReadingScreen (§3 + §6)** — serif body typography (`bodyLarge` 17/27) with:
+  - Phone: single-column, edge-to-edge, immersive `LazyColumn`.
+  - Tablet: landscape + `screenWidthDp >= 840` triggers a two-column spread (left/right `LazyColumn`s with central gutter), mimicking a physical book.
+  - Top bar with back navigation; chapter titles in heavy sans, amber rules between chapters.
+- **Navigation** — `navigation/FolioNav.kt` (`NavHost` `library` ↔ `reader/{bookId}/{bookTitle}`); tapping a library cover (now clickable `BookCoverCard`) navigates to `ReadingScreen`.
+- **Storage (§6)** — `data/db/FolioDatabase` (Room 2.7.2, KSP), `entity/ReadingProgress` (`bookId` PK, chapter/paragraph + timestamp), `dao/ReadingProgressDao` (Flow observe + upsert). `ReadingViewModel` loads the EPUB and observes/saves progress; position restored on next open.
+- Reference: looked at `book-story-master`'s `ReaderLayout` / `ReaderContent` / `ReaderLayoutText` and `EpubTextParser` for structure only — no code copied.
+
+### Changed
+
+- `gradle/libs.versions.toml:2-39` — added `ksp 2.2.20-2.0.4`, `room 2.7.2`, `navigationCompose 2.8.4`, `jsoup 1.18.3`, `lifecycle 2.9.2` and libraries (`navigation-compose`, `room-runtime/ktx/compiler`, `lifecycle-viewmodel-compose/runtime-compose`, `jsoup`); added `ksp` plugin.
+- `build.gradle.kts:1-11` — added `ksp` plugin alias.
+- `gradle.properties:14-19` — added `android.builtInKotlin=false` + `android.newDsl=false` for KSP/Room compatibility with AGP 9.4.
+- `app/build.gradle.kts:1-65` — added `kotlin-android` + `ksp` plugins, `navigation-compose`, lifecycle, Room, jsoup deps, `ksp(room-compiler)`; reverted to `kotlinOptions { jvmTarget = "17" }`.
+- `app/src/main/java/com/makemission/folio/data/db/entity/ReadingProgress.kt` — new.
+- `app/src/main/java/com/makemission/folio/data/db/dao/ReadingProgressDao.kt` — new.
+- `app/src/main/java/com/makemission/folio/data/db/FolioDatabase.kt` — new.
+- `app/src/main/java/com/makemission/folio/data/epub/EpubParser.kt` — new.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt` — new.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingViewModel.kt` — new.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingViewModelFactory.kt` — new.
+- `app/src/main/java/com/makemission/folio/navigation/FolioNav.kt` — new.
+- `app/src/main/java/com/makemission/folio/ui/library/components/BookCoverCard.kt:26-38` — now clickable via `onClick`.
+- `app/src/main/java/com/makemission/folio/ui/library/components/BookGrid.kt:13-26` — now forwards `onBookClick`.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryScreen.kt:20-31` — now takes `onBookClick`.
+- `app/src/main/java/com/makemission/folio/MainActivity.kt:1-31` — hosts `FolioNavHost()` instead of direct `LibraryScreen`.
+- `README.md:1-115` — updated: Reading-screen section, EPUB/Room/nav tech stack, navigation + reader structure, adaptive-layout notes.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` with JDK 21 (`~/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2`).
+
+---
+
 ## Session 4 — 2026-09-08 — Editorial library screen (grid + empty state)
 
 Branch: `main`.

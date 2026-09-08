@@ -26,6 +26,7 @@ import com.makemission.folio.ui.library.components.EmptyLibraryState
 @Composable
 fun LibraryScreen(
     books: List<Book>,
+    onBookClick: (Book) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -43,6 +44,7 @@ fun LibraryScreen(
             } else {
                 BookGrid(
                     books = books,
+                    onBookClick = onBookClick,
                     modifier = Modifier.fillMaxSize(),
                 )
             }

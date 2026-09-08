@@ -1,6 +1,7 @@
 package com.makemission.folio.ui.library.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -25,6 +26,7 @@ import com.makemission.folio.data.model.Book
 @Composable
 fun BookCoverCard(
     book: Book,
+    onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -33,7 +35,10 @@ fun BookCoverCard(
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
                 .clip(RoundedCornerShape(16.dp))
-                .background(book.coverColor),
+                .background(book.coverColor)
+                .let { m ->
+                    if (onClick != null) m.clickable(onClick = onClick) else m
+                },
         ) {
             // Subtle spine edge.
             Box(

@@ -4,17 +4,15 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.remember
-import com.makemission.folio.data.model.curatedSampleBooks
-import com.makemission.folio.ui.library.LibraryScreen
+import com.makemission.folio.navigation.FolioNavHost
 import com.makemission.folio.ui.theme.FolioTheme
 
 /**
- * Single-activity Compose entry point.
+ * Single-activity Compose entry point — navigation host lives here.
  *
- * The library screen is the app's home. Real storage (Room) lands later;
- * for now a curated in-memory seed shows the editorial grid, with the
- * flat empty state ready when the list is empty.
+ * Library is the start destination; tapping a cover navigates to the
+ * Reader (§3 phone/tablet layouts). Storage/Room is initialized lazily
+ * on first read (§6).
  */
 class MainActivity : ComponentActivity() {
 
@@ -23,8 +21,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             FolioTheme {
-                val books = remember { curatedSampleBooks() }
-                LibraryScreen(books = books)
+                FolioNavHost()
             }
         }
     }
