@@ -12,6 +12,7 @@ import com.makemission.folio.data.epub.EpubParser
 import com.makemission.folio.data.model.Book
 import com.makemission.folio.data.model.FolioCoverPalette
 import com.makemission.folio.data.model.curatedSampleBooks
+import com.makemission.folio.data.xray.XRayCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -138,6 +139,8 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             coverImagePath = coverPath,
         )
         bookDao.insert(entity)
+        // Invalidate X-Ray cache so it recomputes for the new/updated book (computed once per book on next open)
+        try { XRayCache.invalidate(context, id) } catch (_: Exception) {}
         return entity
     }
 }

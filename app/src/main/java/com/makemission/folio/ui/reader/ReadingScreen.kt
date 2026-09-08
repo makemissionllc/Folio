@@ -68,6 +68,7 @@ import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.epub.EpubParser
 import com.makemission.folio.ui.reader.components.HighlightOverlay
 import com.makemission.folio.ui.reader.components.ReadingProgressBar
+import com.makemission.folio.ui.reader.components.XRayBottomSheet
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
@@ -101,10 +102,14 @@ fun ReadingScreen(
     val viewModel: ReadingViewModel = viewModel(factory = factory)
     val uiState by viewModel.uiState.collectAsState()
     val highlights by viewModel.highlights.collectAsState()
+    val xrayIndex by viewModel.xrayIndex.collectAsState()
+    val isXRayLoading by viewModel.isXRayLoading.collectAsState()
 
     ReadingScreenContent(
         uiState = uiState,
         highlights = highlights,
+        xrayIndex = xrayIndex,
+        isXRayLoading = isXRayLoading,
         onBack = onBack,
         onSaveProgress = viewModel::saveProgress,
         onAddHighlight = { pts, pressures, tilts, ch ->
@@ -119,6 +124,8 @@ fun ReadingScreen(
 private fun ReadingScreenContent(
     uiState: ReadingUiState,
     highlights: List<Highlight>,
+    xrayIndex: Map<Int, List<com.makemission.folio.data.xray.XRayTerm>>,
+    isXRayLoading: Boolean,
     onBack: () -> Unit,
     onSaveProgress: (Int, Int) -> Unit,
     onAddHighlight: (List<Offset>, List<Float>, List<Float>, Int) -> Unit,
@@ -132,6 +139,7 @@ private fun ReadingScreenContent(
 
     var chromeVisible by remember { mutableStateOf(true) }
     var bionicEnabled by rememberSaveable { mutableStateOf(false) }
+    var showXRay by remember { mutableStateOf(false) }
     var lassoCapture by remember { mutableStateOf<LassoCapture?>(null) }
     val context = LocalContext.current
 
@@ -190,6 +198,13 @@ private fun ReadingScreenContent(
                         }
                     },
                     actions = {
+                        TextButton(onClick = { showXRay = true }) {
+                            Text(
+                                "X-Ray",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         TextButton(onClick = { bionicEnabled = !bionicEnabled }) {
                             Text(
                                 if (bionicEnabled) "Bionic On" else "Bionic Off",
@@ -260,6 +275,15 @@ private fun ReadingScreenContent(
                 )
             }
         }
+    }
+
+    if (showXRay) {
+        XRayBottomSheet(
+            xrayIndex = xrayIndex,
+            chapters = uiState.chapters,
+            isLoading = isXRayLoading,
+            onDismiss = { showXRay = false },
+        )
     }
 }
 

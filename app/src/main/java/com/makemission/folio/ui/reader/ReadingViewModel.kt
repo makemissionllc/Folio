@@ -11,6 +11,9 @@ import com.makemission.folio.data.db.FolioDatabase
 import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.db.entity.ReadingProgress
 import com.makemission.folio.data.epub.EpubParser
+import com.makemission.folio.data.xray.XRayCache
+import com.makemission.folio.data.xray.XRayExtractor
+import com.makemission.folio.data.xray.XRayTerm
 import com.makemission.folio.ui.reader.components.encodeFloats
 import com.makemission.folio.ui.reader.components.encodePoints
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +55,12 @@ class ReadingViewModel(
             initialValue = emptyList(),
         )
 
+    private val _xrayIndex = MutableStateFlow<Map<Int, List<XRayTerm>>>(emptyMap())
+    val xrayIndex: StateFlow<Map<Int, List<XRayTerm>>> = _xrayIndex.asStateFlow()
+
+    private val _isXRayLoading = MutableStateFlow(false)
+    val isXRayLoading: StateFlow<Boolean> = _isXRayLoading.asStateFlow()
+
     init {
         viewModelScope.launch {
             val saved = dao.observe(bookId).firstOrNull()
@@ -84,8 +93,35 @@ class ReadingViewModel(
                 restoredParagraphIndex = paraIdx,
             )
 
+            // X-Ray TF-IDF (§5): compute once per book, cache
+            launchXRayIfNeeded(app, bookId, chapters)
+
             // LCS re-anchoring (§5): if the EPUB file changed, relocate highlights
             reanchorHighlightsIfNeeded(chapters)
+        }
+    }
+
+    private fun launchXRayIfNeeded(
+        app: Application,
+        bookId: String,
+        chapters: List<EpubParser.EpubChapter>,
+    ) {
+        viewModelScope.launch {
+            _isXRayLoading.value = true
+            try {
+                // Try disk cache first (computed on import/first open)
+                val cached = XRayCache.load(app, bookId)
+                if (cached != null && cached.isNotEmpty()) {
+                    _xrayIndex.value = cached
+                    return@launch
+                }
+                // Compute locally, deterministic, no network/dictionary
+                val index = XRayExtractor.extract(chapters, topK = 8)
+                _xrayIndex.value = index
+                XRayCache.save(app, bookId, index)
+            } finally {
+                _isXRayLoading.value = false
+            }
         }
     }
 

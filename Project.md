@@ -7,6 +7,34 @@ Active coding branch: `main`.
 
 ---
 
+## Session 13 — 2026-09-08 — On-device X-Ray (TF-IDF per-chapter index)
+
+Branch: `main`.
+
+### Built
+
+- **X-Ray (§5 — TF-IDF, pure on-device)** — `data/xray/XRayExtractor.kt`: local deterministic TF-IDF that tokenizes each chapter, extracts capitalized proper-noun candidates via Regex `\b[A-Z][a-z]{2,}\b` filtered by a stopword set (no NLP tagger, no dictionary, no network), computes `tf = count/totalWords`, `idf = ln(totalChapters/df)`, `score = tf*idf`, and keeps top 8 per chapter. `data/xray/XRayTerm.kt` holds `term`/`score`/`chapterIndices`/`totalFrequency`. `data/xray/XRayCache.kt` persists the per-book, per-chapter index to `filesDir/xray/<bookId>.json` (org.json) so it is computed once on first open/import and reused, plus in-memory via `ReadingViewModel.xrayIndex` (`StateFlow<Map<Int, List<XRayTerm>>>`).
+- **Bottom sheet (§5)** — `ui/reader/components/XRayBottomSheet.kt`: minimalist `ModalBottomSheet` (skipPartiallyExpanded) opened via an *X-Ray* top-bar button in `ReadingScreen`; shows per-chapter distinctive terms with score and frequency, tap to expand and see which chapters the term appears in. Handles loading and empty states.
+- **Integration** — `ui/reader/ReadingViewModel.kt` now exposes `xrayIndex` + `isXRayLoading`, launches `XRayCache.load` then `XRayExtractor.extract` on chapters load and caches; `ui/library/LibraryViewModel.kt` invalidates the X-Ray cache on import/reimport so the new book's index recomputes. Built on top of existing `EpubParser` output — parser not rewritten; looked at `book-story-master` bottom-sheet structure for inspiration only.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/xray/XRayTerm.kt` — new.
+- `app/src/main/java/com/makemission/folio/data/xray/XRayExtractor.kt` — new: stopwords, capitalizedWord regex, `extract` (tf-idf).
+- `app/src/main/java/com/makemission/folio/data/xray/XRayCache.kt` — new: file cache `filesDir/xray/<bookId>.json` (load/save/invalidate).
+- `app/src/main/java/com/makemission/folio/ui/reader/components/XRayBottomSheet.kt` — new: per-chapter `ModalBottomSheet` with single-chapter and whole-book overloads.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingViewModel.kt:1-175` — added `xrayIndex`/`isXRayLoading`, `launchXRayIfNeeded` (cache load → extract → save).
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryViewModel.kt:1-143` — invalidates `XRayCache` on import/reimport.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:1-832` — added `showXRay` state, `X-Ray` top-bar button, `XRayBottomSheet` (whole-book per-chapter) wired to `xrayIndex`/`isXRayLoading`, collects `xrayIndex` from ViewModel.
+- `README.md:1-142` — intro now lists on-device X-Ray, tree adds `xray/{...}` + `XRayBottomSheet`, Reading-screen section adds X-Ray bullet (§5) and updates structure.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` with JDK 21 (`~/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2`).
+
+---
+
 ## Session 12 — 2026-09-08 — LCS annotation anchoring (highlights survive EPUB updates)
 
 Branch: `main`.
