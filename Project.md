@@ -7,6 +7,34 @@ Active coding branch: `main`.
 
 ---
 
+## Session 12 — 2026-09-08 — LCS annotation anchoring (highlights survive EPUB updates)
+
+Branch: `main`.
+
+### Built
+
+- **LCS anchors (§5 — pure on-device)** — `data/anchor/LcsAnchor.kt`: deterministic Longest Common Subsequence diff that stores each highlight's surrounding paragraph snippet (`anchorText`, ~80 chars) as a contextual anchor instead of just raw stroke coordinates. On book reopen or reimport (updated EPUB file), `ReadingViewModel.reanchorHighlightsIfNeeded` scans the newly parsed chapters for the closest anchor match via LCS similarity (`lcsLength / anchorLen`, threshold 0.55, sliding window for long paragraphs) and reattaches the highlight to the correct `chapterIndex`; if no reasonable match it is left orphaned (`isOrphaned=true`) rather than crashing or guessing. Highlights therefore survive publisher typo-fix updates that shift byte offsets.
+- **Capture + storage (extend, not rewrite)** — `data/db/entity/Highlight.kt` now carries `anchorText` + `isOrphaned`; `dao/HighlightDao.kt` adds `@Update`; `FolioDatabase` v4→v5 (`Highlight` + `BookEntity`, `fallbackToDestructiveMigration(true)`). `ui/reader/ReadingViewModel.kt` now captures the anchor via `LcsAnchor.snippetForHighlight(chapters, chapterIndex)` on `addHighlight` and runs the LCS scan on init; `LibraryViewModel` was taught reimport handling — importing an EPUB whose title already exists reuses the existing `BookEntity` id (updates `filePath`/`coverImagePath` in place) so the same `bookId` highlights are reanchored on next open instead of orphaning to a new book.
+- Built on top of existing `Highlight`/`HighlightOverlay` with pressure/tilt Multiply true-ink — not a rewrite; looked at `book-story-master` annotation handling for structural inspiration only.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/db/entity/Highlight.kt:1-44` — added `anchorText` + `isOrphaned`.
+- `app/src/main/java/com/makemission/folio/data/db/dao/HighlightDao.kt:1-28` — added `@Update update`.
+- `app/src/main/java/com/makemission/folio/data/db/FolioDatabase.kt:1-37` — v4→v5.
+- `app/src/main/java/com/makemission/folio/data/anchor/LcsAnchor.kt` — new: `lcsLength`, `similarity`, `findBestMatch`, `snippetForHighlight`, `MATCH_THRESHOLD`.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingViewModel.kt:1-175` — captures `anchorText` on `addHighlight`, runs `reanchorHighlightsIfNeeded` on init (LCS scan, update or orphan).
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryViewModel.kt:1-115` — reimport path: copy to temp, parse, title-match reuse existing `BookEntity` id, update cover/file, otherwise create new.
+- `app/src/main/java/com/makemission/folio/data/db/dao/BookDao.kt:1-28` — added `getAll()` for title-match lookup.
+- `README.md:1-142` — intro + tech stack (Room v5), project structure (`anchor/LcsAnchor`, `Highlight(anchorText)`), Reading-screen stylus bullet now documents LCS anchors.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` with JDK 21 (`~/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2`).
+
+---
+
 ## Session 11 — 2026-09-08 — EPUB Import (SAF, private storage, cover extraction)
 
 Branch: `main`.

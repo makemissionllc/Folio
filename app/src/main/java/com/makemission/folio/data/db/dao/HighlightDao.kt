@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import com.makemission.folio.data.db.entity.Highlight
 import kotlinx.coroutines.flow.Flow
 
@@ -19,6 +20,9 @@ interface HighlightDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(highlight: Highlight): Long
+
+    @Update
+    suspend fun update(highlight: Highlight)
 
     @Delete
     suspend fun delete(highlight: Highlight)

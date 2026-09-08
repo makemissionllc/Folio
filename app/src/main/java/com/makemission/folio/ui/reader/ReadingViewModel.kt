@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import com.makemission.folio.data.anchor.LcsAnchor
 import com.makemission.folio.data.db.FolioDatabase
 import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.db.entity.ReadingProgress
@@ -82,6 +83,33 @@ class ReadingViewModel(
                 restoredChapterIndex = chapterIdx,
                 restoredParagraphIndex = paraIdx,
             )
+
+            // LCS re-anchoring (§5): if the EPUB file changed, relocate highlights
+            reanchorHighlightsIfNeeded(chapters)
+        }
+    }
+
+    /** Pure on-device LCS scan — relocates anchors if the EPUB text shifted. */
+    private suspend fun reanchorHighlightsIfNeeded(chapters: List<EpubParser.EpubChapter>) {
+        try {
+            val highlights = highlightDao.getForBook(bookId)
+            if (highlights.isEmpty()) return
+            for (hl in highlights) {
+                if (hl.anchorText.isBlank()) continue
+                val match = LcsAnchor.findBestMatch(hl.anchorText, chapters)
+                if (match != null) {
+                    if (match.chapterIndex != hl.chapterIndex || hl.isOrphaned) {
+                        highlightDao.update(hl.copy(chapterIndex = match.chapterIndex, isOrphaned = false))
+                    }
+                } else {
+                    // No reasonable match — leave orphaned rather than guessing
+                    if (!hl.isOrphaned) {
+                        highlightDao.update(hl.copy(isOrphaned = true))
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Never crash on anchoring — orphaned highlights are acceptable
         }
     }
 
@@ -103,9 +131,12 @@ class ReadingViewModel(
         pressures: List<Float> = emptyList(),
         tilts: List<Float> = emptyList(),
         chapterIndex: Int = 0,
+        anchorText: String = "",
         color: Color = Color(0xFFF7B538),
     ) {
         if (normalizedPoints.size < 2) return
+        val anchor = if (anchorText.isNotBlank()) anchorText
+        else LcsAnchor.snippetForHighlight(_uiState.value.chapters, chapterIndex)
         viewModelScope.launch {
             highlightDao.insert(
                 Highlight(
@@ -114,6 +145,8 @@ class ReadingViewModel(
                     pointsData = encodePoints(normalizedPoints),
                     pressuresData = if (pressures.size == normalizedPoints.size) encodeFloats(pressures) else "",
                     tiltsData = if (tilts.size == normalizedPoints.size) encodeFloats(tilts) else "",
+                    anchorText = anchor.take(LcsAnchor.ANCHOR_SNIPPET_LEN),
+                    isOrphaned = false,
                     color = color.toArgb(),
                 ),
             )
@@ -124,7 +157,17 @@ class ReadingViewModel(
         normalizedPoints: List<Offset>,
         chapterIndex: Int = 0,
         color: Color = Color(0xFFF7B538),
-    ) = addHighlight(normalizedPoints, emptyList(), emptyList(), chapterIndex, color)
+    ) = addHighlight(normalizedPoints, emptyList(), emptyList(), chapterIndex, "", color)
+
+    /** Also store anchor when available — preferred overload for §5. */
+    fun addHighlightWithAnchor(
+        normalizedPoints: List<Offset>,
+        pressures: List<Float>,
+        tilts: List<Float>,
+        chapterIndex: Int,
+        anchorText: String,
+        color: Color = Color(0xFFF7B538),
+    ) = addHighlight(normalizedPoints, pressures, tilts, chapterIndex, anchorText, color)
 
     fun clearHighlights() {
         viewModelScope.launch { highlightDao.clearForBook(bookId) }

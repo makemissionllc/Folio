@@ -13,7 +13,7 @@ import com.makemission.folio.data.db.entity.ReadingProgress
 
 @Database(
     entities = [ReadingProgress::class, Highlight::class, BookEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class FolioDatabase : RoomDatabase() {

@@ -4,7 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 /**
- * Stylus highlight (§4) — persisted per book.
+ * Stylus highlight (§4 + §5 LCS anchors) — persisted per book.
  *
  * Extends the existing schema (§6) rather than replacing it.
  * `pointsData` stores the normalized ink path as "x1,y1,x2,y2,..." where
@@ -17,6 +17,11 @@ import androidx.room.PrimaryKey
  * used with Multiply true-ink rendering. Empty strings mean fixed-width
  * (legacy rows). Lasso extraction is handled separately and not stored as
  * a highlight.
+ *
+ * `anchorText` (§5 LCS) stores the surrounding paragraph snippet near the
+ * highlight (e.g. 80 chars) as a contextual anchor. On reopen/reimport,
+ * an LCS scan relocates the highlight to the closest matching paragraph
+ * if the EPUB changed, otherwise it stays orphaned.
  */
 @Entity(tableName = "highlights")
 data class Highlight(
@@ -29,6 +34,10 @@ data class Highlight(
     val pressuresData: String = "",
     /** Comma-separated tilts in radians per point (0..PI/2). */
     val tiltsData: String = "",
+    /** Surrounding text snippet (e.g. 80 chars) for LCS anchoring (§5). */
+    val anchorText: String = "",
+    /** True if anchor could not be relocated after file change — left orphaned. */
+    val isOrphaned: Boolean = false,
     /** ARGB int, e.g. FolioAmber (#F7B538). */
     val color: Int,
     val createdAt: Long = System.currentTimeMillis(),

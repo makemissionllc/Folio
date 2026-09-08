@@ -83,24 +83,52 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
         val safeName = displayName.takeIf { it.endsWith(".epub", ignoreCase = true) } ?: "$displayName.epub"
         val booksDir = File(context.filesDir, "books").apply { mkdirs() }
-        val id = UUID.randomUUID().toString()
-        val destFile = File(booksDir, "${id}_$safeName")
 
+        // Copy to a temp file first so we can parse without yet committing to DB
+        val tmpFile = File(booksDir, "tmp_${UUID.randomUUID()}_$safeName")
         resolver.openInputStream(uri)?.use { input ->
-            destFile.outputStream().use { out -> input.copyTo(out) }
+            tmpFile.outputStream().use { out -> input.copyTo(out) }
         } ?: return null
 
         // Validate by parsing — also gives us title/author
-        val epub = EpubParser.parse(destFile)
+        val epub = EpubParser.parse(tmpFile)
         if (epub == null || epub.chapters.isEmpty()) {
-            destFile.delete()
+            tmpFile.delete()
             return null
         }
         val title = epub.title.ifBlank { safeName.removeSuffix(".epub") }
         val author = epub.author
 
+        // Check for re-import: same title/author already exists → reuse its id so highlights can be LCS-reanchored
+        val existing = try {
+            // Simple title match (case-insensitive) — covers the spec's "publisher pushes update to fix typos" case
+            bookDao.getAll().firstOrNull { it.title.equals(title, ignoreCase = true) }
+        } catch (_: Exception) { null }
+
+        val id = existing?.id ?: UUID.randomUUID().toString()
+        val destFile = File(booksDir, "${id}_$safeName")
+
+        // Move temp to final (or copy if reimport keeps same id but different name)
+        if (tmpFile.absolutePath != destFile.absolutePath) {
+            if (destFile.exists()) destFile.delete()
+            tmpFile.renameTo(destFile)
+            if (!destFile.exists()) {
+                tmpFile.copyTo(destFile, overwrite = true)
+                tmpFile.delete()
+            }
+        }
+        // If reimport, clean up old cover to force regeneration
+        if (existing?.coverImagePath != null) {
+            try { File(existing.coverImagePath).delete() } catch (_: Exception) {}
+        }
+
         // Extract cover image if present (saved under covers/<id>.jpg)
         val coverPath = EpubParser.extractCoverToFile(destFile, context, id)
+
+        // If this was a reimport, delete old file if path changed (we already moved)
+        if (existing != null && existing.filePath != destFile.absolutePath) {
+            try { File(existing.filePath).delete() } catch (_: Exception) {}
+        }
 
         val entity = BookEntity(
             id = id,

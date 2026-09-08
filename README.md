@@ -2,7 +2,7 @@
 
 Folio is a premium, distraction-free Android ebook reader by MakeMission LLC (`com.makemission.folio`). It bridges digital convenience and the tactile craft of traditional bookmaking — fluid stylus interactions, magazine-quality typography, and adaptive layouts for phones and tablets.
 
-Jetpack Compose–first. Library (editorial grid + import), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction), bionic reading and chapter time remaining are now in place; X-Ray and other algorithmic features come later.
+Jetpack Compose–first. Library (editorial grid + import), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction), bionic reading, chapter time remaining and LCS-anchored highlights are now in place; X-Ray and other algorithmic features come later.
 
 ## Tech stack
 
@@ -10,7 +10,7 @@ Jetpack Compose–first. Library (editorial grid + import), core Reading (native
 - `compileSdk` / `targetSdk` 37, `minSdk` 33, Java 17
 - Jetpack Compose (BOM `2025.09.00`): `ui`, `foundation`, `material3`, `activity-compose`
 - Navigation Compose 2.8.4 (`navigation-compose`), lifecycle `viewmodel-compose` / `runtime-compose`
-- Room 2.7.2 (`room-runtime`, `room-ktx`, KSP `room-compiler`) for books, progress + highlight storage (v4)
+- Room 2.7.2 (`room-runtime`, `room-ktx`, KSP `room-compiler`) for books, progress + highlight storage (v5 — LCS anchors)
 - EPUB parsing: native ZIP + `org.jsoup:jsoup:1.18.3` (no network/AI — §6), cover extraction via OPF manifest
 - Coil 2.7.0 (`io.coil-kt:coil-compose`) for cover images
 - Storage Access Framework (SAF) for import — system file picker, copy to private storage
@@ -39,7 +39,8 @@ Folio/
 │       │   ├── MainActivity.kt                 # host — FolioNavHost + volume-key dispatch
 │       │   ├── navigation/FolioNav.kt          # NavHost: library ↔ reader
 │       │   ├── data/
-│       │   │   ├── db/ { FolioDatabase v4, dao/{BookDao, ReadingProgressDao, HighlightDao}, entity/{BookEntity, ReadingProgress, Highlight} }
+│       │   │   ├── anchor/LcsAnchor.kt         # LCS diff + anchor relocation (pure on-device)
+│       │   │   ├── db/ { FolioDatabase v5, dao/{BookDao, ReadingProgressDao, HighlightDao}, entity/{BookEntity, ReadingProgress, Highlight (anchorText)} }
 │       │   │   ├── epub/EpubParser.kt         # native EPUB3 (ZIP+OPF+Jsoup) + cover extraction + fallback
 │       │   │   └── model/Book.kt              # UI model (coverColor + filePath/coverImagePath) + curated seed
 │       │   └── ui/
@@ -90,16 +91,17 @@ Legacy template fragments / Navigation graph from the initial scaffold remain in
 - **Typography** — chapter titles in heavy sans (`headlineSmall` / `titleMedium`), body in Folio serif (`bodyLarge` 17/27, `bodyMedium` on tablet) on the Folio background.
 - **Phone (§3)** — single-column, edge-to-edge, immersive; paragraphs in a `LazyColumn` with Folio spacing and amber rule between chapters.
 - **Tablet (§3)** — landscape + `screenWidthDp >= 840` triggers a two-column spread: chapters split into left/right `LazyColumn`s with a central gutter (book-spine), mimicking a physical spread. More sophisticated virtual-canvas pagination (§5) can replace this later.
-- **Progress (§6)** — `FolioDatabase` (`Room` v4) with `ReadingProgress` (`bookId` PK, `chapterIndex`, `paragraphIndex`, `lastReadMillis`). `ReadingViewModel` observes/saves position via `ReadingProgressDao`; restored on next open.
+- **Progress (§6)** — `FolioDatabase` (`Room` v5) with `ReadingProgress` (`bookId` PK, `chapterIndex`, `paragraphIndex`, `lastReadMillis`). `ReadingViewModel` observes/saves position via `ReadingProgressDao`; restored on next open.
 - **Time remaining (§5 — Rolling-Weight Velocity Estimator)** — `VelocityEstimator` tracks delta between page turns, smooths with an Exponential Moving Average (α=0.35) and discards outliers via σ-threshold (e.g., 15-min idle), then predicts from remaining *character density* (upcoming chars / EMA speed) not just page count; displayed as a small “12 min left in chapter” label near the progress bar (pure on-device, no network).
 - **Frictionless navigation (Folio spec §3)** — inspired by `book-story-master`'s `ReaderProgressBar`:
   - *Hardware page turns* — volume up/down advance a page (one-handed phone use). `MainActivity.onKeyDown` forwards to `ReaderPageTurnHandler` → `animateScrollToItem` by a page.
   - *Minimalist progress bar* — thin amber fill on muted track at the bottom. The bar shows `firstVisibleIndex / total` and tapping it seeks (`animateScrollToItem` to tapped fraction).
   - *Tap-to-toggle chrome* — tapping the reading area toggles the top bar + progress bar (with `AnimatedVisibility` slide/fade) for a fully distraction-free immersive view.
-- **Stylus engine (§4)** — `HighlightOverlay` captures only stylus (`MotionEvent.TOOL_TYPE_STYLUS`, finger passes through for scroll/tap), so a stylus touch instantly draws with no menu or toolbar (zero-friction) and stores in Room (`highlights`: `bookId`, `chapterIndex`, normalized `pointsData` + `pressuresData`/`tiltsData`, `color`):
+- **Stylus engine (§4)** — `HighlightOverlay` captures only stylus (`MotionEvent.TOOL_TYPE_STYLUS`, finger passes through for scroll/tap), so a stylus touch instantly draws with no menu or toolbar (zero-friction) and stores in Room (`highlights`: `bookId`, `chapterIndex`, normalized `pointsData` + `pressuresData`/`tiltsData`, `anchorText`, `color`):
   - *True-ink* — strokes render with `BlendMode.Multiply` in Folio amber `#F7B538` so serif text stays crisp.
   - *Organic physics* — `MotionEvent` pressure (0..1) and `AXIS_TILT` (0..π/2) dynamically scale stroke width (`base 28dp * pressureFactor * tiltFactor`) for a natural hand feel.
   - *Lasso extraction* — a closed-loop stylus circle is classified (closure, bounds, circularity) distinctly from a highlight. Over an image it extracts the diagram as a PNG to cache/clipboard; over text it runs on-device OCR (local text copy, no network) to clipboard — both entirely private. A `DiagramPlaceholder` (Fig. 1) in the first chapter demos image lasso; text-lasso copies paragraph text. UI is a small dialog with *Extract Image* / *Copy Text*.
+  - *LCS anchors (§5)* — each highlight stores the surrounding paragraph snippet (`anchorText`, ~80 chars) as a contextual anchor; on reopen/reimport, `LcsAnchor` runs a pure on-device Longest Common Subsequence scan over the newly parsed chapters to relocate the highlight to the closest matching paragraph (threshold 0.55), or leaves it orphaned if no reasonable match — so highlights survive EPUB typo-fix updates.
 - **Bionic reading (§5)** — `BionicReading` is a deterministic, on-device syllable algorithm (no dictionary, no network) that analyzes each word's onset / nucleus / coda to find the first syllable (vowel-cluster nucleus + optional single-consonant coda, clamped to ~60%) and bolds it via `AnnotatedString` + `SpanStyle(Bold)` for faster scanning. A top-bar toggle (*Bionic On/Off*) applies it to both phone (single-column) and tablet (two-column) layouts, keeping the serif body but adding visual anchors.
 
 Reference: inspected `book-story-master`'s `ReaderLayout` / `ReaderContent` / `ReaderLayoutText`, `ReaderProgressBar`, and `EpubTextParser` for layering and ZIP+Jsoup ideas only — no code copied.
