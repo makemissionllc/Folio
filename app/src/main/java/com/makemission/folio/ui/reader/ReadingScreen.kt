@@ -50,7 +50,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.epub.EpubParser
+import com.makemission.folio.ui.reader.components.HighlightOverlay
 import com.makemission.folio.ui.reader.components.ReadingProgressBar
 import kotlinx.coroutines.launch
 
@@ -76,11 +78,14 @@ fun ReadingScreen(
     }
     val viewModel: ReadingViewModel = viewModel(factory = factory)
     val uiState by viewModel.uiState.collectAsState()
+    val highlights by viewModel.highlights.collectAsState()
 
     ReadingScreenContent(
         uiState = uiState,
+        highlights = highlights,
         onBack = onBack,
         onSaveProgress = viewModel::saveProgress,
+        onAddHighlight = viewModel::addHighlight,
         modifier = modifier,
     )
 }
@@ -89,8 +94,10 @@ fun ReadingScreen(
 @Composable
 private fun ReadingScreenContent(
     uiState: ReadingUiState,
+    highlights: List<Highlight>,
     onBack: () -> Unit,
     onSaveProgress: (Int, Int) -> Unit,
+    onAddHighlight: (List<androidx.compose.ui.geometry.Offset>, Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val configuration = LocalConfiguration.current
@@ -162,8 +169,10 @@ private fun ReadingScreenContent(
                     chapters = uiState.chapters,
                     restoredChapterIndex = uiState.restoredChapterIndex,
                     chromeVisible = chromeVisible,
+                    highlights = highlights,
                     onToggleChrome = { chromeVisible = !chromeVisible },
                     onSaveProgress = onSaveProgress,
+                    onAddHighlight = onAddHighlight,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -171,8 +180,10 @@ private fun ReadingScreenContent(
                     chapters = uiState.chapters,
                     restoredChapterIndex = uiState.restoredChapterIndex,
                     chromeVisible = chromeVisible,
+                    highlights = highlights,
                     onToggleChrome = { chromeVisible = !chromeVisible },
                     onSaveProgress = onSaveProgress,
+                    onAddHighlight = onAddHighlight,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -187,8 +198,10 @@ private fun SingleColumnReadingContent(
     chapters: List<EpubParser.EpubChapter>,
     restoredChapterIndex: Int,
     chromeVisible: Boolean,
+    highlights: List<Highlight>,
     onToggleChrome: () -> Unit,
     onSaveProgress: (Int, Int) -> Unit,
+    onAddHighlight: (List<androidx.compose.ui.geometry.Offset>, Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -285,6 +298,16 @@ private fun SingleColumnReadingContent(
             }
         }
 
+        // Zero-friction stylus highlight overlay — true-ink Multiply (§4).
+        HighlightOverlay(
+            highlights = highlights,
+            onStylusStrokeFinished = { normalized ->
+                val ch = flatIndexToChapterParagraph(listState.firstVisibleItemIndex, chapters).first
+                onAddHighlight(normalized, ch)
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
         AnimatedVisibility(
             visible = chromeVisible,
             enter = slideInVertically { it } + fadeIn(),
@@ -313,8 +336,10 @@ private fun TwoColumnReadingContent(
     chapters: List<EpubParser.EpubChapter>,
     restoredChapterIndex: Int,
     chromeVisible: Boolean,
+    highlights: List<Highlight>,
     onToggleChrome: () -> Unit,
     onSaveProgress: (Int, Int) -> Unit,
+    onAddHighlight: (List<androidx.compose.ui.geometry.Offset>, Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val mid = (chapters.size + 1) / 2
@@ -476,6 +501,16 @@ private fun TwoColumnReadingContent(
                 }
             }
         }
+
+        // Stylus highlight overlay — true-ink Multiply (§4), stylus-only.
+        HighlightOverlay(
+            highlights = highlights,
+            onStylusStrokeFinished = { normalized ->
+                val ch = flatIndexToChapterParagraph(leftState.firstVisibleItemIndex, left).first
+                onAddHighlight(normalized, ch)
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
 
         AnimatedVisibility(
             visible = chromeVisible,

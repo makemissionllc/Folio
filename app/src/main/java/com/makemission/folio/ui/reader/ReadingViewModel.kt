@@ -3,13 +3,20 @@ package com.makemission.folio.ui.reader
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import com.makemission.folio.data.db.FolioDatabase
+import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.db.entity.ReadingProgress
 import com.makemission.folio.data.epub.EpubParser
+import com.makemission.folio.ui.reader.components.encodePoints
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class ReadingUiState(
@@ -29,11 +36,19 @@ class ReadingViewModel(
 
     private val db = FolioDatabase.get(application)
     private val dao = db.readingProgressDao()
+    private val highlightDao = db.highlightDao()
 
     private val _uiState = MutableStateFlow(
         ReadingUiState(bookId = bookId, bookTitle = bookTitle, isLoading = true),
     )
     val uiState: StateFlow<ReadingUiState> = _uiState.asStateFlow()
+
+    val highlights: StateFlow<List<Highlight>> =
+        highlightDao.observeForBook(bookId).stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
 
     init {
         viewModelScope.launch {
@@ -67,5 +82,27 @@ class ReadingViewModel(
                 ),
             )
         }
+    }
+
+    fun addHighlight(
+        normalizedPoints: List<Offset>,
+        chapterIndex: Int = 0,
+        color: Color = Color(0xFFF7B538),
+    ) {
+        if (normalizedPoints.size < 2) return
+        viewModelScope.launch {
+            highlightDao.insert(
+                Highlight(
+                    bookId = bookId,
+                    chapterIndex = chapterIndex,
+                    pointsData = encodePoints(normalizedPoints),
+                    color = color.toArgb(),
+                ),
+            )
+        }
+    }
+
+    fun clearHighlights() {
+        viewModelScope.launch { highlightDao.clearForBook(bookId) }
     }
 }

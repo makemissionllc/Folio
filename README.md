@@ -2,7 +2,7 @@
 
 Folio is a premium, distraction-free Android ebook reader by MakeMission LLC (`com.makemission.folio`). It bridges digital convenience and the tactile craft of traditional bookmaking — fluid stylus interactions, magazine-quality typography, and adaptive layouts for phones and tablets.
 
-Jetpack Compose–first. Library (editorial grid + flat empty state) and the core Reading screen (native EPUB, adaptive single/two-column, Room progress) are now in place; stylus/annotation, X-Ray and bionic features come later.
+Jetpack Compose–first. Library (editorial grid), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation) and basic stylus highlighting (zero-friction, true-ink Multiply) are now in place; pressure/tilt and lasso, X-Ray and bionic features come later.
 
 ## Tech stack
 
@@ -10,7 +10,7 @@ Jetpack Compose–first. Library (editorial grid + flat empty state) and the cor
 - `compileSdk` / `targetSdk` 37, `minSdk` 33, Java 17
 - Jetpack Compose (BOM `2025.09.00`): `ui`, `foundation`, `material3`, `activity-compose`
 - Navigation Compose 2.8.4 (`navigation-compose`), lifecycle `viewmodel-compose` / `runtime-compose`
-- Room 2.7.2 (`room-runtime`, `room-ktx`, KSP `room-compiler`) for local progress
+- Room 2.7.2 (`room-runtime`, `room-ktx`, KSP `room-compiler`) for progress + highlight storage (v2)
 - EPUB parsing: native ZIP + `org.jsoup:jsoup:1.18.3` (no network/AI — §6)
 - Material Components (`Theme.Material3.DayNight.NoActionBar` for the window)
 - Design system in `ui/theme/` — see below
@@ -37,21 +37,20 @@ Folio/
 │       │   ├── MainActivity.kt                 # host — FolioNavHost + volume-key dispatch
 │       │   ├── navigation/FolioNav.kt          # NavHost: library ↔ reader
 │       │   ├── data/
-│       │   │   ├── db/ { FolioDatabase, dao/ReadingProgressDao, entity/ReadingProgress }
+│       │   │   ├── db/ { FolioDatabase v2, dao/{ReadingProgressDao, HighlightDao}, entity/{ReadingProgress, Highlight} }
 │       │   │   ├── epub/EpubParser.kt         # native EPUB3 (ZIP+OPF+Jsoup) + fallback
 │       │   │   └── model/Book.kt              # minimal library model + curated seed
-│       │   ├── navigation/FolioNav.kt          # NavHost: library ↔ reader
 │       │   └── ui/
 │       │       ├── theme/ { Color, Type, Theme }.kt
 │       │       ├── library/
 │       │       │   ├── LibraryScreen.kt        # Scaffold + header, onBookClick
 │       │       │   └── components/ { BookGrid, BookCoverCard, EmptyLibraryState }
 │       │       └── reader/
-│       │           ├── ReadingScreen.kt        # serif body + tap-toggle chrome + volume keys
-│       │           ├── ReadingViewModel.kt     # loads EPUB, observes/saves progress
+│       │           ├── ReadingScreen.kt        # serif body + tap-toggle chrome + volume keys + highlight overlay
+│       │           ├── ReadingViewModel.kt     # EPUB, progress + highlights (Flow)
 │       │           ├── ReadingViewModelFactory.kt
 │       │           ├── ReaderPageTurnHandler.kt# volume-key dispatch bridge
-│       │           └── components/ReadingProgressBar.kt # minimalist tappable bar
+│       │           └── components/ { ReadingProgressBar.kt, HighlightOverlay.kt }
 │       └── res/
 │           ├── mipmap-{hdpi,mdpi,xhdpi,xxhdpi,xxxhdpi}/  # launcher PNGs
 │           ├── mipmap-anydpi-v26/                        # adaptive-icon XML
@@ -76,19 +75,20 @@ Legacy template fragments / Navigation graph from the initial scaffold remain in
 - **Empty state** — centered flat illustration (amber sun, burgundy / paper / deep-green books on a shelf) drawn with Compose `Canvas`, plus editorial copy. Shown when `books.isEmpty()`.
 - **Header** — weighty sans "Library" title + collection subtitle over the Folio background.
 
-## Reading screen (core + frictionless navigation)
+## Reading screen (core + frictionless navigation + stylus highlights)
 
-`ReadingScreen(bookId, bookTitle, onBack)` — per §3 Frictionless Navigation and §6:
+`ReadingScreen(bookId, bookTitle, onBack)` — per §3, §4 Stylus & §6:
 
 - **EPUB parsing** — `EpubParser` is a native engine: `ZipInputStream` → `container.xml` → OPF manifest/spine → `toc.ncx` → Jsoup extraction of paragraphs. No network, no AI. Loads `assets/sample.epub` when present; otherwise renders curated fallback chapters (`sampleFallbackChapters`) so the UI is always usable.
 - **Typography** — chapter titles in heavy sans (`headlineSmall` / `titleMedium`), body in Folio serif (`bodyLarge` 17/27, `bodyMedium` on tablet) on the Folio background.
 - **Phone (§3)** — single-column, edge-to-edge, immersive; paragraphs in a `LazyColumn` with Folio spacing and amber rule between chapters.
 - **Tablet (§3)** — landscape + `screenWidthDp >= 840` triggers a two-column spread: chapters split into left/right `LazyColumn`s with a central gutter (book-spine), mimicking a physical spread. More sophisticated virtual-canvas pagination (§5) can replace this later.
-- **Progress (§6)** — `FolioDatabase` (`Room`) with `ReadingProgress` (`bookId` PK, `chapterIndex`, `paragraphIndex`, `lastReadMillis`). `ReadingViewModel` observes/saves position via `ReadingProgressDao`; restored on next open.
-- **Frictionless navigation (Folio spec)** — inspired by `book-story-master`'s `ReaderProgressBar`:
+- **Progress (§6)** — `FolioDatabase` (`Room` v2) with `ReadingProgress` (`bookId` PK, `chapterIndex`, `paragraphIndex`, `lastReadMillis`). `ReadingViewModel` observes/saves position via `ReadingProgressDao`; restored on next open.
+- **Frictionless navigation (Folio spec §3)** — inspired by `book-story-master`'s `ReaderProgressBar`:
   - *Hardware page turns* — volume up/down advance a page (one-handed phone use). `MainActivity.onKeyDown` forwards to `ReaderPageTurnHandler` → `animateScrollToItem` by a page.
   - *Minimalist progress bar* — thin amber fill on muted track at the bottom. The bar shows `firstVisibleIndex / total` and tapping it seeks (`animateScrollToItem` to tapped fraction).
   - *Tap-to-toggle chrome* — tapping the reading area toggles the top bar + progress bar (with `AnimatedVisibility` slide/fade) for a fully distraction-free immersive view.
+- **Stylus highlighting (§4 — zero-friction + true-ink)** — `HighlightOverlay` captures only `PointerType.Stylus` (finger stays as scroll/tap), so a stylus touch *instantly* draws with no menu or toolbar. Strokes render in Folio amber `#F7B538` with `BlendMode.Multiply` so the serif text underneath stays crisp, simulating ink on paper. Highlights are stored in Room (`highlights` table: `bookId`, `chapterIndex`, normalized `pointsData`, `color`) via `HighlightDao`; `ReadingViewModel.highlights` exposes them as a `Flow`.
 
 Reference: inspected `book-story-master`'s `ReaderLayout` / `ReaderContent` / `ReaderLayoutText`, `ReaderProgressBar`, and `EpubTextParser` for layering and ZIP+Jsoup ideas only — no code copied.
 
