@@ -2,7 +2,7 @@
 
 Folio is a premium, distraction-free Android ebook reader by MakeMission LLC (`com.makemission.folio`). It bridges digital convenience and the tactile craft of traditional bookmaking — fluid stylus interactions, magazine-quality typography, and adaptive layouts for phones and tablets.
 
-Jetpack Compose–first. Library (editorial grid), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction), bionic reading and chapter time remaining are now in place; X-Ray and other algorithmic features come later.
+Jetpack Compose–first. Library (editorial grid + import), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction), bionic reading and chapter time remaining are now in place; X-Ray and other algorithmic features come later.
 
 ## Tech stack
 
@@ -10,8 +10,10 @@ Jetpack Compose–first. Library (editorial grid), core Reading (native EPUB, ad
 - `compileSdk` / `targetSdk` 37, `minSdk` 33, Java 17
 - Jetpack Compose (BOM `2025.09.00`): `ui`, `foundation`, `material3`, `activity-compose`
 - Navigation Compose 2.8.4 (`navigation-compose`), lifecycle `viewmodel-compose` / `runtime-compose`
-- Room 2.7.2 (`room-runtime`, `room-ktx`, KSP `room-compiler`) for progress + highlight storage (v3 — pressure/tilt)
-- EPUB parsing: native ZIP + `org.jsoup:jsoup:1.18.3` (no network/AI — §6)
+- Room 2.7.2 (`room-runtime`, `room-ktx`, KSP `room-compiler`) for books, progress + highlight storage (v4)
+- EPUB parsing: native ZIP + `org.jsoup:jsoup:1.18.3` (no network/AI — §6), cover extraction via OPF manifest
+- Coil 2.7.0 (`io.coil-kt:coil-compose`) for cover images
+- Storage Access Framework (SAF) for import — system file picker, copy to private storage
 - Material Components (`Theme.Material3.DayNight.NoActionBar` for the window)
 - Design system in `ui/theme/` — see below
 
@@ -37,20 +39,21 @@ Folio/
 │       │   ├── MainActivity.kt                 # host — FolioNavHost + volume-key dispatch
 │       │   ├── navigation/FolioNav.kt          # NavHost: library ↔ reader
 │       │   ├── data/
-│       │   │   ├── db/ { FolioDatabase v3, dao/{ReadingProgressDao, HighlightDao}, entity/{ReadingProgress, Highlight (points + pressures/tilts)} }
-│       │   │   ├── epub/EpubParser.kt         # native EPUB3 (ZIP+OPF+Jsoup) + fallback
-│       │   │   └── model/Book.kt              # minimal library model + curated seed
+│       │   │   ├── db/ { FolioDatabase v4, dao/{BookDao, ReadingProgressDao, HighlightDao}, entity/{BookEntity, ReadingProgress, Highlight} }
+│       │   │   ├── epub/EpubParser.kt         # native EPUB3 (ZIP+OPF+Jsoup) + cover extraction + fallback
+│       │   │   └── model/Book.kt              # UI model (coverColor + filePath/coverImagePath) + curated seed
 │       │   └── ui/
 │       │       ├── theme/ { Color, Type, Theme }.kt
 │       │       ├── library/
-│       │       │   ├── LibraryScreen.kt        # Scaffold + header, onBookClick
-│       │       │   └── components/ { BookGrid, BookCoverCard, EmptyLibraryState }
+│       │       │   ├── LibraryScreen.kt        # Scaffold + header + FAB import + SAF picker
+│       │       │   ├── LibraryViewModel.kt     # import (copy→parse→cover→Room), books Flow, error Snackbar
+│       │       │   └── components/ { BookGrid, BookCoverCard (AsyncImage), EmptyLibraryState }
 │       │       └── reader/
 │       │           ├── ReadingScreen.kt        # serif body + chrome/volume + highlight/lasso + bionic toggle + diagram
-│       │           ├── ReadingViewModel.kt     # EPUB, progress + highlights (Flow, pressure/tilt)
+│       │           ├── ReadingViewModel.kt     # per-book file load, progress + highlights (Flow, pressure/tilt)
 │       │           ├── ReadingViewModelFactory.kt
-│           ├── BionicReading.kt        # deterministic onset/nucleus/coda syllable splitter
-│           ├── VelocityEstimator.kt      # Rolling-Weight EMA + outlier + char-density time-remaining
+│       │           ├── BionicReading.kt        # deterministic onset/nucleus/coda syllable splitter
+│       │           ├── VelocityEstimator.kt      # Rolling-Weight EMA + outlier + char-density time-remaining
 │       │           ├── ReaderPageTurnHandler.kt# volume-key dispatch bridge
 │       │           └── components/ { ReadingProgressBar.kt, HighlightOverlay.kt (pressure/tilt Multiply + lasso) }
 │       └── res/
@@ -68,24 +71,26 @@ Folio/
 
 Legacy template fragments / Navigation graph from the initial scaffold remain in `res/` but are unused — the app is fully Compose (Compose Navigation).
 
-## Library screen (editorial grid)
+## Library screen (editorial grid + import)
 
-`LibraryScreen(books, onBookClick)` — inspired by `book-story-master`'s `LibraryScaffold` →
-`LibraryGridLayout` layering, rebuilt for Folio:
+`LibraryScreen` + `LibraryViewModel` — inspired by `book-story-master`'s `LibraryScaffold` →
+`LibraryGridLayout` layering, rebuilt for Folio and extended for import:
 
-- **Curated grid** — `LazyVerticalGrid` with `GridCells.Adaptive(148.dp)` so phones show 2 columns and tablets scale naturally; each item is a `BookCoverCard` (2:3 cover, rounded 16dp, spine accent, Folio title chip). Cards are clickable and navigate to the Reader.
-- **Empty state** — centered flat illustration (amber sun, burgundy / paper / deep-green books on a shelf) drawn with Compose `Canvas`, plus editorial copy. Shown when `books.isEmpty()`.
+- **Curated grid** — `LazyVerticalGrid` with `GridCells.Adaptive(148.dp)` so phones show 2 columns and tablets scale naturally; each item is a `BookCoverCard` (2:3 cover, rounded 16dp, spine accent, Folio title chip, cover image via Coil when available). Cards are clickable and navigate to the Reader.
+- **Empty state** — centered flat illustration (amber sun, burgundy / paper / deep-green books on a shelf) drawn with Compose `Canvas`, plus editorial copy. Shown when both imported and curated are empty (curated ensures the grid is never empty before first import).
+- **Import (§6)** — FloatingActionButton (“+”) launches the Storage Access Framework (`ActivityResultContracts.OpenDocument` with `application/epub+zip` + `*/*`). The returned URI is copied into `filesDir/books/<uuid>_name.epub` (private storage — survives if the user moves/deletes the original), parsed with the existing `EpubParser` (title/author + cover via OPF `meta[name=cover]` / `properties="cover-image"` → `covers/<id>.jpg`), and saved as a `BookEntity` (`filePath`, `coverImagePath`) in Room. Invalid/corrupted EPUBs show a Snackbar (“Could not parse EPUB…”) and do not crash.
+- **Grid update** — `LibraryViewModel.books` is `bookDao.observeAll().map { imported + curatedSampleBooks() }` so imported books appear first in the grid alongside the curated samples; covers show the extracted image when present.
 - **Header** — weighty sans "Library" title + collection subtitle over the Folio background.
 
 ## Reading screen (core + frictionless navigation + stylus engine)
 
 `ReadingScreen(bookId, bookTitle, onBack)` — per §3, §4 Stylus & §6:
 
-- **EPUB parsing** — `EpubParser` is a native engine: `ZipInputStream` → `container.xml` → OPF manifest/spine → `toc.ncx` → Jsoup extraction of paragraphs. No network, no AI. Loads `assets/sample.epub` when present; otherwise renders curated fallback chapters (`sampleFallbackChapters`) so the UI is always usable.
+- **EPUB parsing** — `EpubParser` is a native engine: `ZipInputStream` → `container.xml` → OPF manifest/spine → `toc.ncx` → Jsoup extraction of paragraphs, plus cover extraction as above. No network, no AI. Loads the per-book private file (`bookDao.getById(bookId).filePath`) when present; falls back to `assets/sample.epub` and then `sampleFallbackChapters` so the UI is always usable.
 - **Typography** — chapter titles in heavy sans (`headlineSmall` / `titleMedium`), body in Folio serif (`bodyLarge` 17/27, `bodyMedium` on tablet) on the Folio background.
 - **Phone (§3)** — single-column, edge-to-edge, immersive; paragraphs in a `LazyColumn` with Folio spacing and amber rule between chapters.
 - **Tablet (§3)** — landscape + `screenWidthDp >= 840` triggers a two-column spread: chapters split into left/right `LazyColumn`s with a central gutter (book-spine), mimicking a physical spread. More sophisticated virtual-canvas pagination (§5) can replace this later.
-- **Progress (§6)** — `FolioDatabase` (`Room` v3) with `ReadingProgress` (`bookId` PK, `chapterIndex`, `paragraphIndex`, `lastReadMillis`). `ReadingViewModel` observes/saves position via `ReadingProgressDao`; restored on next open.
+- **Progress (§6)** — `FolioDatabase` (`Room` v4) with `ReadingProgress` (`bookId` PK, `chapterIndex`, `paragraphIndex`, `lastReadMillis`). `ReadingViewModel` observes/saves position via `ReadingProgressDao`; restored on next open.
 - **Time remaining (§5 — Rolling-Weight Velocity Estimator)** — `VelocityEstimator` tracks delta between page turns, smooths with an Exponential Moving Average (α=0.35) and discards outliers via σ-threshold (e.g., 15-min idle), then predicts from remaining *character density* (upcoming chars / EMA speed) not just page count; displayed as a small “12 min left in chapter” label near the progress bar (pure on-device, no network).
 - **Frictionless navigation (Folio spec §3)** — inspired by `book-story-master`'s `ReaderProgressBar`:
   - *Hardware page turns* — volume up/down advance a page (one-handed phone use). `MainActivity.onKeyDown` forwards to `ReaderPageTurnHandler` → `animateScrollToItem` by a page.

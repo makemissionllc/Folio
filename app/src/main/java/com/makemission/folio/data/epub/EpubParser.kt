@@ -3,6 +3,7 @@ package com.makemission.folio.data.epub
 import android.content.Context
 import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
+import java.io.File
 import java.io.InputStream
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -182,6 +183,82 @@ object EpubParser {
 
         if (paragraphs.isEmpty()) return null
         return EpubChapter(title = title, paragraphs = paragraphs)
+    }
+
+    /** Parse from a [File] on private storage. */
+    fun parse(file: File): EpubBook? = try {
+        file.inputStream().use { parse(it) }
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * Extract cover image if present: looks for `<meta name="cover" content="id">`
+     * or `properties="cover-image"` in the OPF manifest, saves the bytes to
+     * `covers/<bookId>.jpg` and returns the absolute path. Returns null if
+     * no cover is found — the UI will fall back to a palette color.
+     */
+    fun extractCoverToFile(
+        inputStream: InputStream,
+        context: Context,
+        bookId: String,
+    ): String? {
+        return try {
+            // Need a fresh copy of entries — read once for cover extraction.
+            val entries = readZipEntries(inputStream)
+            if (entries.isEmpty()) return null
+            val opfPath = findOpfPath(entries) ?: return null
+            val opfBytes = entries[opfPath] ?: return null
+            val opfText = opfBytes.toString(StandardCharsets.UTF_8)
+            val opfDoc = Jsoup.parse(opfText, Parser.xmlParser())
+
+            // 1) meta -> manifest id
+            var coverId: String? = opfDoc.selectFirst("meta[name=cover]")?.attr("content")?.trim()
+            // 2) fallback: manifest item with properties="cover-image"
+            if (coverId.isNullOrEmpty()) {
+                coverId = opfDoc.selectFirst("item[properties~=cover-image]")?.attr("id")?.trim()
+            }
+            // 3) fallback: id containing "cover"
+            if (coverId.isNullOrEmpty()) {
+                coverId = opfDoc.select("manifest > item").firstOrNull { el ->
+                    el.attr("id").contains("cover", ignoreCase = true)
+                }?.attr("id")
+            }
+            if (coverId.isNullOrEmpty()) return null
+
+            val href = opfDoc.selectFirst("item[id=$coverId]")?.attr("href")
+                ?: opfDoc.select("manifest > item[id=$coverId]").firstOrNull()?.attr("href")
+                ?: return null
+            val decodedHref = URLDecoder.decode(href, StandardCharsets.UTF_8.name())
+            val opfDir = opfPath.substringBeforeLast('/', "")
+            val resolved = resolveHref(opfDir, decodedHref).substringAfterLast('/').lowercase()
+            val coverEntry = entries.entries.firstOrNull { (k, _) ->
+                k.substringAfterLast('/').lowercase() == resolved
+            } ?: return null
+
+            val bytes = coverEntry.value
+            // Basic check — must look like an image (JPG/PNG/WEBP header)
+            if (bytes.size < 100) return null
+            val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
+            val ext = when {
+                bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() -> "jpg"
+                bytes.size >= 8 && bytes[0] == 0x89.toByte() -> "png"
+                else -> "jpg"
+            }
+            val outFile = File(coversDir, "$bookId.$ext")
+            outFile.writeBytes(bytes)
+            outFile.absolutePath
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun extractCoverToFile(file: File, context: Context, bookId: String): String? {
+        return try {
+            file.inputStream().use { extractCoverToFile(it, context, bookId) }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     // ---- Fallback content (no file) ----

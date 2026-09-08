@@ -54,8 +54,21 @@ class ReadingViewModel(
     init {
         viewModelScope.launch {
             val saved = dao.observe(bookId).firstOrNull()
-            val epub = EpubParser.loadFromAssetsOrNull(getApplication())
+            // Try to load the imported book's private file first (SAF copy), then assets, then fallback
+            val app = getApplication<Application>()
+            val stored = try { db.bookDao().getById(bookId) } catch (_: Exception) { null }
+            val epub = when {
+                stored?.filePath != null -> {
+                    val f = java.io.File(stored.filePath)
+                    if (f.exists() && f.canRead()) EpubParser.parse(f) else null
+                }
+                else -> null
+            } ?: EpubParser.loadFromAssetsOrNull(app) 
             val chapters = epub?.chapters ?: EpubParser.sampleFallbackChapters(bookTitle)
+
+            // Prefer stored title/author when available (keeps library grid consistent)
+            val displayTitle = stored?.title?.takeIf { it.isNotBlank() }
+                ?: if (epub?.title?.isNotBlank() == true) epub.title else bookTitle
 
             // Use stored progress if valid
             val chapterIdx = saved?.chapterIndex?.coerceIn(0, (chapters.size - 1).coerceAtLeast(0)) ?: 0
@@ -63,7 +76,7 @@ class ReadingViewModel(
 
             _uiState.value = ReadingUiState(
                 bookId = bookId,
-                bookTitle = if (epub?.title?.isNotBlank() == true) epub.title else bookTitle,
+                bookTitle = displayTitle,
                 chapters = chapters,
                 isLoading = false,
                 restoredChapterIndex = chapterIdx,

@@ -19,6 +19,10 @@ data class Book(
     val title: String,
     val author: String,
     val coverColor: Color,
+    /** Present for imported books — private file path (SAF copy). */
+    val filePath: String? = null,
+    /** Present when EpubParser extracted a cover image. */
+    val coverImagePath: String? = null,
 )
 
 /** Curated seed — shows the grid with editorial variety until real storage exists. */

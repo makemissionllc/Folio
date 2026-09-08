@@ -1,13 +1,11 @@
 package com.makemission.folio.navigation
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.makemission.folio.data.model.curatedSampleBooks
 import com.makemission.folio.ui.library.LibraryScreen
 import com.makemission.folio.ui.reader.ReadingScreen
 import java.net.URLDecoder
@@ -27,7 +25,6 @@ sealed class FolioRoute(val route: String) {
 @Composable
 fun FolioNavHost() {
     val navController = rememberNavController()
-    val books = remember { curatedSampleBooks() }
 
     NavHost(
         navController = navController,
@@ -35,7 +32,6 @@ fun FolioNavHost() {
     ) {
         composable(FolioRoute.Library.route) {
             LibraryScreen(
-                books = books,
                 onBookClick = { book ->
                     navController.navigate(FolioRoute.Reader.create(book.id, book.title))
                 },

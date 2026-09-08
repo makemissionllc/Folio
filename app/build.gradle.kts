@@ -64,6 +64,7 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.jsoup)
+    implementation(libs.coil.compose)
 
     ksp(libs.androidx.room.compiler)
 

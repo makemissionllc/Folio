@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -19,9 +20,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.makemission.folio.data.model.Book
+import java.io.File
 
 @Composable
 fun BookCoverCard(
@@ -40,6 +44,21 @@ fun BookCoverCard(
                     if (onClick != null) m.clickable(onClick = onClick) else m
                 },
         ) {
+            // Cover image when available (imported EPUB), otherwise palette color
+            if (book.coverImagePath != null) {
+                AsyncImage(
+                    model = File(book.coverImagePath),
+                    contentDescription = book.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+                // Subtle scrim for legibility of overlay text on photographic covers
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.18f)),
+                )
+            }
             // Subtle spine edge.
             Box(
                 modifier = Modifier
