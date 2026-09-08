@@ -1,19 +1,26 @@
 # Folio
 
-Folio is an Android portfolio app by MakeMission LLC (`com.makemission.folio`).
+Folio is a premium, distraction-free Android ebook reader by MakeMission LLC (`com.makemission.folio`). It bridges digital convenience and the tactile craft of traditional bookmaking — fluid stylus interactions, magazine-quality typography, and adaptive layouts for phones and tablets.
 
-It is currently in early scaffolding: a Kotlin Android app based on the
-Android Studio Basic Views template with a single activity, a navigation
-graph, and two placeholder fragments. Feature development happens on the
-`main` branch.
+The app is Jetpack Compose–first and currently ships the curated editorial library (cover grid + flat empty state); the reading experience lands next.
 
 ## Tech stack
 
-- Kotlin, Android Gradle Plugin (version catalog in `gradle/libs.versions.toml`)
-- `compileSdk` / `targetSdk` 37, `minSdk` 33
-- AndroidX: appcompat, activity-ktx, core-ktx, constraintlayout
-- Material Components, Navigation Fragment / UI
-- ViewBinding enabled
+- Kotlin 2.2, Android Gradle Plugin 9.4 (built-in Kotlin; version catalog in `gradle/libs.versions.toml`)
+- `compileSdk` / `targetSdk` 37, `minSdk` 33, Java 17
+- Jetpack Compose (BOM `2025.09.00`): `ui`, `foundation`, `material3`, `activity-compose`
+- Material Components (`Theme.Material3.DayNight.NoActionBar` for the window)
+- Design system in `ui/theme/` — see below
+
+## Design system
+
+The palette and typography come from `Inspiration/Folio_Project.md` §2:
+
+- **Background** — deep green `#004F39` (library + dark mode)
+- **Active / tags** — burgundy `#780116`
+- **Accent** — xanthous `#F7B538` (highlights, progress, focus)
+
+Typography: heavy sans-serif headers (placeholder for Druk Wide / Helvetica Neue Bold, `FontFamily.SansSerif` Black/ExtraBold) and serif body text. Both `Color.kt` / `Type.kt` / `Theme.kt` follow the structure of the `book-story-master` reference app's `ui/theme/` (no code copied).
 
 ## Project structure
 
@@ -24,53 +31,55 @@ Folio/
 │   └── src/main/
 │       ├── AndroidManifest.xml
 │       ├── java/com/makemission/folio/
-│       │   ├── MainActivity.kt
-│       │   ├── FirstFragment.kt
-│       │   └── SecondFragment.kt
+│       │   ├── MainActivity.kt                 # Compose host — shows LibraryScreen
+│       │   ├── data/model/Book.kt             # minimal library model + curated seed
+│       │   └── ui/
+│       │       ├── theme/ { Color, Type, Theme }.kt
+│       │       └── library/
+│       │           ├── LibraryScreen.kt        # Scaffold + header + content switch
+│       │           └── components/
+│       │               ├── BookGrid.kt         # LazyVerticalGrid (adaptive)
+│       │               ├── BookCoverCard.kt    # flat editorial cover (2:3)
+│       │               └── EmptyLibraryState.kt# flat-illustration empty state
 │       └── res/
 │           ├── mipmap-{hdpi,mdpi,xhdpi,xxhdpi,xxxhdpi}/  # launcher PNGs
 │           ├── mipmap-anydpi-v26/                        # adaptive-icon XML
-│           ├── layout/, navigation/, menu/
-│           └── values/, values-night/, xml/
-├── icons/
-│   └── android/            # IconKitchen source export (res/ + play_store_512.png)
-├── gradle/
-├── build.gradle.kts
-└── settings.gradle.kts
+│           ├── values/ { strings, colors, themes, dimens }
+│           └── xml/ { backup_rules, data_extraction_rules }
+├── Inspiration/
+│   ├── Folio_Project.md        # full app spec
+│   └── book-story-master/      # structure/layout reference only
+├── icons/android/              # IconKitchen source (res/ + play_store_512.png)
+├── gradle/  build.gradle.kts  settings.gradle.kts
+└── Project.md                  # per-session changelog
 ```
+
+Legacy template fragments / Navigation graph from the initial scaffold remain in `res/` but are unused — the app is fully Compose.
+
+## Library screen (editorial grid)
+
+`LibraryScreen(books)` — inspired by `book-story-master`'s `LibraryScaffold` →
+`LibraryGridLayout` layering, rebuilt for Folio:
+
+- **Curated grid** — `LazyVerticalGrid` with `GridCells.Adaptive(148.dp)` so phones show 2 columns and tablets scale naturally; each item is a `BookCoverCard` (2:3 cover, rounded 16dp, spine accent, Folio title chip).
+- **Empty state** — centered flat illustration (amber sun, burgundy / paper / deep-green books on a shelf) drawn with Compose `Canvas`, plus editorial copy. Shown when `books.isEmpty()`.
+- **Header** — weighty sans "Library" title + collection subtitle over the Folio background.
+- **Home wiring** — `MainActivity` renders `LibraryScreen(curatedSampleBooks())`; the flat empty state is ready to show once real storage replaces the in-memory seed.
+
+No reading screen yet — that comes next.
 
 ## Launcher icons
 
 Source of truth: `icons/android/` (IconKitchen export).
 
-Installed into the app as:
-
-- `app/src/main/res/mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}/`
-  - `ic_launcher.png` (legacy)
-  - `ic_launcher_round.png` (legacy round, copied from `ic_launcher.png`)
-  - `ic_launcher_background.png`, `ic_launcher_foreground.png`,
-    `ic_launcher_monochrome.png` (adaptive-icon layers)
-- `app/src/main/res/mipmap-anydpi-v26/`
-  - `ic_launcher.xml` and `ic_launcher_round.xml` (adaptive icons
-    referencing `@mipmap/ic_launcher_background/foreground/monochrome`)
-- `icons/android/play_store_512.png` is kept for the Play Store listing only
-  and is not bundled in the APK.
-
-`AndroidManifest.xml` references them as:
-
-```xml
-android:icon="@mipmap/ic_launcher"
-android:roundIcon="@mipmap/ic_launcher_round"
-```
-
-To replace icons again, export from IconKitchen into `icons/android/` and
-copy `icons/android/res/` over `app/src/main/res/` (keeping the
-`ic_launcher_round` duplicates described above).
+Installed as `app/src/main/res/mipmap-*` / `mipmap-anydpi-v26/` (`ic_launcher`,
+`ic_launcher_round`, layers). See `Project.md` Session 2 for the mapping.
+`AndroidManifest.xml` uses `@mipmap/ic_launcher` / `@mipmap/ic_launcher_round`.
 
 ## Requirements
 
-- Android Studio (Ladybug or newer recommended)
-- JDK 11+ (Gradle toolchain via Foojay resolver)
+- Android Studio Ladybug or newer
+- JDK 21 (Gradle resolves via `~/.gradle/jdks/` in this repo)
 - Android SDK 37 + build tools
 
 ## Build & run
@@ -80,7 +89,7 @@ copy `icons/android/res/` over `app/src/main/res/` (keeping the
 ./gradlew :app:installDebug
 ```
 
-Or open the project in Android Studio and press **Run**.
+Open in Android Studio and press **Run** for the usual flow.
 
 Useful checks:
 
@@ -91,7 +100,7 @@ Useful checks:
 
 ## Branching
 
-- `main` — active coding branch. All sessions merge here.
-- `master` — legacy initial branch, kept for history; merged into `main`.
+- `main` — active branch (default). All work lands here.
+- `github-original-init` — tag preserving the abandoned initial GitHub `main` commit.
 
 See `Project.md` for the per-session changelog.
