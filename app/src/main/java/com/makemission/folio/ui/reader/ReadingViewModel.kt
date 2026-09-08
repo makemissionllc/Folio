@@ -10,6 +10,7 @@ import com.makemission.folio.data.db.FolioDatabase
 import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.db.entity.ReadingProgress
 import com.makemission.folio.data.epub.EpubParser
+import com.makemission.folio.ui.reader.components.encodeFloats
 import com.makemission.folio.ui.reader.components.encodePoints
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -86,6 +87,8 @@ class ReadingViewModel(
 
     fun addHighlight(
         normalizedPoints: List<Offset>,
+        pressures: List<Float> = emptyList(),
+        tilts: List<Float> = emptyList(),
         chapterIndex: Int = 0,
         color: Color = Color(0xFFF7B538),
     ) {
@@ -96,11 +99,19 @@ class ReadingViewModel(
                     bookId = bookId,
                     chapterIndex = chapterIndex,
                     pointsData = encodePoints(normalizedPoints),
+                    pressuresData = if (pressures.size == normalizedPoints.size) encodeFloats(pressures) else "",
+                    tiltsData = if (tilts.size == normalizedPoints.size) encodeFloats(tilts) else "",
                     color = color.toArgb(),
                 ),
             )
         }
     }
+
+    fun addHighlight(
+        normalizedPoints: List<Offset>,
+        chapterIndex: Int = 0,
+        color: Color = Color(0xFFF7B538),
+    ) = addHighlight(normalizedPoints, emptyList(), emptyList(), chapterIndex, color)
 
     fun clearHighlights() {
         viewModelScope.launch { highlightDao.clearForBook(bookId) }
