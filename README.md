@@ -2,7 +2,7 @@
 
 Folio is a premium, distraction-free Android ebook reader by MakeMission LLC (`com.makemission.folio`). It bridges digital convenience and the tactile craft of traditional bookmaking — fluid stylus interactions, magazine-quality typography, and adaptive layouts for phones and tablets.
 
-Jetpack Compose–first. Library (editorial grid), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation) and stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction) are now in place; X-Ray and bionic features come later.
+Jetpack Compose–first. Library (editorial grid), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction) and bionic reading are now in place; X-Ray and other algorithmic features come later.
 
 ## Tech stack
 
@@ -46,7 +46,7 @@ Folio/
 │       │       │   ├── LibraryScreen.kt        # Scaffold + header, onBookClick
 │       │       │   └── components/ { BookGrid, BookCoverCard, EmptyLibraryState }
 │       │       └── reader/
-│       │           ├── ReadingScreen.kt        # serif body + chrome/volume + highlight/lasso + diagram placeholder
+│       │           ├── ReadingScreen.kt        # serif body + chrome/volume + highlight/lasso + bionic toggle + diagram
 │       │           ├── ReadingViewModel.kt     # EPUB, progress + highlights (Flow, pressure/tilt)
 │       │           ├── ReadingViewModelFactory.kt
 │       │           ├── ReaderPageTurnHandler.kt# volume-key dispatch bridge
@@ -92,6 +92,7 @@ Legacy template fragments / Navigation graph from the initial scaffold remain in
   - *True-ink* — strokes render with `BlendMode.Multiply` in Folio amber `#F7B538` so serif text stays crisp.
   - *Organic physics* — `MotionEvent` pressure (0..1) and `AXIS_TILT` (0..π/2) dynamically scale stroke width (`base 28dp * pressureFactor * tiltFactor`) for a natural hand feel.
   - *Lasso extraction* — a closed-loop stylus circle is classified (closure, bounds, circularity) distinctly from a highlight. Over an image it extracts the diagram as a PNG to cache/clipboard; over text it runs on-device OCR (local text copy, no network) to clipboard — both entirely private. A `DiagramPlaceholder` (Fig. 1) in the first chapter demos image lasso; text-lasso copies paragraph text. UI is a small dialog with *Extract Image* / *Copy Text*.
+- **Bionic reading (§5)** — `BionicReading` is a deterministic, on-device syllable algorithm (no dictionary, no network) that analyzes each word's onset / nucleus / coda to find the first syllable (vowel-cluster nucleus + optional single-consonant coda, clamped to ~60%) and bolds it via `AnnotatedString` + `SpanStyle(Bold)` for faster scanning. A top-bar toggle (*Bionic On/Off*) applies it to both phone (single-column) and tablet (two-column) layouts, keeping the serif body but adding visual anchors.
 
 Reference: inspected `book-story-master`'s `ReaderLayout` / `ReaderContent` / `ReaderLayoutText`, `ReaderProgressBar`, and `EpubTextParser` for layering and ZIP+Jsoup ideas only — no code copied.
 

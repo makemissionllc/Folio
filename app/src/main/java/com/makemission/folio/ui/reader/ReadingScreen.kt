@@ -51,6 +51,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -128,6 +129,7 @@ private fun ReadingScreenContent(
     }
 
     var chromeVisible by remember { mutableStateOf(true) }
+    var bionicEnabled by rememberSaveable { mutableStateOf(false) }
     var lassoCapture by remember { mutableStateOf<LassoCapture?>(null) }
     val context = LocalContext.current
 
@@ -185,6 +187,16 @@ private fun ReadingScreenContent(
                             Text("← Back", style = MaterialTheme.typography.labelLarge)
                         }
                     },
+                    actions = {
+                        TextButton(onClick = { bionicEnabled = !bionicEnabled }) {
+                            Text(
+                                if (bionicEnabled) "Bionic On" else "Bionic Off",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (bionicEnabled) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
                         titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -223,6 +235,7 @@ private fun ReadingScreenContent(
                     chapters = uiState.chapters,
                     restoredChapterIndex = uiState.restoredChapterIndex,
                     chromeVisible = chromeVisible,
+                    bionicEnabled = bionicEnabled,
                     highlights = highlights,
                     onToggleChrome = { chromeVisible = !chromeVisible },
                     onSaveProgress = onSaveProgress,
@@ -235,6 +248,7 @@ private fun ReadingScreenContent(
                     chapters = uiState.chapters,
                     restoredChapterIndex = uiState.restoredChapterIndex,
                     chromeVisible = chromeVisible,
+                    bionicEnabled = bionicEnabled,
                     highlights = highlights,
                     onToggleChrome = { chromeVisible = !chromeVisible },
                     onSaveProgress = onSaveProgress,
@@ -320,6 +334,7 @@ private fun SingleColumnReadingContent(
     chapters: List<EpubParser.EpubChapter>,
     restoredChapterIndex: Int,
     chromeVisible: Boolean,
+    bionicEnabled: Boolean,
     highlights: List<Highlight>,
     onToggleChrome: () -> Unit,
     onSaveProgress: (Int, Int) -> Unit,
@@ -398,12 +413,24 @@ private fun SingleColumnReadingContent(
                     chapter.paragraphs,
                     key = { paraIndex, _ -> "c${chapterIndex}-p$paraIndex" },
                 ) { _, paragraph ->
-                    Text(
-                        text = paragraph,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.padding(bottom = 14.dp),
-                    )
+                    if (bionicEnabled) {
+                        val annotated = remember(paragraph) {
+                            BionicReading.toBionicAnnotated(paragraph, BionicReading.boldSpan())
+                        }
+                        Text(
+                            text = annotated,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.padding(bottom = 14.dp),
+                        )
+                    } else {
+                        Text(
+                            text = paragraph,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.padding(bottom = 14.dp),
+                        )
+                    }
                 }
                 // Insert diagram after first chapter for lasso-image demo.
                 if (chapterIndex == 0) {
@@ -462,6 +489,7 @@ private fun TwoColumnReadingContent(
     chapters: List<EpubParser.EpubChapter>,
     restoredChapterIndex: Int,
     chromeVisible: Boolean,
+    bionicEnabled: Boolean,
     highlights: List<Highlight>,
     onToggleChrome: () -> Unit,
     onSaveProgress: (Int, Int) -> Unit,
@@ -545,12 +573,24 @@ private fun TwoColumnReadingContent(
                         )
                     }
                     itemsIndexed(chapter.paragraphs, key = { i, _ -> "L-c$chapterIndex-p$i" }) { _, p ->
-                        Text(
-                            text = p,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.padding(bottom = 12.dp),
-                        )
+                        if (bionicEnabled) {
+                            val annotated = remember(p) {
+                                BionicReading.toBionicAnnotated(p, BionicReading.boldSpan())
+                            }
+                            Text(
+                                text = annotated,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.padding(bottom = 12.dp),
+                            )
+                        } else {
+                            Text(
+                                text = p,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.padding(bottom = 12.dp),
+                            )
+                        }
                     }
                     if (chapterIndex == 0) {
                         item(key = "L-diagram-$chapterIndex") {
@@ -612,12 +652,24 @@ private fun TwoColumnReadingContent(
                             )
                         }
                         itemsIndexed(chapter.paragraphs, key = { i, _ -> "R-c$chapterIndex-p$i" }) { _, p ->
-                            Text(
-                                text = p,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onBackground,
-                                modifier = Modifier.padding(bottom = 12.dp),
-                            )
+                            if (bionicEnabled) {
+                                val annotated = remember(p) {
+                                    BionicReading.toBionicAnnotated(p, BionicReading.boldSpan())
+                                }
+                                Text(
+                                    text = annotated,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    modifier = Modifier.padding(bottom = 12.dp),
+                                )
+                            } else {
+                                Text(
+                                    text = p,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    modifier = Modifier.padding(bottom = 12.dp),
+                                )
+                            }
                         }
                         item(key = "R-gap-$chapterIndex") {
                             Spacer(modifier = Modifier.height(6.dp))
