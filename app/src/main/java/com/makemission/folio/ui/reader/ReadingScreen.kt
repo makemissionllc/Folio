@@ -53,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +68,7 @@ import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.epub.EpubParser
 import com.makemission.folio.ui.reader.components.HighlightOverlay
 import com.makemission.folio.ui.reader.components.ReadingProgressBar
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 private data class LassoCapture(
@@ -353,6 +355,29 @@ private fun SingleColumnReadingContent(
         }
     }
 
+    val estimator = remember { VelocityEstimator() }
+    var timeRemaining by remember { mutableStateOf<String?>(null) }
+    var lastFlat by remember { mutableStateOf(listState.firstVisibleItemIndex) }
+    var lastTime by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(listState, chapters) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { newFlat ->
+                val now = System.currentTimeMillis()
+                val deltaMs = (now - lastTime).toDouble()
+                val charsMoved = ReadingFlatMapper.charsBetween(lastFlat, newFlat, chapters).coerceAtLeast(1)
+                if (newFlat != lastFlat && deltaMs in 500.0..300000.0) {
+                    estimator.addSample(deltaMs, charsMoved)
+                }
+                val remaining = ReadingFlatMapper.remainingCharsInChapter(newFlat, chapters)
+                val estMs = estimator.estimateMs(remaining)
+                timeRemaining = formatTimeRemaining(estMs)
+                lastFlat = newFlat
+                lastTime = now
+            }
+    }
+
     DisposableEffect(listState) {
         ReaderPageTurnHandler.onVolumeKey = { isUp ->
             scope.launch {
@@ -467,17 +492,31 @@ private fun SingleColumnReadingContent(
             exit = slideOutVertically { it } + fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
-            ReadingProgressBar(
-                progress = progress,
-                onSeek = { fraction ->
-                    val target = ((listState.layoutInfo.totalItemsCount - 1) * fraction).toInt()
-                        .coerceIn(0, (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
-                    scope.launch { listState.animateScrollToItem(target) }
-                },
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
-            )
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                timeRemaining?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+                    )
+                }
+                ReadingProgressBar(
+                    progress = progress,
+                    onSeek = { fraction ->
+                        val target = ((listState.layoutInfo.totalItemsCount - 1) * fraction).toInt()
+                            .coerceIn(0, (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                        scope.launch { listState.animateScrollToItem(target) }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }
@@ -510,6 +549,30 @@ private fun TwoColumnReadingContent(
             val total = leftState.layoutInfo.totalItemsCount.coerceAtLeast(1)
             (first.toFloat() / (total - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
         }
+    }
+
+    val estimator = remember { VelocityEstimator() }
+    var timeRemaining by remember { mutableStateOf<String?>(null) }
+    var lastFlat by remember { mutableStateOf(leftState.firstVisibleItemIndex) }
+    var lastTime by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(leftState, left) {
+        snapshotFlow { leftState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { newFlat ->
+                val now = System.currentTimeMillis()
+                val deltaMs = (now - lastTime).toDouble()
+                val charsMoved = ReadingFlatMapper.charsBetween(lastFlat, newFlat, left).coerceAtLeast(1)
+                if (newFlat != lastFlat && deltaMs in 500.0..300000.0) {
+                    estimator.addSample(deltaMs, charsMoved)
+                }
+                val remaining = ReadingFlatMapper.remainingCharsInChapter(newFlat, left)
+                // For spread, estimate based on left column's remaining; right column is second half, but still character-density aware
+                val estMs = estimator.estimateMs(remaining)
+                timeRemaining = formatTimeRemaining(estMs)
+                lastFlat = newFlat
+                lastTime = now
+            }
     }
 
     DisposableEffect(leftState) {
@@ -702,17 +765,31 @@ private fun TwoColumnReadingContent(
             exit = slideOutVertically { it } + fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
-            ReadingProgressBar(
-                progress = progress,
-                onSeek = { fraction ->
-                    val target = ((leftState.layoutInfo.totalItemsCount - 1) * fraction).toInt()
-                        .coerceIn(0, (leftState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
-                    scope.launch { leftState.animateScrollToItem(target) }
-                },
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
-            )
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                timeRemaining?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+                    )
+                }
+                ReadingProgressBar(
+                    progress = progress,
+                    onSeek = { fraction ->
+                        val target = ((leftState.layoutInfo.totalItemsCount - 1) * fraction).toInt()
+                            .coerceIn(0, (leftState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                        scope.launch { leftState.animateScrollToItem(target) }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }

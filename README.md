@@ -2,7 +2,7 @@
 
 Folio is a premium, distraction-free Android ebook reader by MakeMission LLC (`com.makemission.folio`). It bridges digital convenience and the tactile craft of traditional bookmaking — fluid stylus interactions, magazine-quality typography, and adaptive layouts for phones and tablets.
 
-Jetpack Compose–first. Library (editorial grid), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction) and bionic reading are now in place; X-Ray and other algorithmic features come later.
+Jetpack Compose–first. Library (editorial grid), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction), bionic reading and chapter time remaining are now in place; X-Ray and other algorithmic features come later.
 
 ## Tech stack
 
@@ -49,6 +49,8 @@ Folio/
 │       │           ├── ReadingScreen.kt        # serif body + chrome/volume + highlight/lasso + bionic toggle + diagram
 │       │           ├── ReadingViewModel.kt     # EPUB, progress + highlights (Flow, pressure/tilt)
 │       │           ├── ReadingViewModelFactory.kt
+│           ├── BionicReading.kt        # deterministic onset/nucleus/coda syllable splitter
+│           ├── VelocityEstimator.kt      # Rolling-Weight EMA + outlier + char-density time-remaining
 │       │           ├── ReaderPageTurnHandler.kt# volume-key dispatch bridge
 │       │           └── components/ { ReadingProgressBar.kt, HighlightOverlay.kt (pressure/tilt Multiply + lasso) }
 │       └── res/
@@ -84,6 +86,7 @@ Legacy template fragments / Navigation graph from the initial scaffold remain in
 - **Phone (§3)** — single-column, edge-to-edge, immersive; paragraphs in a `LazyColumn` with Folio spacing and amber rule between chapters.
 - **Tablet (§3)** — landscape + `screenWidthDp >= 840` triggers a two-column spread: chapters split into left/right `LazyColumn`s with a central gutter (book-spine), mimicking a physical spread. More sophisticated virtual-canvas pagination (§5) can replace this later.
 - **Progress (§6)** — `FolioDatabase` (`Room` v3) with `ReadingProgress` (`bookId` PK, `chapterIndex`, `paragraphIndex`, `lastReadMillis`). `ReadingViewModel` observes/saves position via `ReadingProgressDao`; restored on next open.
+- **Time remaining (§5 — Rolling-Weight Velocity Estimator)** — `VelocityEstimator` tracks delta between page turns, smooths with an Exponential Moving Average (α=0.35) and discards outliers via σ-threshold (e.g., 15-min idle), then predicts from remaining *character density* (upcoming chars / EMA speed) not just page count; displayed as a small “12 min left in chapter” label near the progress bar (pure on-device, no network).
 - **Frictionless navigation (Folio spec §3)** — inspired by `book-story-master`'s `ReaderProgressBar`:
   - *Hardware page turns* — volume up/down advance a page (one-handed phone use). `MainActivity.onKeyDown` forwards to `ReaderPageTurnHandler` → `animateScrollToItem` by a page.
   - *Minimalist progress bar* — thin amber fill on muted track at the bottom. The bar shows `firstVisibleIndex / total` and tapping it seeks (`animateScrollToItem` to tapped fraction).
