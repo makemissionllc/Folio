@@ -2,7 +2,7 @@
 
 Folio is a premium, distraction-free Android ebook reader by MakeMission LLC (`com.makemission.folio`). It bridges digital convenience and the tactile craft of traditional bookmaking — fluid stylus interactions, magazine-quality typography, and adaptive layouts for phones and tablets.
 
-Jetpack Compose–first. Library (editorial grid + import), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction), bionic reading, chapter time remaining, LCS-anchored highlights and on-device X-Ray are now in place; other algorithmic features come later.
+Jetpack Compose–first. Library (editorial grid + import), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction), bionic reading, chapter time remaining, LCS-anchored highlights, on-device X-Ray and offline dictionary are now in place; other algorithmic features come later.
 
 ## Tech stack
 
@@ -12,6 +12,7 @@ Jetpack Compose–first. Library (editorial grid + import), core Reading (native
 - Navigation Compose 2.8.4 (`navigation-compose`), lifecycle `viewmodel-compose` / `runtime-compose`
 - Room 2.7.2 (`room-runtime`, `room-ktx`, KSP `room-compiler`) for books, progress + highlight storage (v5 — LCS anchors)
 - EPUB parsing: native ZIP + `org.jsoup:jsoup:1.18.3` (no network/AI — §6), cover extraction via OPF manifest
+- Offline dictionary: bundled `assets/dictionary.json` (compact WordNet-style, permissively-licensed, ~120 entries) via `DictionaryRepository` — no network
 - Coil 2.7.0 (`io.coil-kt:coil-compose`) for cover images
 - Storage Access Framework (SAF) for import — system file picker, copy to private storage
 - Material Components (`Theme.Material3.DayNight.NoActionBar` for the window)
@@ -34,11 +35,13 @@ Folio/
 ├── app/
 │   ├── build.gradle.kts
 │   └── src/main/
+│       ├── assets/dictionary.json        # offline WordNet-style dictionary (no network)
 │       ├── AndroidManifest.xml
 │       ├── java/com/makemission/folio/
 │       │   ├── MainActivity.kt                 # host — FolioNavHost + volume-key dispatch
 │       │   ├── navigation/FolioNav.kt          # NavHost: library ↔ reader
 │       │   ├── data/
+│       │   │   ├── dictionary/DictionaryRepository.kt # offline asset lookup (WordNet-style)
 │       │   │   ├── xray/{XRayTerm, XRayExtractor (TF-IDF), XRayCache (file)} 
 │       │   │   ├── anchor/LcsAnchor.kt         # LCS diff + anchor relocation (pure on-device)
 │       │   │   ├── db/ { FolioDatabase v5, dao/{BookDao, ReadingProgressDao, HighlightDao}, entity/{BookEntity, ReadingProgress, Highlight (anchorText)} }
@@ -57,7 +60,7 @@ Folio/
 │       │           ├── BionicReading.kt        # deterministic onset/nucleus/coda syllable splitter
 │       │           ├── VelocityEstimator.kt      # Rolling-Weight EMA + outlier + char-density time-remaining
 │       │           ├── ReaderPageTurnHandler.kt# volume-key dispatch bridge
-│       │           └── components/ { ReadingProgressBar.kt, HighlightOverlay.kt (pressure/tilt Multiply + lasso), XRayBottomSheet.kt }
+│       │           └── components/ { ReadingProgressBar.kt, HighlightOverlay.kt (pressure/tilt Multiply + lasso), XRayBottomSheet.kt, DictionaryPopup.kt }
 │       └── res/
 │           ├── mipmap-{hdpi,mdpi,xhdpi,xxhdpi,xxxhdpi}/  # launcher PNGs
 │           ├── mipmap-anydpi-v26/                        # adaptive-icon XML
@@ -104,6 +107,7 @@ Legacy template fragments / Navigation graph from the initial scaffold remain in
   - *Lasso extraction* — a closed-loop stylus circle is classified (closure, bounds, circularity) distinctly from a highlight. Over an image it extracts the diagram as a PNG to cache/clipboard; over text it runs on-device OCR (local text copy, no network) to clipboard — both entirely private. A `DiagramPlaceholder` (Fig. 1) in the first chapter demos image lasso; text-lasso copies paragraph text. UI is a small dialog with *Extract Image* / *Copy Text*.
   - *LCS anchors (§5)* — each highlight stores the surrounding paragraph snippet (`anchorText`, ~80 chars) as a contextual anchor; on reopen/reimport, `LcsAnchor` runs a pure on-device Longest Common Subsequence scan over the newly parsed chapters to relocate the highlight to the closest matching paragraph (threshold 0.55), or leaves it orphaned if no reasonable match — so highlights survive EPUB typo-fix updates.
 - **Bionic reading (§5)** — `BionicReading` is a deterministic, on-device syllable algorithm (no dictionary, no network) that analyzes each word's onset / nucleus / coda to find the first syllable (vowel-cluster nucleus + optional single-consonant coda, clamped to ~60%) and bolds it via `AnnotatedString` + `SpanStyle(Bold)` for faster scanning. A top-bar toggle (*Bionic On/Off*) applies it to both phone (single-column) and tablet (two-column) layouts, keeping the serif body but adding visual anchors.
+- **Offline dictionary (§6 — on-device)** — `DictionaryRepository` loads a compact open-source `assets/dictionary.json` (WordNet-style, ~120 entries, permissively-licensed, no network) once and caches it. Double-tapping any word in the reading text (via `TextLayoutResult.getOffsetForPosition` + `detectTapGestures` onDoubleTap) looks up the lowercased word and shows a sleek `Dialog`-based popup (`DictionaryPopup`) near the tap with the definition, or a graceful “No definition found” state. Works with `PointerType.Stylus` highlighting (stylus-only) and single-tap chrome toggle without conflict, on both phone and tablet layouts.
 - **X-Ray (§5 — TF-IDF)** — `XRayExtractor` is a local, deterministic TF-IDF index (no network, no external dictionary): for each chapter it counts capitalized proper-noun candidates (filtered by stopwords) and scores them by `tf * idf` (`tf = count/totalWords`, `idf = ln(totalChapters/df)`) to surface distinctive terms (characters, locations, jargon). The per-book, per-chapter index is computed once on first open (or import) and cached to `filesDir/xray/<bookId>.json` (also in-memory via `ReadingViewModel.xrayIndex`), then surfaced as a minimalist `ModalBottomSheet` via an *X-Ray* top-bar button; tapping a term shows which chapters it appears in.
 
 Reference: inspected `book-story-master`'s `ReaderLayout` / `ReaderContent` / `ReaderLayoutText`, `ReaderProgressBar`, and `EpubTextParser` for layering and ZIP+Jsoup ideas only — no code copied.

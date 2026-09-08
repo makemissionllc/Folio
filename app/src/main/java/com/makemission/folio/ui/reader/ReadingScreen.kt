@@ -54,18 +54,23 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.makemission.folio.data.db.entity.Highlight
+import com.makemission.folio.data.dictionary.DictionaryRepository
 import com.makemission.folio.data.epub.EpubParser
+import com.makemission.folio.ui.reader.components.DictionaryPopup
 import com.makemission.folio.ui.reader.components.HighlightOverlay
 import com.makemission.folio.ui.reader.components.ReadingProgressBar
 import com.makemission.folio.ui.reader.components.XRayBottomSheet
@@ -141,7 +146,13 @@ private fun ReadingScreenContent(
     var bionicEnabled by rememberSaveable { mutableStateOf(false) }
     var showXRay by remember { mutableStateOf(false) }
     var lassoCapture by remember { mutableStateOf<LassoCapture?>(null) }
+    var dictPopup by remember { mutableStateOf<Pair<String, String?>?>(null) }
     val context = LocalContext.current
+
+    val onWordDoubleTap: (String) -> Unit = { word ->
+        val def = DictionaryRepository.lookup(word, context)
+        dictPopup = word to def
+    }
 
     // Lasso extraction dialog — distinct handling for image vs text.
     lassoCapture?.let { capture ->
@@ -171,6 +182,14 @@ private fun ReadingScreenContent(
                     TextButton(onClick = { lassoCapture = null }) { Text("Dismiss") }
                 }
             },
+        )
+    }
+
+    dictPopup?.let { (word, def) ->
+        DictionaryPopup(
+            word = word,
+            definition = def,
+            onDismiss = { dictPopup = null },
         )
     }
 
@@ -258,6 +277,7 @@ private fun ReadingScreenContent(
                     onSaveProgress = onSaveProgress,
                     onAddHighlight = onAddHighlight,
                     onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
+                    onWordDoubleTap = onWordDoubleTap,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -271,6 +291,7 @@ private fun ReadingScreenContent(
                     onSaveProgress = onSaveProgress,
                     onAddHighlight = onAddHighlight,
                     onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
+                    onWordDoubleTap = onWordDoubleTap,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -366,6 +387,7 @@ private fun SingleColumnReadingContent(
     onSaveProgress: (Int, Int) -> Unit,
     onAddHighlight: (List<Offset>, List<Float>, List<Float>, Int) -> Unit,
     onLasso: (List<Offset>, Rect) -> Unit,
+    onWordDoubleTap: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -462,24 +484,36 @@ private fun SingleColumnReadingContent(
                     chapter.paragraphs,
                     key = { paraIndex, _ -> "c${chapterIndex}-p$paraIndex" },
                 ) { _, paragraph ->
-                    if (bionicEnabled) {
-                        val annotated = remember(paragraph) {
-                            BionicReading.toBionicAnnotated(paragraph, BionicReading.boldSpan())
-                        }
-                        Text(
-                            text = annotated,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.padding(bottom = 14.dp),
-                        )
-                    } else {
-                        Text(
-                            text = paragraph,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.padding(bottom = 14.dp),
-                        )
-                    }
+                    var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+                    val annotated = if (bionicEnabled) {
+                        remember(paragraph) { BionicReading.toBionicAnnotated(paragraph, BionicReading.boldSpan()) }
+                    } else null
+                    Text(
+                        text = annotated ?: androidx.compose.ui.text.AnnotatedString(paragraph),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        onTextLayout = { layoutResult = it },
+                        modifier = Modifier
+                            .padding(bottom = 14.dp)
+                            .pointerInput(paragraph, bionicEnabled) {
+                                detectTapGestures(
+                                    onDoubleTap = { offset ->
+                                        layoutResult?.let { layout ->
+                                            val pos = layout.getOffsetForPosition(offset)
+                                            if (pos < 0 || pos >= paragraph.length) return@detectTapGestures
+                                            var start = pos
+                                            var end = pos
+                                            while (start > 0 && paragraph[start - 1].isLetter()) start--
+                                            while (end < paragraph.length && paragraph[end].isLetter()) end++
+                                            if (start < end) {
+                                                val word = paragraph.substring(start, end)
+                                                onWordDoubleTap(word)
+                                            }
+                                        }
+                                    }
+                                )
+                            },
+                    )
                 }
                 // Insert diagram after first chapter for lasso-image demo.
                 if (chapterIndex == 0) {
@@ -558,6 +592,7 @@ private fun TwoColumnReadingContent(
     onSaveProgress: (Int, Int) -> Unit,
     onAddHighlight: (List<Offset>, List<Float>, List<Float>, Int) -> Unit,
     onLasso: (List<Offset>, Rect) -> Unit,
+    onWordDoubleTap: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val mid = (chapters.size + 1) / 2
@@ -660,24 +695,34 @@ private fun TwoColumnReadingContent(
                         )
                     }
                     itemsIndexed(chapter.paragraphs, key = { i, _ -> "L-c$chapterIndex-p$i" }) { _, p ->
-                        if (bionicEnabled) {
-                            val annotated = remember(p) {
-                                BionicReading.toBionicAnnotated(p, BionicReading.boldSpan())
-                            }
-                            Text(
-                                text = annotated,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onBackground,
-                                modifier = Modifier.padding(bottom = 12.dp),
-                            )
-                        } else {
-                            Text(
-                                text = p,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onBackground,
-                                modifier = Modifier.padding(bottom = 12.dp),
-                            )
-                        }
+                        var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+                        val annotated = if (bionicEnabled) remember(p) { BionicReading.toBionicAnnotated(p, BionicReading.boldSpan()) } else null
+                        Text(
+                            text = annotated ?: androidx.compose.ui.text.AnnotatedString(p),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            onTextLayout = { layoutResult = it },
+                            modifier = Modifier
+                                .padding(bottom = 12.dp)
+                                .pointerInput(p, bionicEnabled) {
+                                    detectTapGestures(
+                                        onDoubleTap = { offset ->
+                                            layoutResult?.let { layout ->
+                                                val pos = layout.getOffsetForPosition(offset)
+                                                if (pos < 0 || pos >= p.length) return@detectTapGestures
+                                                var start = pos
+                                                var end = pos
+                                                while (start > 0 && p[start - 1].isLetter()) start--
+                                                while (end < p.length && p[end].isLetter()) end++
+                                                if (start < end) {
+                                                    val word = p.substring(start, end)
+                                                    onWordDoubleTap(word)
+                                                }
+                                            }
+                                        }
+                                    )
+                                },
+                        )
                     }
                     if (chapterIndex == 0) {
                         item(key = "L-diagram-$chapterIndex") {
@@ -739,24 +784,34 @@ private fun TwoColumnReadingContent(
                             )
                         }
                         itemsIndexed(chapter.paragraphs, key = { i, _ -> "R-c$chapterIndex-p$i" }) { _, p ->
-                            if (bionicEnabled) {
-                                val annotated = remember(p) {
-                                    BionicReading.toBionicAnnotated(p, BionicReading.boldSpan())
-                                }
-                                Text(
-                                    text = annotated,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onBackground,
-                                    modifier = Modifier.padding(bottom = 12.dp),
-                                )
-                            } else {
-                                Text(
-                                    text = p,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onBackground,
-                                    modifier = Modifier.padding(bottom = 12.dp),
-                                )
-                            }
+                            var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+                            val annotated = if (bionicEnabled) remember(p) { BionicReading.toBionicAnnotated(p, BionicReading.boldSpan()) } else null
+                            Text(
+                                text = annotated ?: androidx.compose.ui.text.AnnotatedString(p),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                onTextLayout = { layoutResult = it },
+                                modifier = Modifier
+                                    .padding(bottom = 12.dp)
+                                    .pointerInput(p, bionicEnabled) {
+                                        detectTapGestures(
+                                            onDoubleTap = { offset ->
+                                                layoutResult?.let { layout ->
+                                                    val pos = layout.getOffsetForPosition(offset)
+                                                    if (pos < 0 || pos >= p.length) return@detectTapGestures
+                                                    var start = pos
+                                                    var end = pos
+                                                    while (start > 0 && p[start - 1].isLetter()) start--
+                                                    while (end < p.length && p[end].isLetter()) end++
+                                                    if (start < end) {
+                                                        val word = p.substring(start, end)
+                                                        onWordDoubleTap(word)
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    },
+                            )
                         }
                         item(key = "R-gap-$chapterIndex") {
                             Spacer(modifier = Modifier.height(6.dp))

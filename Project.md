@@ -7,6 +7,31 @@ Active coding branch: `main`.
 
 ---
 
+## Session 14 — 2026-09-08 — Offline dictionary (WordNet-style, double-tap)
+
+Branch: `main`.
+
+### Built
+
+- **Offline dictionary (§6 — on-device, no network)** — `assets/dictionary.json` (compact open-source WordNet-style, ~120 entries, permissively-licensed, `{"word": "definition"}` lowercased keys) bundled as an app asset; `data/dictionary/DictionaryRepository.kt` loads it once via `assets.open` + `JSONObject` and caches in memory (synchronized, case-insensitive, punctuation-stripped, singular fallback). Lookup is `lowercase().trim(punctuation)` with no network calls.
+- **Double-tap lookup (§6)** — `ui/reader/components/DictionaryPopup.kt`: sleek `Dialog`-based popup (Folio-themed `Card`, amber rule, `titleMedium` word + `bodyMedium` definition, “No definition found” graceful state). `ui/reader/ReadingScreen.kt` now captures `TextLayoutResult` per paragraph (`onTextLayout`) and adds `Modifier.pointerInput { detectTapGestures(onDoubleTap) }` that uses `layout.getOffsetForPosition` + letter-boundary expansion to extract the tapped word, then `DictionaryRepository.lookup(word, context)` and shows the popup. Works with `PointerType.Stylus` highlighting (stylus-only `pointerInteropFilter` lets finger pass through) and single-tap chrome toggle (double-tap consumes, single-tap still toggles) without conflict, on both phone (single-column) and tablet (two-column) layouts. Handled for both `bionicEnabled` annotated and plain `AnnotatedString` cases.
+- Built on top of existing text rendering — `BionicReading` paragraph `Text` not rewritten, just wrapped with double-tap handling and `onTextLayout`.
+
+### Changed
+
+- `app/src/main/assets/dictionary.json` — new: ~120 WordNet-style entries (library, folio, typography, bionic, etc., original definitions, MIT-permissive).
+- `app/src/main/java/com/makemission/folio/data/dictionary/DictionaryRepository.kt` — new: asset load, `lookup` (case-insensitive, punctuation + singular fallback).
+- `app/src/main/java/com/makemission/folio/ui/reader/components/DictionaryPopup.kt` — new: `Dialog` + `Card` (16dp, surface, amber rule) with word/definition/Close.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:1-832` — added `dictPopup` state + `onWordDoubleTap` (lookup → popup), `DictionaryPopup` display after lasso dialog, updated `SingleColumnReadingContent` + `TwoColumnReadingContent` paragraph `Text` to capture `TextLayoutResult` and `pointerInput` double-tap (works with `bionicEnabled` via `AnnotatedString`), added imports for `TextLayoutResult`/`detectTapGestures`/`DictionaryRepository`.
+- `README.md:1-142` — intro now lists offline dictionary, tech stack adds `assets/dictionary.json`, project structure adds `dictionary/` + `assets/dictionary.json` + `DictionaryPopup` in reader components, Reading-screen section adds offline dictionary bullet (§6) and updates structure.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` with JDK 21 (`~/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2`).
+
+---
+
 ## Session 13 — 2026-09-08 — On-device X-Ray (TF-IDF per-chapter index)
 
 Branch: `main`.
