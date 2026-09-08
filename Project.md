@@ -7,6 +7,52 @@ Active coding branch: `main`.
 
 ---
 
+## Session 3 — 2026-09-08 — Compose design system + git repair
+
+Branch: `main` (consolidated; `master` retired).
+
+### Changed
+
+- Added the Folio design system under `app/src/main/java/com/makemission/folio/ui/theme/`:
+  - `Color.kt` — brand palette per spec (`Folio_Project.md` §2): deep green
+    `#004F39` (library/dark backgrounds), burgundy `#780116` (active states,
+    tags, buttons), amber `#F7B538` (accent/highlights), plus dark and light
+    Material 3 `ColorScheme`s.
+  - `Type.kt` — editorial typography: heavy sans-serif headers (placeholder
+    for Druk Wide / Helvetica Neue Bold) and serif body text for reading.
+  - `Theme.kt` — `FolioTheme()` composable (structure modeled on the
+    `book-story-master` reference `ui/theme/Theme.kt`; no code copied).
+- Converted `MainActivity` to a Compose `ComponentActivity` and wired
+  `FolioTheme` as the default theme for the app. No screens yet.
+- Gradle: enabled Compose for AGP 9 (built-in Kotlin, so no
+  `kotlin-android` plugin; JVM target via `kotlin { compilerOptions { } }`),
+  added Compose BOM `2025.09.00`, `activity-compose`, `ui`, `material3`,
+  `foundation`; Java 17.
+- Added `Inspiration/book-story-master` (Book's Story) as a reference app
+  for structure/layout inspiration only.
+- Added Apache-2.0 `LICENSE` matching the spec's license choice.
+
+### Git repair
+
+- Truncated `.git` objects (empty/zero-byte files, likely a filesystem/sync
+  event) were removed; verified `git fsck` is clean.
+- Restored `README.md` / `LICENSE` working copies that had been truncated
+  to 0 bytes from the index.
+- Replaced the unrecoverable local `main` ref with the real history
+  tip (`a740f90`); retired the stale local/remote `master`.
+- Renamed the git remote from `main` to `origin` (removes refname
+  ambiguity), kept remote default branch as `main`.
+- Preserved the original (unused) GitHub `main` commit as tag
+  `github-original-init`.
+
+### Verification
+
+- `git fsck --full` clean; commits on `main` only.
+- `./gradlew :app:assembleDebug -x lint` builds with JDK 21
+  (`~/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2`).
+
+---
+
 ## Session 2 — 2026-09-07 — Custom launcher icons + main branch + docs
 
 Branch: work started on `master`, merged into `main`. `main` is now the
