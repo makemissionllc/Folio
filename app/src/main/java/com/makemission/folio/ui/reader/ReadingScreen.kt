@@ -2,10 +2,16 @@ package com.makemission.folio.ui.reader
 
 import android.app.Application
 import android.content.res.Configuration
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -20,8 +26,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -33,8 +37,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -43,13 +51,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.makemission.folio.data.epub.EpubParser
+import com.makemission.folio.ui.reader.components.ReadingProgressBar
+import kotlinx.coroutines.launch
 
 /**
- * Core reading screen — native EPUB rendering, serif typography, adaptive layout.
- *
- * §3 phone: single-column, edge-to-edge, immersive.
- * §3 tablet: two-column spread in landscape (book-like).
- * §6 progress: Room-backed chapter/paragraph position (no annotations yet).
+ * Core reading screen — native EPUB rendering, serif typography, adaptive layout,
+ * plus frictionless navigation (volume-key page turns, tappable progress bar,
+ * tap-to-toggle immersive chrome) per §3 Frictionless Navigation.
  *
  * Structure inspired by the reference app's `ReaderLayout` + `ReaderContent`
  * layering; implementation is Folio-specific and minimal.
@@ -91,30 +99,38 @@ private fun ReadingScreenContent(
             configuration.screenWidthDp >= 840
     }
 
+    var chromeVisible by remember { mutableStateOf(true) }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = uiState.bookTitle.ifBlank { "Reading" },
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                    )
-                },
-                navigationIcon = {
-                    androidx.compose.material3.TextButton(onClick = onBack) {
-                        Text("← Back", style = MaterialTheme.typography.labelLarge)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                ),
-                windowInsets = WindowInsets.statusBars,
-            )
+            AnimatedVisibility(
+                visible = chromeVisible,
+                enter = slideInVertically { -it } + fadeIn(),
+                exit = slideOutVertically { -it } + fadeOut(),
+            ) {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = uiState.bookTitle.ifBlank { "Reading" },
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                        )
+                    },
+                    navigationIcon = {
+                        androidx.compose.material3.TextButton(onClick = onBack) {
+                            Text("← Back", style = MaterialTheme.typography.labelLarge)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    windowInsets = WindowInsets.statusBars,
+                )
+            }
         },
     ) { paddingValues ->
         Box(
@@ -145,6 +161,8 @@ private fun ReadingScreenContent(
                 TwoColumnReadingContent(
                     chapters = uiState.chapters,
                     restoredChapterIndex = uiState.restoredChapterIndex,
+                    chromeVisible = chromeVisible,
+                    onToggleChrome = { chromeVisible = !chromeVisible },
                     onSaveProgress = onSaveProgress,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -152,6 +170,8 @@ private fun ReadingScreenContent(
                 SingleColumnReadingContent(
                     chapters = uiState.chapters,
                     restoredChapterIndex = uiState.restoredChapterIndex,
+                    chromeVisible = chromeVisible,
+                    onToggleChrome = { chromeVisible = !chromeVisible },
                     onSaveProgress = onSaveProgress,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -166,21 +186,47 @@ private fun ReadingScreenContent(
 private fun SingleColumnReadingContent(
     chapters: List<EpubParser.EpubChapter>,
     restoredChapterIndex: Int,
+    chromeVisible: Boolean,
+    onToggleChrome: () -> Unit,
     onSaveProgress: (Int, Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    val progress by remember {
+        derivedStateOf {
+            val first = listState.firstVisibleItemIndex
+            val total = listState.layoutInfo.totalItemsCount.coerceAtLeast(1)
+            (first.toFloat() / (total - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+        }
+    }
+
+    // Volume keys → page turns (one-handed phone reading).
+    DisposableEffect(listState) {
+        ReaderPageTurnHandler.onVolumeKey = { isUp ->
+            scope.launch {
+                val current = listState.firstVisibleItemIndex
+                val pageSize = 6 // ~one screen worth of items
+                val target = if (isUp) (current - pageSize).coerceAtLeast(0)
+                else (current + pageSize).coerceAtMost(
+                    (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0),
+                )
+                listState.animateScrollToItem(target)
+            }
+        }
+        onDispose { ReaderPageTurnHandler.onVolumeKey = null }
+    }
 
     // Restore position
     LaunchedEffect(chapters) {
         if (restoredChapterIndex in chapters.indices) {
-            // Approximate: scroll to chapter start
             val flatIndex = chapters.take(restoredChapterIndex).sumOf { 1 + it.paragraphs.size }
             if (flatIndex > 0) listState.scrollToItem(flatIndex.coerceAtMost(flatIndex))
         }
     }
 
-    // Persist progress on dispose — simple first-visible heuristic
+    // Persist progress on dispose
     DisposableEffect(listState) {
         onDispose {
             val firstVisible = listState.firstVisibleItemIndex
@@ -189,48 +235,73 @@ private fun SingleColumnReadingContent(
         }
     }
 
-    LazyColumn(
-        state = listState,
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            top = 8.dp,
-            bottom = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 24.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(0.dp),
-    ) {
-        chapters.forEachIndexed { chapterIndex, chapter ->
-            item(key = "chapter-title-$chapterIndex") {
-                Text(
-                    text = chapter.title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.padding(top = 28.dp, bottom = 12.dp),
-                )
+    Box(modifier = modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onToggleChrome,
+                ),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                top = 8.dp,
+                bottom = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            chapters.forEachIndexed { chapterIndex, chapter ->
+                item(key = "chapter-title-$chapterIndex") {
+                    Text(
+                        text = chapter.title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(top = 28.dp, bottom = 12.dp),
+                    )
+                }
+                itemsIndexed(
+                    chapter.paragraphs,
+                    key = { paraIndex, _ -> "c${chapterIndex}-p$paraIndex" },
+                ) { _, paragraph ->
+                    Text(
+                        text = paragraph,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(bottom = 14.dp),
+                    )
+                }
+                item(key = "chapter-gap-$chapterIndex") {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(MaterialTheme.colorScheme.outlineVariant),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
             }
-            itemsIndexed(
-                chapter.paragraphs,
-                key = { paraIndex, _ -> "c${chapterIndex}-p$paraIndex" },
-            ) { _, paragraph ->
-                Text(
-                    text = paragraph,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.padding(bottom = 14.dp),
-                )
-            }
-            item(key = "chapter-gap-$chapterIndex") {
-                Spacer(modifier = Modifier.height(8.dp))
-                // Thin rule between chapters — amber, per Folio accent
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(1.dp)
-                        .background(MaterialTheme.colorScheme.outlineVariant),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-            }
+        }
+
+        AnimatedVisibility(
+            visible = chromeVisible,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            ReadingProgressBar(
+                progress = progress,
+                onSeek = { fraction ->
+                    val target = ((listState.layoutInfo.totalItemsCount - 1) * fraction).toInt()
+                        .coerceIn(0, (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                    scope.launch { listState.animateScrollToItem(target) }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
+            )
         }
     }
 }
@@ -241,20 +312,42 @@ private fun SingleColumnReadingContent(
 private fun TwoColumnReadingContent(
     chapters: List<EpubParser.EpubChapter>,
     restoredChapterIndex: Int,
+    chromeVisible: Boolean,
+    onToggleChrome: () -> Unit,
     onSaveProgress: (Int, Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Split chapters roughly in half for a spread illusion.
-    // For a real pagination engine (§5 True-Page) this would be a virtual
-    // canvas; here we keep it simple: left = first half, right = second half.
     val mid = (chapters.size + 1) / 2
     val left = remember(chapters) { chapters.take(mid) }
     val right = remember(chapters) { chapters.drop(mid) }
 
     val leftState = rememberLazyListState()
-    val rightState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
-    // Restore left column position (primary)
+    val progress by remember {
+        derivedStateOf {
+            val first = leftState.firstVisibleItemIndex
+            val total = leftState.layoutInfo.totalItemsCount.coerceAtLeast(1)
+            (first.toFloat() / (total - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+        }
+    }
+
+    DisposableEffect(leftState) {
+        ReaderPageTurnHandler.onVolumeKey = { isUp ->
+            scope.launch {
+                val pageSize = 5
+                val target = if (isUp) {
+                    (leftState.firstVisibleItemIndex - pageSize).coerceAtLeast(0)
+                } else {
+                    (leftState.firstVisibleItemIndex + pageSize)
+                        .coerceAtMost((leftState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                }
+                leftState.animateScrollToItem(target)
+            }
+        }
+        onDispose { ReaderPageTurnHandler.onVolumeKey = null }
+    }
+
     LaunchedEffect(chapters) {
         if (restoredChapterIndex in chapters.indices && restoredChapterIndex < mid) {
             val flat = left.take(restoredChapterIndex).sumOf { 1 + it.paragraphs.size }
@@ -270,85 +363,28 @@ private fun TwoColumnReadingContent(
         }
     }
 
-    Row(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 12.dp),
-    ) {
-        // Left page
-        LazyColumn(
-            state = leftState,
+    Box(modifier = modifier.fillMaxSize()) {
+        Row(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
+                .fillMaxSize()
+                .padding(horizontal = 12.dp)
+                .padding(bottom = 32.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onToggleChrome,
+                ),
         ) {
-            left.forEachIndexed { chapterIndex, chapter ->
-                item(key = "L-title-$chapterIndex") {
-                    Text(
-                        text = chapter.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.padding(top = 20.dp, bottom = 10.dp),
-                    )
-                }
-                itemsIndexed(chapter.paragraphs, key = { i, _ -> "L-c$chapterIndex-p$i" }) { _, p ->
-                    Text(
-                        text = p,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.padding(bottom = 12.dp),
-                    )
-                }
-                item(key = "L-gap-$chapterIndex") {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(1.dp)
-                            .background(MaterialTheme.colorScheme.outlineVariant),
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                }
-            }
-        }
-
-        // Central gutter — physical spread spine
-        Box(
-            modifier = Modifier
-                .width(1.dp)
-                .fillMaxHeight()
-                .padding(vertical = 16.dp)
-                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-        )
-
-        // Right page
-        if (right.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "—",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    textAlign = TextAlign.Center,
-                )
-            }
-        } else {
             LazyColumn(
-                state = rightState,
+                state = leftState,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
-                right.forEachIndexed { chapterIndex, chapter ->
-                    item(key = "R-title-$chapterIndex") {
+                left.forEachIndexed { chapterIndex, chapter ->
+                    item(key = "L-title-$chapterIndex") {
                         Text(
                             text = chapter.title,
                             style = MaterialTheme.typography.titleMedium,
@@ -356,7 +392,7 @@ private fun TwoColumnReadingContent(
                             modifier = Modifier.padding(top = 20.dp, bottom = 10.dp),
                         )
                     }
-                    itemsIndexed(chapter.paragraphs, key = { i, _ -> "R-c$chapterIndex-p$i" }) { _, p ->
+                    itemsIndexed(chapter.paragraphs, key = { i, _ -> "L-c$chapterIndex-p$i" }) { _, p ->
                         Text(
                             text = p,
                             style = MaterialTheme.typography.bodyMedium,
@@ -364,7 +400,7 @@ private fun TwoColumnReadingContent(
                             modifier = Modifier.padding(bottom = 12.dp),
                         )
                     }
-                    item(key = "R-gap-$chapterIndex") {
+                    item(key = "L-gap-$chapterIndex") {
                         Spacer(modifier = Modifier.height(6.dp))
                         Box(
                             modifier = Modifier
@@ -376,6 +412,88 @@ private fun TwoColumnReadingContent(
                     }
                 }
             }
+
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .fillMaxHeight()
+                    .padding(vertical = 16.dp)
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+            )
+
+            if (right.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "—",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            } else {
+                val rightState = rememberLazyListState()
+                LazyColumn(
+                    state = rightState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                ) {
+                    right.forEachIndexed { chapterIndex, chapter ->
+                        item(key = "R-title-$chapterIndex") {
+                            Text(
+                                text = chapter.title,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.padding(top = 20.dp, bottom = 10.dp),
+                            )
+                        }
+                        itemsIndexed(chapter.paragraphs, key = { i, _ -> "R-c$chapterIndex-p$i" }) { _, p ->
+                            Text(
+                                text = p,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.padding(bottom = 12.dp),
+                            )
+                        }
+                        item(key = "R-gap-$chapterIndex") {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(MaterialTheme.colorScheme.outlineVariant),
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
+                    }
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = chromeVisible,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            ReadingProgressBar(
+                progress = progress,
+                onSeek = { fraction ->
+                    val target = ((leftState.layoutInfo.totalItemsCount - 1) * fraction).toInt()
+                        .coerceIn(0, (leftState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                    scope.launch { leftState.animateScrollToItem(target) }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
+            )
         }
     }
 }
@@ -386,7 +504,7 @@ private fun flatIndexToChapterParagraph(
 ): Pair<Int, Int> {
     var remaining = flatIndex
     chapters.forEachIndexed { chIdx, ch ->
-        val chapterSize = 1 + ch.paragraphs.size + 1 // title + paragraphs + gap
+        val chapterSize = 1 + ch.paragraphs.size + 1
         if (remaining < chapterSize) return chIdx to 0
         remaining -= chapterSize
     }

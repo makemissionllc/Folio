@@ -34,21 +34,24 @@ Folio/
 │   └── src/main/
 │       ├── AndroidManifest.xml
 │       ├── java/com/makemission/folio/
-│       │   ├── MainActivity.kt                 # Compose host — FolioNavHost
+│       │   ├── MainActivity.kt                 # host — FolioNavHost + volume-key dispatch
 │       │   ├── navigation/FolioNav.kt          # NavHost: library ↔ reader
 │       │   ├── data/
 │       │   │   ├── db/ { FolioDatabase, dao/ReadingProgressDao, entity/ReadingProgress }
 │       │   │   ├── epub/EpubParser.kt         # native EPUB3 (ZIP+OPF+Jsoup) + fallback
 │       │   │   └── model/Book.kt              # minimal library model + curated seed
+│       │   ├── navigation/FolioNav.kt          # NavHost: library ↔ reader
 │       │   └── ui/
 │       │       ├── theme/ { Color, Type, Theme }.kt
 │       │       ├── library/
 │       │       │   ├── LibraryScreen.kt        # Scaffold + header, onBookClick
 │       │       │   └── components/ { BookGrid, BookCoverCard, EmptyLibraryState }
 │       │       └── reader/
-│       │           ├── ReadingScreen.kt        # serif body, phone/tablet adaptive
+│       │           ├── ReadingScreen.kt        # serif body + tap-toggle chrome + volume keys
 │       │           ├── ReadingViewModel.kt     # loads EPUB, observes/saves progress
-│       │           └── ReadingViewModelFactory.kt
+│       │           ├── ReadingViewModelFactory.kt
+│       │           ├── ReaderPageTurnHandler.kt# volume-key dispatch bridge
+│       │           └── components/ReadingProgressBar.kt # minimalist tappable bar
 │       └── res/
 │           ├── mipmap-{hdpi,mdpi,xhdpi,xxhdpi,xxxhdpi}/  # launcher PNGs
 │           ├── mipmap-anydpi-v26/                        # adaptive-icon XML
@@ -73,17 +76,21 @@ Legacy template fragments / Navigation graph from the initial scaffold remain in
 - **Empty state** — centered flat illustration (amber sun, burgundy / paper / deep-green books on a shelf) drawn with Compose `Canvas`, plus editorial copy. Shown when `books.isEmpty()`.
 - **Header** — weighty sans "Library" title + collection subtitle over the Folio background.
 
-## Reading screen (core)
+## Reading screen (core + frictionless navigation)
 
-`ReadingScreen(bookId, bookTitle, onBack)` — per §3 and §6:
+`ReadingScreen(bookId, bookTitle, onBack)` — per §3 Frictionless Navigation and §6:
 
 - **EPUB parsing** — `EpubParser` is a native engine: `ZipInputStream` → `container.xml` → OPF manifest/spine → `toc.ncx` → Jsoup extraction of paragraphs. No network, no AI. Loads `assets/sample.epub` when present; otherwise renders curated fallback chapters (`sampleFallbackChapters`) so the UI is always usable.
 - **Typography** — chapter titles in heavy sans (`headlineSmall` / `titleMedium`), body in Folio serif (`bodyLarge` 17/27, `bodyMedium` on tablet) on the Folio background.
 - **Phone (§3)** — single-column, edge-to-edge, immersive; paragraphs in a `LazyColumn` with Folio spacing and amber rule between chapters.
 - **Tablet (§3)** — landscape + `screenWidthDp >= 840` triggers a two-column spread: chapters split into left/right `LazyColumn`s with a central gutter (book-spine), mimicking a physical spread. More sophisticated virtual-canvas pagination (§5) can replace this later.
 - **Progress (§6)** — `FolioDatabase` (`Room`) with `ReadingProgress` (`bookId` PK, `chapterIndex`, `paragraphIndex`, `lastReadMillis`). `ReadingViewModel` observes/saves position via `ReadingProgressDao`; restored on next open.
+- **Frictionless navigation (Folio spec)** — inspired by `book-story-master`'s `ReaderProgressBar`:
+  - *Hardware page turns* — volume up/down advance a page (one-handed phone use). `MainActivity.onKeyDown` forwards to `ReaderPageTurnHandler` → `animateScrollToItem` by a page.
+  - *Minimalist progress bar* — thin amber fill on muted track at the bottom. The bar shows `firstVisibleIndex / total` and tapping it seeks (`animateScrollToItem` to tapped fraction).
+  - *Tap-to-toggle chrome* — tapping the reading area toggles the top bar + progress bar (with `AnimatedVisibility` slide/fade) for a fully distraction-free immersive view.
 
-Reference: inspected `book-story-master`'s `ReaderLayout` / `ReaderContent` / `ReaderLayoutText` and `EpubTextParser` for layering and ZIP+Jsoup ideas only — no code copied.
+Reference: inspected `book-story-master`'s `ReaderLayout` / `ReaderContent` / `ReaderLayoutText`, `ReaderProgressBar`, and `EpubTextParser` for layering and ZIP+Jsoup ideas only — no code copied.
 
 ## Launcher icons
 
