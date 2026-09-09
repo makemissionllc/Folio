@@ -54,12 +54,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -74,6 +79,9 @@ import com.makemission.folio.ui.reader.components.DictionaryPopup
 import com.makemission.folio.ui.reader.components.HighlightOverlay
 import com.makemission.folio.ui.reader.components.ReadingProgressBar
 import com.makemission.folio.ui.reader.components.XRayBottomSheet
+import com.makemission.folio.ui.theme.AdaptiveContrastEngine
+import com.makemission.folio.ui.theme.hasAmbientLightSensor
+import com.makemission.folio.ui.theme.rememberAmbientLightLux
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
@@ -151,6 +159,40 @@ private fun ReadingScreenContent(
     var dictPopup by remember { mutableStateOf<Pair<String, String?>?>(null) }
     val context = LocalContext.current
 
+    // Colorimetric Contrast Optimization (§5) — builds on FolioTheme, not rewriting it
+    var adaptiveEnabled by rememberSaveable { mutableStateOf(false) }
+    val isDark = isSystemInDarkTheme()
+    val baseBg = MaterialTheme.colorScheme.background
+    val baseText = MaterialTheme.colorScheme.onBackground
+    val hasSensor = remember(context) { hasAmbientLightSensor(context) }
+    // Sensor is only active when toggle is on and device has sensor
+    val luxState = rememberAmbientLightLux(enabled = adaptiveEnabled && hasSensor)
+    val rawLux = luxState.value
+    // Compute adaptive pair via WCAG engine when sensor available
+    val adaptivePair = remember(rawLux, isDark, baseBg, baseText, adaptiveEnabled, hasSensor) {
+        if (adaptiveEnabled && hasSensor && rawLux != null) {
+            AdaptiveContrastEngine.adaptivePair(baseBg, baseText, rawLux, isDark)
+        } else null
+    }
+    val targetBg = adaptivePair?.first ?: baseBg
+    val targetText = adaptivePair?.second ?: baseText
+    // Smooth/gradual transition — not jarring flicker (800ms tween)
+    val animatedBg by animateColorAsState(
+        targetValue = targetBg,
+        animationSpec = tween(durationMillis = 800, easing = LinearOutSlowInEasing),
+        label = "adaptiveBg",
+    )
+    val animatedText by animateColorAsState(
+        targetValue = targetText,
+        animationSpec = tween(durationMillis = 800, easing = LinearOutSlowInEasing),
+        label = "adaptiveText",
+    )
+    val readingBg = if (adaptiveEnabled && hasSensor && rawLux != null) animatedBg else baseBg
+    val readingText = if (adaptiveEnabled && hasSensor && rawLux != null) animatedText else baseText
+    // Also adapt surface for chrome consistency (same as bg)
+    val readingSurface = readingBg
+    val readingOnSurface = readingText
+
     val onWordDoubleTap: (String) -> Unit = { word ->
         val def = DictionaryRepository.lookup(word, context)
         dictPopup = word to def
@@ -199,7 +241,7 @@ private fun ReadingScreenContent(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = readingBg,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             AnimatedVisibility(
@@ -236,10 +278,25 @@ private fun ReadingScreenContent(
                                 else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        TextButton(
+                            onClick = { if (hasSensor) adaptiveEnabled = !adaptiveEnabled },
+                            enabled = hasSensor,
+                        ) {
+                            Text(
+                                text = when {
+                                    !hasSensor -> "No sensor"
+                                    adaptiveEnabled -> "Contrast Auto"
+                                    else -> "Contrast Fixed"
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (adaptiveEnabled && hasSensor) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        containerColor = readingSurface.copy(alpha = 0.92f),
+                        titleContentColor = readingOnSurface,
                     ),
                     windowInsets = WindowInsets.statusBars,
                 )
@@ -250,7 +307,7 @@ private fun ReadingScreenContent(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = paddingValues.calculateTopPadding())
-                .background(MaterialTheme.colorScheme.background),
+                .background(readingBg),
         ) {
             if (uiState.isLoading) {
                 Box(
@@ -282,6 +339,8 @@ private fun ReadingScreenContent(
                     onAddHighlight = onAddHighlight,
                     onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
                     onWordDoubleTap = onWordDoubleTap,
+                    readingText = readingText,
+                    readingBackground = readingBg,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -296,6 +355,8 @@ private fun ReadingScreenContent(
                     onAddHighlight = onAddHighlight,
                     onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
                     onWordDoubleTap = onWordDoubleTap,
+                    readingText = readingText,
+                    readingBackground = readingBg,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -392,6 +453,8 @@ private fun SingleColumnReadingContent(
     onAddHighlight: (List<Offset>, List<Float>, List<Float>, Int) -> Unit,
     onLasso: (List<Offset>, Rect) -> Unit,
     onWordDoubleTap: (String) -> Unit,
+    readingText: Color = MaterialTheme.colorScheme.onBackground,
+    readingBackground: Color = MaterialTheme.colorScheme.background,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -491,7 +554,7 @@ private fun SingleColumnReadingContent(
                     Text(
                         text = chapter.title,
                         style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onBackground,
+                        color = readingText,
                         modifier = Modifier.padding(top = 28.dp, bottom = 12.dp),
                     )
                 }
@@ -506,7 +569,7 @@ private fun SingleColumnReadingContent(
                     Text(
                         text = annotated ?: androidx.compose.ui.text.AnnotatedString(paragraph),
                         style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onBackground,
+                        color = readingText,
                         onTextLayout = { layoutResult = it },
                         modifier = Modifier
                             .padding(bottom = 14.dp)
@@ -568,7 +631,7 @@ private fun SingleColumnReadingContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
+                    .background(readingBackground.copy(alpha = 0.92f)),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // True-Page + Velocity row — near progress bar, not interrupting reading
@@ -582,13 +645,13 @@ private fun SingleColumnReadingContent(
                     Text(
                         text = "Page $currentPage of ${truePageInfo.totalPages}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = readingText.copy(alpha = 0.85f),
                     )
                     timeRemaining?.let {
                         Text(
                             text = it,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = readingText.copy(alpha = 0.85f),
                             textAlign = TextAlign.End,
                         )
                     }
@@ -621,6 +684,8 @@ private fun TwoColumnReadingContent(
     onAddHighlight: (List<Offset>, List<Float>, List<Float>, Int) -> Unit,
     onLasso: (List<Offset>, Rect) -> Unit,
     onWordDoubleTap: (String) -> Unit,
+    readingText: Color = MaterialTheme.colorScheme.onBackground,
+    readingBackground: Color = MaterialTheme.colorScheme.background,
     modifier: Modifier = Modifier,
 ) {
     val mid = (chapters.size + 1) / 2
@@ -735,7 +800,7 @@ private fun TwoColumnReadingContent(
                         Text(
                             text = chapter.title,
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onBackground,
+                            color = readingText,
                             modifier = Modifier.padding(top = 20.dp, bottom = 10.dp),
                         )
                     }
@@ -745,7 +810,7 @@ private fun TwoColumnReadingContent(
                         Text(
                             text = annotated ?: androidx.compose.ui.text.AnnotatedString(p),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onBackground,
+                            color = readingText,
                             onTextLayout = { layoutResult = it },
                             modifier = Modifier
                                 .padding(bottom = 12.dp)
@@ -823,7 +888,7 @@ private fun TwoColumnReadingContent(
                             Text(
                                 text = chapter.title,
                                 style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onBackground,
+                                color = readingText,
                                 modifier = Modifier.padding(top = 20.dp, bottom = 10.dp),
                             )
                         }
@@ -833,7 +898,7 @@ private fun TwoColumnReadingContent(
                             Text(
                                 text = annotated ?: androidx.compose.ui.text.AnnotatedString(p),
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onBackground,
+                                color = readingText,
                                 onTextLayout = { layoutResult = it },
                                 modifier = Modifier
                                     .padding(bottom = 12.dp)

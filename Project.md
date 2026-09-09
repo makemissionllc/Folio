@@ -7,6 +7,30 @@ Active coding branch: `main`.
 
 ---
 
+## Session 17 — 2026-09-09 — Colorimetric Contrast Optimization (ambient-light WCAG 7:1)
+
+Branch: `main`.
+
+### Built
+
+- **Colorimetric Contrast Optimization (§5 — ambient-light, WCAG 7:1, smooth, toggle, graceful fallback)** — Builds on top of existing `FolioTheme` (no rewrite): `ui/theme/AdaptiveContrastEngine.kt` implements WCAG relative luminance (`L = 0.2126*Rlin+0.7152*Glin+0.0722*Blin`, `contrast = (Llighter+0.05)/(Ldarker+0.05)`) and `luxToFactor = log10(lux+1)/log10(10001)` to lerp the Folio palette (dark: `#001A12`→`#004F39`→`#0B5C45`; light: `#F1E8D2`→`#FBF6EC`→`#FFFBF0`) then binary-searches text toward white/black via `ensureContrast` until **7:1** is met; `ui/theme/AmbientLightSensor.kt` provides `rememberAmbientLightLux(enabled)` using `SensorManager`/`TYPE_LIGHT` with exponential moving average (`alpha 0.15`) and `SENSOR_DELAY_NORMAL`, returning `State<Float?>` (null on devices without sensor). `ReadingScreen` (`ReadingScreenContent`) adds `adaptiveEnabled` toggle (`rememberSaveable`, TopAppBar `Contrast Auto`/`Contrast Fixed`/`No sensor` button, disabled when `!hasAmbientLightSensor()`), reads `rawLux`, computes `adaptivePair` via `AdaptiveContrastEngine.adaptivePair(baseBg, baseText, lux, isDark)`, and smooths hex shifts with `animateColorAsState(tween 800ms, LinearOutSlowInEasing)` so changes feel gradual, not jarring flicker. Adapted `readingBg`/`readingText` (and `readingSurface`/`readingOnSurface`) are passed to `SingleColumnReadingContent`/`TwoColumnReadingContent` (new `readingText`/`readingBackground` params) and used for `Scaffold containerColor`, `Box background`, `TopAppBar`, and body `Text` colors; when `!adaptiveEnabled` or `rawLux==null` or no sensor, gracefully falls back to fixed `FolioTheme` colors — no crash on emulators. Pure on-device, deterministic; `book-story-master` used for structure only.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/ui/theme/AdaptiveContrastEngine.kt` — new: `relativeLuminance`, `contrastRatio`, `luxToFactor`, `adaptiveBackground`, `ensureContrast`, `adaptivePair` (TARGET 7:1).
+- `app/src/main/java/com/makemission/folio/ui/theme/AmbientLightSensor.kt` — new: `rememberAmbientLightLux(enabled, alpha=0.15)` (SensorManager + EMA + State<Float?>), `hasAmbientLightSensor(context)` helper, graceful null fallback.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:1-1010` — added imports (`animateColorAsState`, `isSystemInDarkTheme`, `AdaptiveContrastEngine`, `AmbientLightSensor`), `adaptiveEnabled` state + `isDark`/`baseBg`/`baseText`/`hasSensor`/`luxState`/`adaptivePair`/`targetBg`/`targetText`/`animatedBg`/`animatedText`/`readingBg`/`readingText`/`readingSurface` logic inside `ReadingScreenContent`, TopAppBar third action toggle, `Scaffold containerColor` + `Box background` + `TopAppBar` colors now use `readingBg`/`readingSurface`, passed `readingText`/`readingBackground` to both column contents and updated all body `Text` colors (`headlineSmall`/`titleMedium`/`bodyLarge`/`bodyMedium`) and bottom chrome (`surface`/`onSurfaceVariant` → `readingBackground`/`readingText`) to use adapted colors.
+- `README.md:1-158` — intro now lists ambient-light adaptive contrast via WCAG 7:1, project structure adds `theme/{AdaptiveContrastEngine, AmbientLightSensor}` + reader toggle note, Reading-screen section adds Colorimetric Contrast Optimization bullet (sensor + WCAG + lux mapping + smoothing + toggle + fallback, on top of FolioTheme).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- Verified smooth: EMA `alpha 0.15` in sensor + `animateColorAsState(tween 800ms)` prevents flicker; verified WCAG: `contrastRatio` math matches spec 7:1; verified toggle enables/disables; verified graceful fallback: `hasAmbientLightSensor()` check, `luxState` null → fixed theme, no crash on emulator.
+- No rewrite of `FolioTheme` — `Color.kt`/`Theme.kt` untouched, adaptive colors applied as overlay in `ReadingScreen`.
+
+---
+
 ## Session 16 — 2026-09-09 — True-Page Calculation Engine (virtual canvas, absolute pages)
 
 Branch: `main`.
