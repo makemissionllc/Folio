@@ -7,6 +7,40 @@ Active coding branch: `main`.
 
 ---
 
+## Session 23 — 2026-09-09 — Bookmarks (distinct from highlights, position marks, top-bar toggle + bottom sheet, phone+tablet jump)
+
+Branch: `main`.
+
+### Built
+
+- **Bookmark entity (Room, distinct from Highlight)** — `data/db/entity/Bookmark.kt`: new `@Entity(tableName="bookmarks")` with `id` autoGenerate, `bookId`, `chapterIndex`, `paragraphIndex` (spec's “position”), `createdAt`, `previewText` (120-char snippet). Separate table from `highlights` — bookmark just marks a spot, no text selection / Multiply rendering (§4). `data/db/dao/BookmarkDao.kt`: `observeForBook` (Flow), `getForBook`, `findExact(chapter,para)`, `insert(REPLACE)`, `delete`, `deleteById`, `clearForBook`. `data/db/FolioDatabase.kt`: v7→v8, added `Bookmark` entity + `bookmarkDao()`, `fallbackToDestructiveMigration(true)`. Build on top of existing Highlight/Room setup, not a rewrite.
+- **ReadingViewModel bookmarks** — `ui/reader/ReadingViewModel.kt`: added `bookmarkDao`, `bookmarks: StateFlow<List<Bookmark>>` via `observeForBook(bookId)` (`SharingStarted.WhileSubscribed`), `addBookmark`/`removeBookmark(bookmark)`/`removeBookmark(ch,para)`/`toggleBookmark(ch,para)` (idempotent via `findExact`, auto `previewText` from current `chapters[ ch].paragraphs[para].take(120)`), `isBookmarked(ch,para, list)` helper. Tracks vocabulary via existing path (no rewrite of `Highlight`/`LcsAnchor`/`Sm2`).
+- **Reading top bar bookmark toggle (filled when bookmarked)** — `ui/reader/ReadingScreen.kt`: `ReadingScreen` now collects `bookmarks` from `ReadingViewModel` and passes `onToggleBookmark`/`onDeleteBookmark` to `ReadingScreenContent`. `ReadingScreenContent` hoists `singleListState`/`tabletLeftState`/`tabletRightState` (`rememberLazyListState`) so the `TopAppBar` can know the current reading position; `currentBookmarkPos` via `derivedStateOf { bookmarkPositionForFlat(firstVisible, chapters) }` and `isCurrentBookmarked` via `bookmarks.any { ch==curCh && para==curPara }`. `TopAppBar.actions` now has: bookmark icon `TextButton` (`☆` → `🔖` filled when `isCurrentBookmarked`, `onToggleBookmark(currentCh, currentPara)`) and `Bookmarks N` button that opens the bottom sheet. Works on both layouts because the hoisted states are the actual `LazyListState`s used by `SingleColumnReadingContent`/`TwoColumnReadingContent`.
+- **Bookmark bottom sheet (X-Ray spirit) + jump** — `ui/reader/components/BookmarkBottomSheet.kt`: new `ModalBottomSheet(skipPartiallyExpanded)` listing `bookmarks` for the current book (chapter title + `Ch/¶` + preview `maxLines 2` + formatted date `MMM d, h:mm a`, `Surface` cards `12dp`, `surfaceVariant`); empty state shows guidance (“Bookmark the current page with the top-bar icon. Filled = already bookmarked”). Tapping a row calls `onBookmarkClick` → sets `pendingBookmarkJump` and dismisses; `Remove` button calls `onBookmarkDelete`. `ReadingScreenContent` holds `pendingBookmarkJump: Bookmark?` and passes to both column contents. `SingleColumnReadingContent` (`listState` param) and `TwoColumnReadingContent` (`leftListState`/`rightListState`) each have `LaunchedEffect(pendingBookmarkJump)` that computes `flatIndexForBookmark*` helpers (mirror `LazyColumn` flat layout: `1 title + paras + (ch0?1 diagram) + 1 gap`) and does `animateScrollToItem`/`scrollToItem` with `onJumpConsumed`, so jump works on phone and tablet (left vs right determined by `chapterIndex < mid`). No copy from `book-story-master` — structural inspiration from its history sheets only.
+- **Helpers** — added `bookmarkPositionForFlat`, `flatIndexForBookmark`, `flatIndexForBookmarkInLeft`, `flatIndexForBookmarkInRight` at bottom of `ReadingScreen.kt` to map between `LazyColumn` flat indices and `(chapter, paragraph)` for accurate bookmark icon + jump. Kept existing `flatIndexToChapterParagraph` for progress fallback but fixed diagram offset.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/db/entity/Bookmark.kt` — new: Bookmark entity (bookId, chapterIndex/position, preview).
+- `app/src/main/java/com/makemission/folio/data/db/dao/BookmarkDao.kt` — new: Flow + exact lookup + insert/delete.
+- `app/src/main/java/com/makemission/folio/data/db/FolioDatabase.kt:1-43` — v7→v8, added Bookmark + bookmarkDao.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingViewModel.kt:1-290` — added bookmarkDao/bookmarks Flow, add/remove/toggle/isBookmarked.
+- `app/src/main/java/com/makemission/folio/ui/reader/components/BookmarkBottomSheet.kt` — new: ModalBottomSheet list with jump/delete/date.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:1-1184` — added Bookmark import, hoisted `singleListState`/`tabletLeftState`/`tabletRightState`, `currentBookmarkPos`/`isCurrentBookmarked`, TopAppBar bookmark icon (`☆`/`🔖`) + `Bookmarks N` button, `pendingBookmarkJump` state + bottom sheets (`XRay` + `Bookmark`), updated `SingleColumnReadingContent`/`TwoColumnReadingContent` to accept external list states + `pendingBookmarkJump`/`onJumpConsumed` + `LaunchedEffect` flat helpers, added `bookmarkPositionForFlat`/`flatIndexForBookmark*` helpers.
+- `README.md:1-185` — intro now lists bookmarks (position-only, distinct from highlights, top-bar toggle + sheet + jump); tech stack Room v8; project structure adds `Bookmark`/`BookmarkDao` + `BookmarkBottomSheet` + reader bookmarks note; Reading section progress v8 + new Bookmarks bullet (entity, VM, TopBar icon, sheet, jump, phone+tablet, Inspiration).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (no new lint).
+- Verified distinct from highlights: Bookmark table separate, no ink/pressure/LCS fields; adding a highlight does not create a bookmark and vice versa.
+- Verified top bar toggle: first visible paragraph bookmarked → icon `🔖` primary; not bookmarked → `☆`; tapping toggles via `toggleBookmark` (idempotent `findExact`).
+- Verified sheet: current book's bookmarks shown with chapter + paragraph + preview + date; empty state guidance shown; Remove deletes row via Room Flow.
+- Verified jump: tapping bookmark dismisses sheet and `animateScrollToItem` scrolls to exact chapter+paragraph via flat helpers; tested phone (single-column) and tablet spread (left var for `ch<mid`, right var for `ch>=mid`, hoisted states) — both scroll without crash.
+- No rewrite: `Highlight` entity/DAO untouched, `FolioDatabase` extended, `ReadingViewModel`/`ReadingScreen` built on top.
+
+---
+
 ## Session 22 — 2026-09-09 — Automatic device scanning for EPUBs (Downloads/Documents/external, hash dedup, reuse pipeline, non-blocking)
 
 Branch: `main`.

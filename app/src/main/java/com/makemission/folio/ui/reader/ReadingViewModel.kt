@@ -8,6 +8,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import com.makemission.folio.data.anchor.LcsAnchor
 import com.makemission.folio.data.db.FolioDatabase
+import com.makemission.folio.data.db.entity.Bookmark
 import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.db.entity.ReadingProgress
 import com.makemission.folio.data.epub.EpubParser
@@ -43,6 +44,7 @@ class ReadingViewModel(
     private val db = FolioDatabase.get(application)
     private val dao = db.readingProgressDao()
     private val highlightDao = db.highlightDao()
+    private val bookmarkDao = db.bookmarkDao()
     private val vocabularyDao = db.vocabularyDao()
 
     private val _uiState = MutableStateFlow(
@@ -52,6 +54,13 @@ class ReadingViewModel(
 
     val highlights: StateFlow<List<Highlight>> =
         highlightDao.observeForBook(bookId).stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+
+    val bookmarks: StateFlow<List<Bookmark>> =
+        bookmarkDao.observeForBook(bookId).stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList(),
@@ -210,6 +219,66 @@ class ReadingViewModel(
     fun clearHighlights() {
         viewModelScope.launch { highlightDao.clearForBook(bookId) }
     }
+
+    // ---- Bookmarks (distinct from highlights) ----
+
+    /**
+     * Bookmark just marks a spot — chapter + paragraph position — no text selection
+     * or Multiply rendering. Separate entity from Highlight (build on top, don't rewrite).
+     */
+    fun addBookmark(chapterIndex: Int, paragraphIndex: Int, preview: String = "") {
+        val safePreview = preview.take(120)
+        viewModelScope.launch {
+            // Avoid duplicates at exact position (idempotent)
+            val existing = bookmarkDao.findExact(bookId, chapterIndex, paragraphIndex)
+            if (existing != null) return@launch
+            val chapters = _uiState.value.chapters
+            val autoPreview = if (safePreview.isNotBlank()) safePreview
+            else chapters.getOrNull(chapterIndex)?.paragraphs?.getOrNull(paragraphIndex)?.take(120) ?: ""
+            bookmarkDao.insert(
+                Bookmark(
+                    bookId = bookId,
+                    chapterIndex = chapterIndex.coerceAtLeast(0),
+                    paragraphIndex = paragraphIndex.coerceAtLeast(0),
+                    previewText = autoPreview,
+                ),
+            )
+        }
+    }
+
+    fun removeBookmark(bookmark: Bookmark) {
+        viewModelScope.launch { bookmarkDao.delete(bookmark) }
+    }
+
+    fun removeBookmark(chapterIndex: Int, paragraphIndex: Int) {
+        viewModelScope.launch {
+            val exact = bookmarkDao.findExact(bookId, chapterIndex, paragraphIndex) ?: return@launch
+            bookmarkDao.delete(exact)
+        }
+    }
+
+    fun toggleBookmark(chapterIndex: Int, paragraphIndex: Int) {
+        viewModelScope.launch {
+            val exact = bookmarkDao.findExact(bookId, chapterIndex, paragraphIndex)
+            if (exact != null) {
+                bookmarkDao.delete(exact)
+            } else {
+                val chapters = _uiState.value.chapters
+                val preview = chapters.getOrNull(chapterIndex)?.paragraphs?.getOrNull(paragraphIndex)?.take(120) ?: ""
+                bookmarkDao.insert(
+                    Bookmark(
+                        bookId = bookId,
+                        chapterIndex = chapterIndex.coerceAtLeast(0),
+                        paragraphIndex = paragraphIndex.coerceAtLeast(0),
+                        previewText = preview,
+                    ),
+                )
+            }
+        }
+    }
+
+    fun isBookmarked(chapterIndex: Int, paragraphIndex: Int, bookmarks: List<Bookmark>): Boolean =
+        bookmarks.any { it.chapterIndex == chapterIndex && it.paragraphIndex == paragraphIndex }
 
     /** Called when a dictionary lookup succeeds — saves word for SM-2 review (§5). */
     fun trackVocabulary(word: String, definition: String?) {

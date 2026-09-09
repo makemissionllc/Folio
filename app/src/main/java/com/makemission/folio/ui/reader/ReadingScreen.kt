@@ -73,9 +73,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.makemission.folio.data.db.entity.Bookmark
 import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.dictionary.DictionaryRepository
 import com.makemission.folio.data.epub.EpubParser
+import com.makemission.folio.ui.reader.components.BookmarkBottomSheet
 import com.makemission.folio.ui.reader.components.DictionaryPopup
 import com.makemission.folio.ui.reader.components.ExpandableDiagram
 import com.makemission.folio.ui.reader.components.HighlightOverlay
@@ -117,12 +119,14 @@ fun ReadingScreen(
     val viewModel: ReadingViewModel = viewModel(factory = factory)
     val uiState by viewModel.uiState.collectAsState()
     val highlights by viewModel.highlights.collectAsState()
+    val bookmarks by viewModel.bookmarks.collectAsState()
     val xrayIndex by viewModel.xrayIndex.collectAsState()
     val isXRayLoading by viewModel.isXRayLoading.collectAsState()
 
     ReadingScreenContent(
         uiState = uiState,
         highlights = highlights,
+        bookmarks = bookmarks,
         xrayIndex = xrayIndex,
         isXRayLoading = isXRayLoading,
         onBack = onBack,
@@ -131,6 +135,8 @@ fun ReadingScreen(
             viewModel.addHighlight(pts, pressures, tilts, ch)
         },
         onTrackVocabulary = viewModel::trackVocabulary,
+        onToggleBookmark = viewModel::toggleBookmark,
+        onDeleteBookmark = viewModel::removeBookmark,
         modifier = modifier,
     )
 }
@@ -140,12 +146,15 @@ fun ReadingScreen(
 private fun ReadingScreenContent(
     uiState: ReadingUiState,
     highlights: List<Highlight>,
+    bookmarks: List<Bookmark> = emptyList(),
     xrayIndex: Map<Int, List<com.makemission.folio.data.xray.XRayTerm>>,
     isXRayLoading: Boolean,
     onBack: () -> Unit,
     onSaveProgress: (Int, Int) -> Unit,
     onAddHighlight: (List<Offset>, List<Float>, List<Float>, Int) -> Unit,
     onTrackVocabulary: (String, String?) -> Unit = { _, _ -> },
+    onToggleBookmark: (Int, Int) -> Unit = { _, _ -> },
+    onDeleteBookmark: (Bookmark) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val configuration = LocalConfiguration.current
@@ -157,8 +166,11 @@ private fun ReadingScreenContent(
     var chromeVisible by remember { mutableStateOf(true) }
     var bionicEnabled by rememberSaveable { mutableStateOf(false) }
     var showXRay by remember { mutableStateOf(false) }
+    var showBookmarks by remember { mutableStateOf(false) }
     var lassoCapture by remember { mutableStateOf<LassoCapture?>(null) }
     var dictPopup by remember { mutableStateOf<Pair<String, String?>?>(null) }
+    // Pending jump target for bookmarks (distinct from highlights)
+    var pendingBookmarkJump by remember { mutableStateOf<Bookmark?>(null) }
     val context = LocalContext.current
 
     // Colorimetric Contrast Optimization (§5) — builds on FolioTheme, not rewriting it
@@ -198,6 +210,29 @@ private fun ReadingScreenContent(
     // Settings: "Always show progress bar" — persisted via DataStore, overrides tap-to-hide
     val settingsRepo = remember(context) { com.makemission.folio.data.settings.SettingsRepository.get(context) }
     val alwaysShowProgressBar by settingsRepo.alwaysShowProgressBar.collectAsState(initial = false)
+
+    // --- Bookmarks: hoisted list states so TopBar knows current position ---
+    val singleListState = rememberLazyListState()
+    val tabletLeftState = rememberLazyListState()
+    val tabletRightState = rememberLazyListState()
+
+    // Current reading position for bookmark toggle (first visible paragraph)
+    val currentBookmarkPos by remember {
+        derivedStateOf {
+            if (uiState.chapters.isEmpty()) 0 to 0
+            else if (isTabletLandscape) {
+                bookmarkPositionForFlat(tabletLeftState.firstVisibleItemIndex, uiState.chapters, isTablet = true)
+            } else {
+                bookmarkPositionForFlat(singleListState.firstVisibleItemIndex, uiState.chapters, isTablet = false)
+            }
+        }
+    }
+    val isCurrentBookmarked by remember {
+        derivedStateOf {
+            val (ch, para) = currentBookmarkPos
+            bookmarks.any { it.chapterIndex == ch && it.paragraphIndex == para }
+        }
+    }
 
     val onWordDoubleTap: (String) -> Unit = { word ->
         val def = DictionaryRepository.lookup(word, context)
@@ -269,6 +304,25 @@ private fun ReadingScreenContent(
                         }
                     },
                     actions = {
+                        // Bookmark icon — filled when current position is bookmarked (distinct from highlights)
+                        TextButton(onClick = {
+                            val (ch, para) = currentBookmarkPos
+                            onToggleBookmark(ch, para)
+                        }) {
+                            Text(
+                                text = if (isCurrentBookmarked) "🔖" else "☆",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (isCurrentBookmarked) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = { showBookmarks = true }) {
+                            Text(
+                                text = if (bookmarks.isEmpty()) "Bookmarks" else "Bookmarks ${bookmarks.size}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         TextButton(onClick = { showXRay = true }) {
                             Text(
                                 "X-Ray",
@@ -348,6 +402,10 @@ private fun ReadingScreenContent(
                     readingText = readingText,
                     readingBackground = readingBg,
                     alwaysShowProgressBar = alwaysShowProgressBar,
+                    leftListState = tabletLeftState,
+                    rightListState = tabletRightState,
+                    pendingBookmarkJump = pendingBookmarkJump,
+                    onJumpConsumed = { pendingBookmarkJump = null },
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -365,6 +423,9 @@ private fun ReadingScreenContent(
                     readingText = readingText,
                     readingBackground = readingBg,
                     alwaysShowProgressBar = alwaysShowProgressBar,
+                    listState = singleListState,
+                    pendingBookmarkJump = pendingBookmarkJump,
+                    onJumpConsumed = { pendingBookmarkJump = null },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -377,6 +438,18 @@ private fun ReadingScreenContent(
             chapters = uiState.chapters,
             isLoading = isXRayLoading,
             onDismiss = { showXRay = false },
+        )
+    }
+    if (showBookmarks) {
+        BookmarkBottomSheet(
+            bookmarks = bookmarks,
+            chapters = uiState.chapters,
+            onBookmarkClick = { bm ->
+                showBookmarks = false
+                pendingBookmarkJump = bm
+            },
+            onBookmarkDelete = onDeleteBookmark,
+            onDismiss = { showBookmarks = false },
         )
     }
 }
@@ -464,10 +537,26 @@ private fun SingleColumnReadingContent(
     readingText: Color = MaterialTheme.colorScheme.onBackground,
     readingBackground: Color = MaterialTheme.colorScheme.background,
     alwaysShowProgressBar: Boolean = false,
+    listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
+    pendingBookmarkJump: Bookmark? = null,
+    onJumpConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+
+    // Bookmark jump — works on phone layout
+    LaunchedEffect(pendingBookmarkJump) {
+        val bm = pendingBookmarkJump ?: return@LaunchedEffect
+        val flat = flatIndexForBookmark(bm.chapterIndex, bm.paragraphIndex, chapters, isTablet = false, mid = 0)
+        if (flat >= 0) {
+            listState.animateScrollToItem(flat.coerceIn(0, (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+            // Fallback: if not yet laid out, scroll without animation
+            if (listState.firstVisibleItemIndex != flat) {
+                listState.scrollToItem(flat.coerceIn(0, (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+            }
+        }
+        onJumpConsumed()
+    }
 
     // True-Page Calculation Engine (§5) — virtual canvas, cached on rotate/font
     val truePageInfo = rememberTruePageState(
@@ -718,15 +807,39 @@ private fun TwoColumnReadingContent(
     readingText: Color = MaterialTheme.colorScheme.onBackground,
     readingBackground: Color = MaterialTheme.colorScheme.background,
     alwaysShowProgressBar: Boolean = false,
+    leftListState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
+    rightListState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
+    pendingBookmarkJump: Bookmark? = null,
+    onJumpConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val mid = (chapters.size + 1) / 2
     val left = remember(chapters) { chapters.take(mid) }
     val right = remember(chapters) { chapters.drop(mid) }
 
-    val leftState = rememberLazyListState()
-    val rightState = rememberLazyListState()
+    val leftState = leftListState
+    val rightState = rightListState
     val scope = rememberCoroutineScope()
+
+    // Bookmark jump — works on tablet spread (jump to appropriate column)
+    LaunchedEffect(pendingBookmarkJump) {
+        val bm = pendingBookmarkJump ?: return@LaunchedEffect
+        if (bm.chapterIndex < mid) {
+            val flat = flatIndexForBookmark(bm.chapterIndex, bm.paragraphIndex, chapters, isTablet = true, mid = mid)
+            // left flat is offset within left list: need left-relative flat
+            val leftFlat = flatIndexForBookmarkInLeft(bm.chapterIndex, bm.paragraphIndex, left)
+            val target = if (leftFlat >= 0) leftFlat else flat
+            leftState.animateScrollToItem(target.coerceIn(0, (leftState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+            if (leftState.firstVisibleItemIndex != target) leftState.scrollToItem(target)
+        } else {
+            val rightFlat = flatIndexForBookmarkInRight(bm.chapterIndex, bm.paragraphIndex, right, mid)
+            val target = rightFlat.coerceIn(0, (rightState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+            rightState.animateScrollToItem(target)
+            if (rightState.firstVisibleItemIndex != target) rightState.scrollToItem(target)
+            // Also ensure left shows corresponding chapter if user jumped to right half — keep left as is
+        }
+        onJumpConsumed()
+    }
 
     val progress by remember {
         derivedStateOf {
@@ -1063,9 +1176,103 @@ private fun flatIndexToChapterParagraph(
 ): Pair<Int, Int> {
     var remaining = flatIndex
     chapters.forEachIndexed { chIdx, ch ->
-        val chapterSize = 1 + ch.paragraphs.size + 1
+        // Single-column flat size: title(1) + paragraphs + optional diagram(1 for ch0) + gap(1)
+        val chapterSize = 1 + ch.paragraphs.size + (if (chIdx == 0) 1 else 0) + 1
         if (remaining < chapterSize) return chIdx to 0
         remaining -= chapterSize
     }
     return 0 to 0
+}
+
+/** Accurate paragraph-aware mapping for bookmarks (distinct from flatIndexToChapterParagraph's 0 fallback). */
+internal fun bookmarkPositionForFlat(
+    flatIndex: Int,
+    chapters: List<EpubParser.EpubChapter>,
+    isTablet: Boolean,
+): Pair<Int, Int> {
+    if (chapters.isEmpty()) return 0 to 0
+    if (isTablet) {
+        // Tablet left holds first half; flat there maps directly to global 0..mid-1
+        var rem = flatIndex
+        for (idx in chapters.indices) {
+            val ch = chapters[idx]
+            // For tablet left list, size is same as phone but without right half
+            // We treat flat as left-relative; global ch is idx when idx < mid
+            val size = 1 + ch.paragraphs.size + (if (idx == 0) 1 else 0) + 1
+            if (rem < size) {
+                return if (rem == 0) idx to 0 // title
+                else {
+                    val paraIdx = (rem - 1).coerceIn(0, (ch.paragraphs.size - 1).coerceAtLeast(0))
+                    // Skip diagram slot for ch0: if para beyond size, clamp
+                    if (idx == 0 && rem == 1 + ch.paragraphs.size) idx to 0 else idx to paraIdx
+                }
+            }
+            rem -= size
+        }
+        return 0 to 0
+    } else {
+        var rem = flatIndex
+        for (idx in chapters.indices) {
+            val ch = chapters[idx]
+            val hasDiagram = idx == 0
+            val size = 1 + ch.paragraphs.size + (if (hasDiagram) 1 else 0) + 1
+            if (rem < size) {
+                if (rem == 0) return idx to 0
+                if (rem in 1..ch.paragraphs.size) return idx to (rem - 1)
+                // diagram or gap -> return first para of this chapter as fallback for bookmark toggle
+                return idx to 0
+            }
+            rem -= size
+        }
+        return 0 to 0
+    }
+}
+
+/** Phone flat index for a bookmark (chapter + paragraph). */
+internal fun flatIndexForBookmark(
+    chapterIndex: Int,
+    paragraphIndex: Int,
+    chapters: List<EpubParser.EpubChapter>,
+    isTablet: Boolean,
+    mid: Int,
+): Int {
+    if (chapterIndex !in chapters.indices) return -1
+    var flat = 0
+    for (idx in 0 until chapterIndex) {
+        val ch = chapters[idx]
+        flat += 1 + ch.paragraphs.size + (if (idx == 0) 1 else 0) + 1
+    }
+    // title offset + paragraph offset
+    flat += 1 + paragraphIndex.coerceIn(0, (chapters[chapterIndex].paragraphs.size - 1).coerceAtLeast(0))
+    return flat
+}
+
+internal fun flatIndexForBookmarkInLeft(
+    chapterIndex: Int,
+    paragraphIndex: Int,
+    left: List<EpubParser.EpubChapter>,
+): Int {
+    if (chapterIndex !in left.indices) return -1
+    var flat = 0
+    for (idx in 0 until chapterIndex) {
+        flat += 1 + left[idx].paragraphs.size + (if (idx == 0) 1 else 0) + 1
+    }
+    flat += 1 + paragraphIndex.coerceIn(0, (left[chapterIndex].paragraphs.size - 1).coerceAtLeast(0))
+    return flat
+}
+
+internal fun flatIndexForBookmarkInRight(
+    chapterIndex: Int,
+    paragraphIndex: Int,
+    right: List<EpubParser.EpubChapter>,
+    mid: Int,
+): Int {
+    val localIdx = chapterIndex - mid
+    if (localIdx !in right.indices) return -1
+    var flat = 0
+    for (idx in 0 until localIdx) {
+        flat += 1 + right[idx].paragraphs.size + 1 // no diagram in right (ch0 is in left)
+    }
+    flat += 1 + paragraphIndex.coerceIn(0, (right[localIdx].paragraphs.size - 1).coerceAtLeast(0))
+    return flat
 }

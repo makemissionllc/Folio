@@ -5,17 +5,19 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.makemission.folio.data.db.dao.BookDao
+import com.makemission.folio.data.db.dao.BookmarkDao
 import com.makemission.folio.data.db.dao.HighlightDao
 import com.makemission.folio.data.db.dao.ReadingProgressDao
 import com.makemission.folio.data.db.dao.VocabularyDao
 import com.makemission.folio.data.db.entity.BookEntity
+import com.makemission.folio.data.db.entity.Bookmark
 import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.db.entity.ReadingProgress
 import com.makemission.folio.data.db.entity.VocabularyCard
 
 @Database(
-    entities = [ReadingProgress::class, Highlight::class, BookEntity::class, VocabularyCard::class],
-    version = 7,
+    entities = [ReadingProgress::class, Highlight::class, BookEntity::class, VocabularyCard::class, Bookmark::class],
+    version = 8,
     exportSchema = false,
 )
 abstract class FolioDatabase : RoomDatabase() {
@@ -24,6 +26,7 @@ abstract class FolioDatabase : RoomDatabase() {
     abstract fun highlightDao(): HighlightDao
     abstract fun bookDao(): BookDao
     abstract fun vocabularyDao(): VocabularyDao
+    abstract fun bookmarkDao(): BookmarkDao
 
     companion object {
         @Volatile
