@@ -19,6 +19,12 @@ interface ReadingProgressDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(progress: ReadingProgress)
 
+    @Query("SELECT * FROM reading_progress ORDER BY lastReadMillis DESC")
+    fun observeAll(): Flow<List<ReadingProgress>>
+
+    @Query("SELECT * FROM reading_progress ORDER BY lastReadMillis DESC")
+    suspend fun getAll(): List<ReadingProgress>
+
     @Query("DELETE FROM reading_progress WHERE bookId = :bookId")
     suspend fun clear(bookId: String)
 }

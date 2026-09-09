@@ -2,7 +2,7 @@
 
 Folio is a premium, distraction-free Android ebook reader by MakeMission LLC (`com.makemission.folio`). It bridges digital convenience and the tactile craft of traditional bookmaking — fluid stylus interactions, magazine-quality typography, and adaptive layouts for phones and tablets.
 
-Jetpack Compose–first. Library (editorial grid + import + Vocabulary badge + swipe to Settings + automatic device scanning for EPUBs in Downloads/Documents/external storage with content-hash dedup, subtle non-blocking progress, Settings toggle + manual scan), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation + persistent “Always show progress bar” via DataStore, true-page numbers via virtual-canvas pre-computation, ambient-light adaptive contrast via WCAG 7:1, Knuth-Plass orphan/widow control with squared-off paragraphs, bounding-box image expansion for diagrams, bookmarks as position-only marks distinct from highlights with top-bar toggle + bottom-sheet list + jump), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction), bionic reading, chapter time remaining, LCS-anchored highlights, on-device X-Ray, offline dictionary, spaced-repetition vocabulary (SM-2, pure on-device), a Folio-themed Settings screen (Reading/Library/Appearance/Privacy sections), and first-launch onboarding (pager + upfront storage/notification permissions, DataStore-tracked, privacy-first) are now in place; other algorithmic features come later.
+Jetpack Compose–first. Library (editorial grid + import + Vocabulary badge + swipe to Settings + automatic device scanning for EPUBs in Downloads/Documents/external storage with content-hash dedup, subtle non-blocking progress, Settings toggle + manual scan, Insights teaser), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation + persistent “Always show progress bar” via DataStore, true-page numbers via virtual-canvas pre-computation, ambient-light adaptive contrast via WCAG 7:1, Knuth-Plass orphan/widow control with squared-off paragraphs, bounding-box image expansion for diagrams, bookmarks as position-only marks distinct from highlights with top-bar toggle + bottom-sheet list + jump), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction), bionic reading, chapter time remaining, LCS-anchored highlights, on-device X-Ray, offline dictionary, spaced-repetition vocabulary (SM-2, pure on-device), a Folio-themed Settings screen (Reading/Library/Insights/Appearance/Privacy sections) + standalone Insights journal (aggregates existing Highlight, Bookmark, ReadingProgress, VocabularyCard, Book data — streaks/time patterns from timestamps, no new collection), and first-launch onboarding (pager + upfront storage/notification permissions, DataStore-tracked, privacy-first) are now in place; other algorithmic features come later.
 
 ## Tech stack
 
@@ -40,7 +40,7 @@ Folio/
 │       ├── AndroidManifest.xml
 │       ├── java/com/makemission/folio/
 │       │   ├── MainActivity.kt                 # host — FolioNavHost + volume-key dispatch
-│       │   ├── navigation/FolioNav.kt          # NavHost: library ↔ reader ↔ vocabulary ↔ settings + first-launch onboarding gate (DataStore, extend, not rewrite)
+│       │   ├── navigation/FolioNav.kt          # NavHost: library ↔ reader ↔ vocabulary ↔ settings+insights + first-launch onboarding gate (DataStore, extend, not rewrite)
 │       │   ├── data/
 │       │   │   ├── dictionary/DictionaryRepository.kt # offline asset lookup (WordNet-style)
 │       │   │   ├── vocabulary/Sm2.kt           # SuperMemo-2 scheduling (pure on-device, deterministic)
@@ -49,19 +49,22 @@ Folio/
 │       │   │   ├── image/{BoundingBoxCropper, CroppedImageCache} # white-margin detection + disk cache (on-device)
 │       │   │   ├── scan/EpubScanner.kt         # device storage scan (Downloads/Documents/external, MediaStore, EPUB only; PDF plug-in point)
 │       │   │   ├── settings/SettingsRepository.kt # DataStore preferences (alwaysShowProgressBar + hasSeenOnboarding + autoScanEnabled, survives restart)
-│       │   │   ├── db/ { FolioDatabase v8, dao/{BookDao, BookmarkDao, ReadingProgressDao, HighlightDao, VocabularyDao}, entity/{BookEntity (fileHash/importedFromPath), Bookmark (bookId/chapterIndex/position), ReadingProgress, Highlight (anchorText), VocabularyCard (SM-2)} }
+│       │   │   ├── db/ { FolioDatabase v8, dao/{BookDao, BookmarkDao, ReadingProgressDao, HighlightDao, VocabularyDao}, entity/{BookEntity (fileHash/importedFromPath), Bookmark (bookId/chapterIndex/position), ReadingProgress, Highlight (anchorText), VocabularyCard (SM-2)} } # Insights queries existing tables (no new tracking)
 │       │   │   ├── epub/EpubParser.kt         # native EPUB3 (ZIP+OPF+Jsoup) + cover extraction + fallback (PDF note)
 │       │   │   └── model/Book.kt              # UI model (coverColor + filePath/coverImagePath) + curated seed
 │       │   └── ui/
 │       │       ├── theme/ { Color, Type, Theme, AdaptiveContrastEngine, AmbientLightSensor }.kt  # WCAG 7:1 ambient-light adaptive contrast
 │       │       ├── library/
-│       │       │   ├── LibraryScreen.kt        # Scaffold + header + FAB import + SAF picker + Vocabulary teaser/badge + swipe-right to Settings + subtle scan progress + auto-scan on launch (pointerInput)
+│       │       │   ├── LibraryScreen.kt        # Scaffold + header + FAB import + SAF picker + Vocabulary teaser/badge + Insights teaser + swipe-right to Settings + subtle scan progress + auto-scan on launch (pointerInput)
 │       │       │   ├── LibraryViewModel.kt     # import (copy→parse→cover→Room) + device scan (reuse pipeline, hash/path dedup), books Flow, error Snackbar, due vocabulary count, isScanning/scanProgress
 │       │       │   └── components/ { BookGrid, BookCoverCard (AsyncImage), EmptyLibraryState }
 │       │       ├── onboarding/
 │       │       │   └── OnboardingScreen.kt     # First-launch pager (Welcome, Stylus, Smart, Privacy) + storage/notification permission requests, FolioTheme, DataStore hasSeenOnboarding
 │       │       ├── settings/
-│       │       │   └── SettingsScreen.kt       # Folio-themed sections: Reading / Library (auto-scan toggle + Scan device) / Appearance / Privacy-Data (DataStore)
+│       │       │   └── SettingsScreen.kt       # Folio-themed sections: Reading / Library (auto-scan toggle + Scan device) / Insights (open ledger) / Appearance / Privacy-Data (DataStore)
+│       │       ├── insights/
+│       │       │   ├── InsightsScreen.kt       # journal — aggregates existing Highlight/Bookmark/ReadingProgress/VocabularyCard/Book via Room Flows, editorial cards, empty state
+│       │       │   └── InsightsViewModel.kt    # read-only combine of 5 DAOs → InsightsState (books/in-progress, highlights/bookmarks, vocab learned/due/mastered, streaks from timestamps)
 │       │       ├── reader/
 │       │       │   ├── ReadingScreen.kt        # serif body (Knuth-Plass orphan/widow, squared-off) + chrome/volume + highlight/lasso + bionic toggle + expandable diagram + dictionary→vocabulary + true pages near progress + adaptive contrast toggle + DataStore-backed alwaysShowProgressBar + bookmarks (top-bar toggle + sheet) (overrides tap-to-hide)
 │       │       │   ├── ReadingViewModel.kt     # per-book file load, progress + highlights + bookmarks + vocabulary tracking (Flow, pressure/tilt, SM-2 save)
@@ -103,8 +106,13 @@ Legacy template fragments / Navigation graph from the initial scaffold remain in
 - **Settings toggle** — `SettingsRepository.KEY_AUTO_SCAN_ENABLED` (`autoScanEnabled` `Flow<Boolean>` default true) persisted via the same `folio_settings` DataStore. The **Library** section in `SettingsScreen` has a `Switch` for “Auto-scan on launch” (disabled when permission not granted) and a **Scan device** `Button` (disabled when permission denied or already scanning, shows `CircularProgressIndicator` while scanning). The toggle and button share the activity-scoped `LibraryViewModel` so progress/snackbar are unified; no extra DataStore or navigation rewrite.
 - **Grid update** — `LibraryViewModel.books` is `bookDao.observeAll().map { imported + curatedSampleBooks() }` so imported (and auto-scanned) books appear first in the grid alongside the curated samples; covers show the extracted image when present.
 - **Vocabulary teaser (§5 — SM-2, non-intrusive)** — a discreet `Card` below the header shows due-for-review count (`LibraryViewModel.dueVocabularyCount` via `VocabularyDao.observeDueCount()`). When `dueCount > 0` a small amber badge displays the number; otherwise it shows “No words due — keep reading” with an `Open` button. Tapping navigates to the `Vocabulary` review screen (`FolioNav` `vocabulary` route). No reading popups or interruptions — the badge surfaces only on the Library screen.
+- **Insights teaser (journal, not dashboard)** — a second discreet `Card` (“Insights — A quiet ledger of your reading”, `surface` with amber dot, `InsightsTeaser`) below the vocabulary card; tapping opens `FolioRoute.Insights`. Same editorial style, read-only aggregation, empty-state aware.
 - **Settings navigation** — Swipe right on the Library (horizontal drag >120px via `detectHorizontalDragGestures` + `pointerInput`, or tap “⚙ Settings” in the header) navigates via `FolioNav` `settings` route to the Settings screen. Built on top of existing `FolioNavHost` (added `FolioRoute.Settings`) — not a rewrite; structural inspiration from `book-story-master`’s settings navigation only.
 - **Header** — weighty sans "Library" title + collection subtitle over the Folio background, now a `Row` with “⚙ Settings” `TextButton` for discoverability.
+
+## Insights screen (quiet ledger, read-only aggregation)
+
+`InsightsScreen` + `InsightsViewModel` (`ui/insights/`) — per spec, a book-themed journal not a fitness dashboard. **Read-only**: `combine`-s `BookDao.observeAll`, `HighlightDao.observeAll`, `BookmarkDao.observeAll`, `ReadingProgressDao.observeAll`, `VocabularyDao.observeAll` — no parallel tracking, queries what already exists (§6). Derives simple, thoughtful stats: **Shelf** (total books / in-progress via `reading_progress` rows), **Marginalia** (total highlights / bookmarks), **Lexicon** (SM-2 `VocabularyCard` → total / due `dueAt<=now` / mastered `repetitions>=3||interval>=21` / learning), **Rhythm** (reading `lastReadMillis` → `LocalDate` distinct days, `currentStreak`/`longestStreak` consecutive-day math via `ChronoUnit.DAYS`, `lastReadLabel` “today/yesterday/Nd ago”, sessions count). Empty state gracefully shows an `EmptyJournalCard` with encouraging on-brand copy (“No pages turned yet — and that’s fine … open a book … Folio keeps everything on-device”). FolioTheme styling: `background` deep green, `surface` cards `16dp` + `1dp` elevation, editorial uppercase `labelMedium` + `headlineMedium` values + small amber `Canvas` dot, `SettingsSection`-like hero (`InsightsHero` journal Canvas) — no generic charts/graphs. Accessible from **Settings → Insights** (`Button("Open Insights")` in `Insights` section) and **Library → Insights teaser** (`InsightsTeaser` card below vocabulary). Built on `Navigation` `FolioRoute.Insights`, no rewrite of existing DAOs (only added `observeAll`/`count` queries as read-only extensions). Inspiration from `book-story-master`’s stats/history grouping only.
 
 ## Reading screen (core + frictionless navigation + stylus engine)
 

@@ -62,6 +62,7 @@ fun LibraryScreen(
     onBookClick: (Book) -> Unit = {},
     onVocabularyClick: () -> Unit = {},
     onSettingsClick: () -> Unit = {},
+    onInsightsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: LibraryViewModel = viewModel(),
 ) {
@@ -158,6 +159,7 @@ fun LibraryScreen(
                 },
         ) {
             VocabularyTeaser(dueCount = dueCount, onClick = onVocabularyClick)
+            InsightsTeaser(onClick = onInsightsClick)
             // Subtle non-blocking scan progress (spec: don't block UI)
             if (isScanning) {
                 Card(
@@ -221,6 +223,7 @@ fun LibraryScreen(
     onBookClick: (Book) -> Unit = {},
     onVocabularyClick: () -> Unit = {},
     onSettingsClick: () -> Unit = {},
+    onInsightsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -234,6 +237,7 @@ fun LibraryScreen(
                 .padding(top = paddingValues.calculateTopPadding()),
         ) {
             VocabularyTeaser(dueCount = 0, onClick = onVocabularyClick)
+            InsightsTeaser(onClick = onInsightsClick)
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 if (books.isEmpty()) {
                     EmptyLibraryState(modifier = Modifier.fillMaxSize())
@@ -337,6 +341,45 @@ private fun VocabularyTeaser(
             } else {
                 TextButton(onClick = onClick) { Text("Open") }
             }
+        }
+    }
+}
+
+@Composable
+private fun InsightsTeaser(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                Text(
+                    "Insights",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    "A quiet ledger of your reading",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            TextButton(onClick = onClick) { Text("Open") }
         }
     }
 }

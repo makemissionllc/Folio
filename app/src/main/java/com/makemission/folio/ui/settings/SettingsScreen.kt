@@ -58,6 +58,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onInsightsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -194,6 +195,32 @@ fun SettingsScreen(
 
             item {
                 SettingsSection(
+                    title = "Insights",
+                    subtitle = "A quiet ledger of your reading",
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "Books, highlights, bookmarks, words and rhythm — all from what you’ve already saved, on-device.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Button(
+                            onClick = onInsightsClick,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                        ) {
+                            Text("Open Insights", style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
+            }
+
+            item {
+                SettingsSection(
                     title = "Appearance",
                     subtitle = "Theme & contrast",
                 ) {
@@ -252,7 +279,7 @@ private fun SettingsHeader(
             color = MaterialTheme.colorScheme.onBackground,
         )
         Text(
-            text = "Reading • Library • Appearance • Privacy",
+            text = "Reading • Library • Insights • Appearance • Privacy",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

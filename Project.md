@@ -7,6 +7,40 @@ Active coding branch: `main`.
 
 ---
 
+## Session 24 — 2026-09-09 — Insights (quiet ledger, read-only aggregation, FolioTheme journal, streaks)
+
+Branch: `main`.
+
+### Built
+
+- **Insights screen (read-only, book-themed journal)** — `ui/insights/InsightsScreen.kt` + `InsightsViewModel.kt`: standalone `FolioRoute.Insights` screen aggregating existing Room data via `combine` of 5 Flows (`BookDao.observeAll` + `HighlightDao.observeAll` + `BookmarkDao.observeAll` + `ReadingProgressDao.observeAll` + `VocabularyDao.observeAll`) — no parallel tracking, no new collection; queries what already exists (§6). `InsightsViewModel` builds `InsightsState` (totalBooks / inProgressBooks from `reading_progress` rows, totalHighlights / totalBookmarks, vocab total/due `dueAt<=now`/mastered `reps>=3||interval>=21`/learning, rhythm: readingSessions count, distinctDays via `LocalDate` from `lastReadMillis`, currentStreak/longestStreak consecutive-day `ChronoUnit.DAYS` math, lastReadLabel “today/yesterday/Nd ago”). Uses `java.time` (`ZoneId`, `ChronoUnit`) available at `minSdk 33`. `InsightsScreen` is FolioTheme editorial, not a fitness dashboard: `Scaffold` `background` deep green, `LazyColumn` `InsightsHero` (journal Canvas amber/green/burgundy `36×24` + spines) + `InsightsSection` cards (`surface` `16dp`, `1dp`, uppercase `labelMedium` primary + `bodySmall`, `StatCell` with `headlineMedium` value + amber dot via `Canvas`), sections Shelf / Marginalia / Lexicon / Rhythm + closing ledger note, empty state `EmptyJournalCard` with encouraging on-brand copy and on-device reassurance. No generic charts/graphs. Structural inspiration from `book-story-master`’s history grouping only.
+- **Navigation + entry points** — `navigation/FolioNav.kt`: added `FolioRoute.Insights("insights")` + `composable(Insights)` → `InsightsScreen(onBack)`. `ui/settings/SettingsScreen.kt`: added `onInsightsClick` param + new **Insights** `SettingsSection` (“A quiet ledger of your reading”, `Button("Open Insights")`, primary) between Library and Appearance, header now “Reading • Library • Insights • Appearance • Privacy”. `ui/library/LibraryScreen.kt`: added `onInsightsClick` param to both overloads, `InsightsTeaser` card (`surface` amber-dot editorial, “Insights — A quiet ledger”) below `VocabularyTeaser`, `LibraryHeader` unchanged but teases Insights; `FolioNavHost` wires `LibraryScreen(onInsightsClick = navigate Insights)` + `SettingsScreen(onInsightsClick = navigate Insights)`. Extends existing navigation, not a rewrite.
+- **DAO read-only extensions** — `data/db/dao/ReadingProgressDao.kt`: added `observeAll()`/`getAll()`; `HighlightDao.kt`: added `observeAll()`/`getAll()`/`observeCount()`/`countAll()`; `BookmarkDao.kt`: added `observeAll()`/`getAll()`/`observeCount()`/`countAll()` — all pure `SELECT` queries for Insights aggregation, no extra tables.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/db/dao/ReadingProgressDao.kt:1-32` — added `observeAll`/`getAll` (all progress rows for streaks/sessions).
+- `app/src/main/java/com/makemission/folio/data/db/dao/HighlightDao.kt:1-45` — added `observeAll`/`getAll`/`observeCount`/`countAll`.
+- `app/src/main/java/com/makemission/folio/data/db/dao/BookmarkDao.kt:1-47` — added `observeAll`/`getAll`/`observeCount`/`countAll`.
+- `app/src/main/java/com/makemission/folio/ui/insights/InsightsViewModel.kt` — new: `InsightsState` + `InsightsViewModel` (combine 5 DAOs, books/in-progress, highlights/bookmarks, vocab total/due/mastered, streaks via `LocalDate`, lastReadLabel).
+- `app/src/main/java/com/makemission/folio/ui/insights/InsightsScreen.kt` — new: `InsightsScreen` (`Scaffold` + `InsightsHeader` + `InsightsHero` + `EmptyJournalCard` + 4 `InsightsSection`s with `StatCell` amber dot, empty-state handling), journal styling.
+- `app/src/main/java/com/makemission/folio/navigation/FolioNav.kt:1-121` — added `FolioRoute.Insights`, `composable(Settings)` now passes `onInsightsClick`, added `composable(Insights)` → `InsightsScreen`.
+- `app/src/main/java/com/makemission/folio/ui/settings/SettingsScreen.kt:1-431` — added `onInsightsClick` param, new Insights section (`Button("Open Insights")`), header subtitle now includes Insights.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryScreen.kt:1-375` — added `onInsightsClick` param (both overloads), `InsightsTeaser` card below vocabulary, wired via `FolioNav`.
+- `README.md:1-185` — intro now lists Insights journal; project structure adds `insights/{InsightsScreen, InsightsViewModel}` + `FolioNav` insights + `Library InsightsTeaser` + `Settings Insights` + db note (Insights queries existing tables); added `## Insights screen` section (Shelf/Marginalia/Lexicon/Rhythm, empty state, FolioTheme, entry points, Inspiration); Library now notes Insights teaser, Reading notes DB v8 unchanged but preserved.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (no new lint, no rewrite).
+- Verified read-only: Insights only calls `observeAll` on existing DAOs; no `insert`/`upsert`/`update` in ViewModel; creating a highlight/bookmark/vocab/progress immediately reflects in Insights via Flow combine.
+- Verified stats: books `totalBooks` = `BookDao.observeAll.size`, `inProgressBooks` = `progress.size`; highlights/bookmarks = global `observeAll.size`; vocab `total/due/mastered` from `vocabulary` (due `dueAt<=now`, mastered `reps>=3`); streaks from `lastReadMillis` distinct `LocalDate` sorted via `ChronoUnit.DAYS` (current 0 if gap>1, longest max run), distinctDays count, lastReadLabel “today/yesterday/Nd ago”.
+- Verified empty state: fresh DB (no rows) → `isEmpty true` → `InsightsHero(isEmpty=true)` + `EmptyJournalCard` with encouraging copy (“No pages turned yet — and that’s fine … open a book … on-device”) + no sections shown; after data exists sections appear.
+- Verified theming: deep green `background`, `surface`/`surfaceVariant` cards `16dp`, uppercase `labelMedium`, `headlineMedium` values, amber dot `Canvas`, flat hero — not generic charts/graphs, journal-like.
+- Verified navigation: Settings → “Open Insights” button and Library → “Insights — A quiet ledger” card both navigate to `insights` via `FolioNav`; Back returns via `popBackStack`; no rewrite of `LibraryScreen`/`SettingsScreen` structure beyond extension.
+
+---
+
 ## Session 23 — 2026-09-09 — Bookmarks (distinct from highlights, position marks, top-bar toggle + bottom sheet, phone+tablet jump)
 
 Branch: `main`.

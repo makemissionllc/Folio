@@ -29,6 +29,18 @@ interface BookmarkDao {
     @Query("DELETE FROM bookmarks WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    @Query("SELECT * FROM bookmarks ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<Bookmark>>
+
+    @Query("SELECT * FROM bookmarks ORDER BY createdAt DESC")
+    suspend fun getAll(): List<Bookmark>
+
+    @Query("SELECT COUNT(*) FROM bookmarks")
+    fun observeCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM bookmarks")
+    suspend fun countAll(): Int
+
     @Query("DELETE FROM bookmarks WHERE bookId = :bookId")
     suspend fun clearForBook(bookId: String)
 }

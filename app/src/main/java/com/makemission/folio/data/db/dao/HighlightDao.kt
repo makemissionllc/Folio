@@ -27,6 +27,18 @@ interface HighlightDao {
     @Delete
     suspend fun delete(highlight: Highlight)
 
+    @Query("SELECT * FROM highlights ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<Highlight>>
+
+    @Query("SELECT * FROM highlights ORDER BY createdAt DESC")
+    suspend fun getAll(): List<Highlight>
+
+    @Query("SELECT COUNT(*) FROM highlights")
+    fun observeCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM highlights")
+    suspend fun countAll(): Int
+
     @Query("DELETE FROM highlights WHERE bookId = :bookId")
     suspend fun clearForBook(bookId: String)
 }

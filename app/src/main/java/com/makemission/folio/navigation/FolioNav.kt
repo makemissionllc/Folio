@@ -37,6 +37,7 @@ sealed class FolioRoute(val route: String) {
     }
     data object Vocabulary : FolioRoute("vocabulary")
     data object Settings : FolioRoute("settings")
+    data object Insights : FolioRoute("insights")
     data object Onboarding : FolioRoute("onboarding")
 }
 
@@ -80,10 +81,19 @@ fun FolioNavHost() {
                 onSettingsClick = {
                     navController.navigate(FolioRoute.Settings.route)
                 },
+                onInsightsClick = {
+                    navController.navigate(FolioRoute.Insights.route)
+                },
             )
         }
         composable(FolioRoute.Settings.route) {
             com.makemission.folio.ui.settings.SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onInsightsClick = { navController.navigate(FolioRoute.Insights.route) },
+            )
+        }
+        composable(FolioRoute.Insights.route) {
+            com.makemission.folio.ui.insights.InsightsScreen(
                 onBack = { navController.popBackStack() },
             )
         }
