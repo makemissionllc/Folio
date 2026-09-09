@@ -1,17 +1,31 @@
 package com.makemission.folio.navigation
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.ui.library.LibraryScreen
+import com.makemission.folio.ui.onboarding.OnboardingScreen
 import com.makemission.folio.ui.reader.ReadingScreen
 import com.makemission.folio.ui.vocabulary.VocabularyScreen
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.launch
 
 sealed class FolioRoute(val route: String) {
     data object Library : FolioRoute("library")
@@ -23,10 +37,32 @@ sealed class FolioRoute(val route: String) {
     }
     data object Vocabulary : FolioRoute("vocabulary")
     data object Settings : FolioRoute("settings")
+    data object Onboarding : FolioRoute("onboarding")
 }
 
 @Composable
 fun FolioNavHost() {
+    val context = LocalContext.current
+    val repo = remember { SettingsRepository.get(context) }
+    val hasSeenOnboarding by repo.hasSeenOnboarding.collectAsState(initial = null)
+    val scope = rememberCoroutineScope()
+
+    if (hasSeenOnboarding == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+        }
+        return
+    }
+
+    if (hasSeenOnboarding == false) {
+        OnboardingScreen(
+            onComplete = {
+                scope.launch { repo.setHasSeenOnboarding(true) }
+            },
+        )
+        return
+    }
+
     val navController = rememberNavController()
 
     NavHost(

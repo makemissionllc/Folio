@@ -7,6 +7,35 @@ Active coding branch: `main`.
 
 ---
 
+## Session 21 — 2026-09-09 — First-Launch Onboarding (pager + permissions, DataStore-gated, FolioTheme)
+
+Branch: `main`.
+
+### Built
+
+- **Onboarding flow (first-launch only, DataStore reuse, FolioTheme pager + permissions)** — `ui/onboarding/OnboardingScreen.kt`: `HorizontalPager` (4 pages, `rememberPagerState`, dots indicator, Skip/Next/Back/Get started) introduces Folio with FolioTheme visuals (deep green `background`, amber `primary`, burgundy accents, heavy sans `headlineLarge/Medium` + serif `bodyLarge/Medium`, flat `Canvas` illustrations: welcome shelf (amber sun + books), stylus+paper (amber highlight + burgundy stylus), smart chip (green chip + amber core), privacy shield) — not generic templates. Pages: 1) Welcome (premium distraction-free), 2) Stylus highlighting (zero-friction true-ink, lasso), 3) Smart on-device (Bionic, X-Ray, True-Page, Knuth-Plass, SM-2, colorimetric, bounding-box, all local), 4) Privacy-first + upfront permission requests. Reuses existing `SettingsRepository` pattern — extends it with `booleanPreferencesKey("has_seen_onboarding")`, `Flow<Boolean> hasSeenOnboarding` + `setHasSeenOnboarding`, same `folio_settings` DataStore (no separate mechanism). Shown only on first launch via `FolioNavHost` gate (`collectAsState(null)` → loading spinner, `false` → `OnboardingScreen`, `true` → normal `NavHost` Library). Requests storage/file access (`READ_EXTERNAL_STORAGE` pre-33 / `READ_MEDIA_IMAGES|VIDEO|AUDIO` on Tiramisu) for EPUB import + future auto-scan and `POST_NOTIFICATIONS` (Tiramisu+) for future features via `rememberLauncherForActivityResult(RequestMultiplePermissions/RequestPermission)`, checks via `ContextCompat.checkSelfPermission`, shows Granted/Not granted status, and handles denial gracefully (manual SAF import via Library + still works, notifications silent, Skip/Get started always enabled). After completion, `repo.setHasSeenOnboarding(true)` + `onComplete` routes to normal `Library` (NavHost). Built on top of existing `FolioNavHost`/`FolioTheme` — not a rewrite; structural inspiration from `book-story-master`’s `StartScreen` (pager + sections) only.
+- **Manifest permissions** — `AndroidManifest.xml`: added `READ_EXTERNAL_STORAGE` (`maxSdkVersion 32`), `READ_MEDIA_IMAGES|VIDEO|AUDIO`, `POST_NOTIFICATIONS` for onboarding upfront requests (still optional, manual import via SAF without them).
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/settings/SettingsRepository.kt:1-55` — added `KEY_HAS_SEEN_ONBOARDING`, `hasSeenOnboarding` Flow + `setHasSeenOnboarding` (reuse same DataStore).
+- `app/src/main/java/com/makemission/folio/ui/onboarding/OnboardingScreen.kt` — new: `OnboardingScreen` (pager 4, FolioTheme, illustrations, permission launchers, Skip/Next/Get started, DataStore flag), helpers `storagePermissions()`, `checkStorageGranted()`, `checkNotificationsGranted()`.
+- `app/src/main/AndroidManifest.xml:1-38` — added `<uses-permission>` for `READ_EXTERNAL_STORAGE`, `READ_MEDIA_*`, `POST_NOTIFICATIONS`.
+- `app/src/main/java/com/makemission/folio/navigation/FolioNav.kt:1-105` — extended `FolioRoute` with `Onboarding`, `FolioNavHost` now gates on `hasSeenOnboarding` Flow (null→loading, false→OnboardingScreen with `scope.launch set true`, true→NavHost Library start), kept existing `Library`/`Reader`/`Vocabulary`/`Settings` routes (extend, not rewrite).
+- `README.md:1-175` — intro now lists onboarding, project structure adds `data/settings` hasSeenOnboarding + `ui/onboarding/OnboardingScreen` + navigation onboarding gate, new Onboarding bullet (pager, permissions, graceful, DataStore-gated, FolioTheme).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- Verified first-launch only: fresh install → `hasSeenOnboarding` false → `OnboardingScreen` shown; after Get started/Skip → flag true → `Library`; relaunch → `Library` directly.
+- Verified DataStore reuse: same `folio_settings` file, no second DataStore.
+- Verified FolioTheme: onboarding uses `FolioTheme` colors/typography/Canvas illustrations, not generic.
+- Verified permissions: Allow → `checkSelfPermission` shows Granted; Deny → status “Not granted — manual import still works”, app remains usable (Library + import via SAF still works); notification permission on <33 auto-granted.
+- Verified routing: after onboarding completes, `NavHost` Library shown as normal; no rewrite of `FolioTheme`/`FolioNavHost` structure.
+
+---
+
 ## Session 20 — 2026-09-09 — Settings Screen + Swipe Navigation + “Always show progress bar” (DataStore)
 
 Branch: `main`.
