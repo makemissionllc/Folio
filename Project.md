@@ -7,6 +7,43 @@ Active coding branch: `main`.
 
 ---
 
+## Session 15 — 2026-09-09 — Spaced Repetition Vocabulary (SM-2, on-device)
+
+Branch: `main`.
+
+### Built
+
+- **Spaced Repetition Vocabulary (§5 — SM-2, pure on-device, deterministic)** — Extends dictionary lookup without rewriting `DictionaryRepository`/`DictionaryPopup`. `ReadingViewModel.trackVocabulary(word, definition)` is invoked whenever a double-tap lookup succeeds (definition non-null); `ReadingScreen` wires `onWordDoubleTap` → `DictionaryRepository.lookup` → `dictPopup` + `onTrackVocabulary` (added param to `ReadingScreenContent`). Words saved locally in Room (extended schema, not replaced): `data/db/entity/VocabularyCard.kt` (`word` PK lowercased, `definition`, `easeFactor=2.5`, `intervalDays`, `repetitions`, `dueAt`, `lastReviewedAt`, `reviewCount`, `createdAt`), `data/db/dao/VocabularyDao.kt` (`observeAll`, `observeDue(now)`, `getDue`, `getByWord`, `upsert`, `delete`, `observeDueCount`, `observeTotalCount`), `FolioDatabase` v5→v6 (`VocabularyCard`, `vocabularyDao()`, `fallbackToDestructiveMigration(true)`).
+- **SM-2 scheduling (§5 — SuperMemo-2)** — `data/vocabulary/Sm2.kt`: deterministic on-device algorithm, no network. Quality mapping Again=0, Hard=3, Good=4, Easy=5. On `quality<3` resets `repetitions=0, interval=1`; else `interval = 1` (reps 0), `6` (reps 1), otherwise `(interval*ease).roundToInt()`, then `reps++` and `ease += 0.1-(5-q)*(0.08+(5-q)*0.02)` clamped to `MIN_EASE=1.3`. `dueAt = now + interval*24h`. `newCard(word, definition)` creates due-now cards. `LibraryViewModel` now observes `dueCount` non-intrusively; `ReadingViewModel.trackVocabulary` de-duplicates (update definition if changed, keep SM-2 fields) and `VocabularyViewModel` applies `Sm2.schedule` on rating.
+- **Review flow (§5)** — `ui/vocabulary/VocabularyViewModel.kt` (`AndroidViewModel`, `allCards`/`dueCards`/`dueCount` via `VocabularyDao`, `currentReview`/`showDefinition` StateFlows, `startReview`/`revealDefinition`/`rateCurrent(q: Int)` → `Sm2.schedule` → `upsert` → next due, `dismissReview`) and `ui/vocabulary/VocabularyScreen.kt` (Folio-themed `Scaffold` + `TopAppBar`, states: due-list with “Start review” + `LazyColumn` cards, `ReviewCard` centered word + amber rule + “Show definition” → reveal → Again/Hard/Good/Easy `TextButton`s → `Sm2.AGAIN/HARD/GOOD/EASY`, empty “No vocabulary yet” hint, “All caught up!” list). No network, no AI.
+- **Discreet surfacing (§5 — non-intrusive)** — `ui/library/LibraryScreen.kt` now shows a `VocabularyTeaser` `Card` below the header (above the grid): “Vocabulary — X due for review” with a small amber badge (`primary` rounded `12.dp`) when `dueCount>0`, otherwise “No words due — keep reading” + `Open` button. Tapping navigates via `FolioNav` (`FolioRoute.Vocabulary`) to `VocabularyScreen`. `LibraryViewModel.dueVocabularyCount` is `vocabularyDao.observeDueCount().stateIn(...)` so badge updates reactively. No popups interrupting reading.
+- Built on top of existing `DictionaryRepository`/`DictionaryPopup` — not a rewrite; looked at `book-story-master` for structural inspiration only (no code copied).
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/db/entity/VocabularyCard.kt` — new: Room entity for SM-2.
+- `app/src/main/java/com/makemission/folio/data/db/dao/VocabularyDao.kt` — new: Room DAO with due/all flows.
+- `app/src/main/java/com/makemission/folio/data/db/FolioDatabase.kt:1-43` — v5→v6, added `VocabularyCard` + `vocabularyDao()`.
+- `app/src/main/java/com/makemission/folio/data/vocabulary/Sm2.kt` — new: `Sm2.schedule`/`newCard`, constants AGAIN/HARD/GOOD/EASY, MIN_EASE, interval/ease logic.
+- `app/src/main/java/com/makemission/folio/ui/vocabulary/VocabularyViewModel.kt` — new: `AndroidViewModel` with `allCards`/`dueCards`/`currentReview`/`showDefinition`, `startReview`/`rateCurrent`/`dismissReview`.
+- `app/src/main/java/com/makemission/folio/ui/vocabulary/VocabularyScreen.kt` — new: `VocabularyScreen` + `ReviewCard` (states: review, due-list, empty, all-caught-up), `width` import fix.
+- `app/src/main/java/com/makemission/folio/navigation/FolioNav.kt:1-69` — added `FolioRoute.Vocabulary` (`vocabulary`), `LibraryScreen(onVocabularyClick)` → navigate, `composable(Vocabulary)` → `VocabularyScreen(onBack=pop)`.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryScreen.kt:1-240` — added `VocabularyTeaser` discreet badge card (imports `Alignment`, `width` handling), wired `dueVocabularyCount` from ViewModel, added `onVocabularyClick` param to both overloads, column layout (teaser above grid).
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryViewModel.kt:1-150` — added `vocabularyDao` + `dueVocabularyCount` Flow.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingViewModel.kt:1-234` — added `vocabularyDao`, `trackVocabulary(word, definition)` (lowercased de-dupe, `Sm2.newCard` on new, definition-update otherwise).
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:1-887` — added `onTrackVocabulary` param to `ReadingScreenContent`, wired `viewModel::trackVocabulary`, `onWordDoubleTap` now also calls `onTrackVocabulary(word, def)` when `def != null` (extends, doesn't rewrite dictionary popup).
+- `README.md:1-150` — intro now lists SM-2 vocabulary, tech stack Room v6, project structure adds `vocabulary/Sm2` + `db/VocabularyCard/VocabularyDao` + `ui/vocabulary/` + navigation vocabulary route + library teaser/badge notes, Library-screen section adds Vocabulary teaser bullet (non-intrusive badge), Reading-screen section adds Spaced Repetition Vocabulary bullet (SM-2 algorithm, tracking, review flow, on-device).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (fixed missing `Alignment` import in `LibraryScreen.kt` and `width` import in `VocabularyScreen.kt`).
+- Verified `DictionaryRepository`/`DictionaryPopup` not rewritten — extended via `ReadingViewModel.trackVocabulary` + `ReadingScreen` callback.
+- Verified SM-2 determinism: `Sm2.schedule` pure function, no network, interval/ease math matches SuperMemo-2 spec (min EF 1.3).
+- Verified discreet surfacing: badge only on Library, review via separate `Vocabulary` route, reading never interrupted.
+
+---
+
 ## Session 14 — 2026-09-08 — Offline dictionary (WordNet-style, double-tap)
 
 Branch: `main`.

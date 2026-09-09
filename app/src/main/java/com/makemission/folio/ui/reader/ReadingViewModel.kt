@@ -11,6 +11,7 @@ import com.makemission.folio.data.db.FolioDatabase
 import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.db.entity.ReadingProgress
 import com.makemission.folio.data.epub.EpubParser
+import com.makemission.folio.data.vocabulary.Sm2
 import com.makemission.folio.data.xray.XRayCache
 import com.makemission.folio.data.xray.XRayExtractor
 import com.makemission.folio.data.xray.XRayTerm
@@ -42,6 +43,7 @@ class ReadingViewModel(
     private val db = FolioDatabase.get(application)
     private val dao = db.readingProgressDao()
     private val highlightDao = db.highlightDao()
+    private val vocabularyDao = db.vocabularyDao()
 
     private val _uiState = MutableStateFlow(
         ReadingUiState(bookId = bookId, bookTitle = bookTitle, isLoading = true),
@@ -207,5 +209,26 @@ class ReadingViewModel(
 
     fun clearHighlights() {
         viewModelScope.launch { highlightDao.clearForBook(bookId) }
+    }
+
+    /** Called when a dictionary lookup succeeds — saves word for SM-2 review (§5). */
+    fun trackVocabulary(word: String, definition: String?) {
+        if (word.isBlank() || definition.isNullOrBlank()) return
+        val key = word.lowercase().trim()
+        viewModelScope.launch {
+            try {
+                val existing = vocabularyDao.getByWord(key)
+                if (existing == null) {
+                    val card = Sm2.newCard(key, definition)
+                    // Keep original casing for display as first-seen word
+                    vocabularyDao.upsert(card.copy(word = key, definition = definition))
+                } else {
+                    // Update definition if improved, but keep SM-2 scheduling
+                    if (existing.definition != definition) {
+                        vocabularyDao.upsert(existing.copy(definition = definition))
+                    }
+                }
+            } catch (_: Exception) {}
+        }
     }
 }

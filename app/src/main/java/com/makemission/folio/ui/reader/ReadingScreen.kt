@@ -120,6 +120,7 @@ fun ReadingScreen(
         onAddHighlight = { pts, pressures, tilts, ch ->
             viewModel.addHighlight(pts, pressures, tilts, ch)
         },
+        onTrackVocabulary = viewModel::trackVocabulary,
         modifier = modifier,
     )
 }
@@ -134,6 +135,7 @@ private fun ReadingScreenContent(
     onBack: () -> Unit,
     onSaveProgress: (Int, Int) -> Unit,
     onAddHighlight: (List<Offset>, List<Float>, List<Float>, Int) -> Unit,
+    onTrackVocabulary: (String, String?) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val configuration = LocalConfiguration.current
@@ -152,6 +154,8 @@ private fun ReadingScreenContent(
     val onWordDoubleTap: (String) -> Unit = { word ->
         val def = DictionaryRepository.lookup(word, context)
         dictPopup = word to def
+        // Persist for SM-2 review (§5) — extend, don't rewrite DictionaryRepository/Popup
+        if (def != null) onTrackVocabulary(word, def)
     }
 
     // Lasso extraction dialog — distinct handling for image vs text.

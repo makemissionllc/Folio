@@ -30,12 +30,16 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     private val db = FolioDatabase.get(application)
     private val bookDao = db.bookDao()
+    private val vocabularyDao = db.vocabularyDao()
 
     private val _importError = MutableSharedFlow<String>(replay = 0)
     val importError = _importError.asSharedFlow()
 
     private val _isImporting = MutableStateFlow(false)
     val isImporting: StateFlow<Boolean> = _isImporting
+
+    val dueVocabularyCount = vocabularyDao.observeDueCount()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     /** Imported books + curated samples so the grid is never empty before first import. */
     val books: StateFlow<List<Book>> = bookDao.observeAll()

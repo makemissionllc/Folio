@@ -8,6 +8,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.makemission.folio.ui.library.LibraryScreen
 import com.makemission.folio.ui.reader.ReadingScreen
+import com.makemission.folio.ui.vocabulary.VocabularyScreen
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -20,6 +21,7 @@ sealed class FolioRoute(val route: String) {
             return "reader/$bookId/$encTitle"
         }
     }
+    data object Vocabulary : FolioRoute("vocabulary")
 }
 
 @Composable
@@ -35,7 +37,13 @@ fun FolioNavHost() {
                 onBookClick = { book ->
                     navController.navigate(FolioRoute.Reader.create(book.id, book.title))
                 },
+                onVocabularyClick = {
+                    navController.navigate(FolioRoute.Vocabulary.route)
+                },
             )
+        }
+        composable(FolioRoute.Vocabulary.route) {
+            VocabularyScreen(onBack = { navController.popBackStack() })
         }
         composable(
             route = FolioRoute.Reader.route,
