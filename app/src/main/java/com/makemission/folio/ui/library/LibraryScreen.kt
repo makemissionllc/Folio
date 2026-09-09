@@ -15,9 +15,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -36,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.makemission.folio.data.model.Book
+import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.ui.library.components.BookGrid
 import com.makemission.folio.ui.library.components.EmptyLibraryState
 
@@ -45,6 +49,11 @@ import com.makemission.folio.ui.library.components.EmptyLibraryState
  * Implantation is SAF-based: the system picker returns a URI, we copy into
  * private storage, parse with the existing EpubParser (title/author/cover),
  * and persist via Room. Vocabulary due count is surfaced non-intrusively.
+ * Also hosts automatic device scanning for EPUBs (Downloads/Documents/external)
+ * via [com.makemission.folio.data.scan.EpubScanner] — reuses the same import
+ * pipeline (private copy + EpubParser + Room) with content-hash/path dedup.
+ * Shows a subtle non-blocking scan progress indicator; auto-scans on launch
+ * when Settings toggle is on and storage permission was granted during onboarding.
  * Structure takes cues from the reference app's LibraryScaffold → LibraryGridLayout
  * but is Folio-specific and extends the existing Book/Grid rather than replacing.
  */
@@ -58,8 +67,12 @@ fun LibraryScreen(
 ) {
     val books by viewModel.books.collectAsState()
     val dueCount by viewModel.dueVocabularyCount.collectAsState()
+    val isScanning by viewModel.isScanning.collectAsState()
+    val scanProgress by viewModel.scanProgress.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val settingsRepo = remember { SettingsRepository.get(context) }
+    val autoScanEnabled by settingsRepo.autoScanEnabled.collectAsState(initial = null)
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -79,6 +92,22 @@ fun LibraryScreen(
     LaunchedEffect(Unit) {
         viewModel.importError.collect { msg ->
             snackbarHostState.showSnackbar(msg)
+        }
+    }
+    LaunchedEffect(Unit) {
+        viewModel.scanResult.collect { msg ->
+            snackbarHostState.showSnackbar(msg)
+        }
+    }
+    // Auto-scan on launch when toggle is enabled and storage permission was granted
+    // (spec: if permission denied, feature is unavailable/disabled — no crash, no repeated prompt)
+    LaunchedEffect(autoScanEnabled) {
+        if (autoScanEnabled == true && viewModel.hasStoragePermission(context)) {
+            // Small delay so Library content settles; non-blocking
+            kotlinx.coroutines.delay(600)
+            if (!viewModel.isScanning.value) {
+                viewModel.scanDevice(context)
+            }
         }
     }
 
@@ -129,6 +158,43 @@ fun LibraryScreen(
                 },
         ) {
             VocabularyTeaser(dueCount = dueCount, onClick = onVocabularyClick)
+            // Subtle non-blocking scan progress (spec: don't block UI)
+            if (isScanning) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = scanProgress ?: "Scanning device for EPUBs…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                }
+            }
             Box(
                 modifier = Modifier
                     .weight(1f)

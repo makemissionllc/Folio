@@ -15,31 +15,43 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.activity.ComponentActivity
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.makemission.folio.data.scan.EpubScanner
 import com.makemission.folio.data.settings.SettingsRepository
+import com.makemission.folio.ui.library.LibraryViewModel
 import kotlinx.coroutines.launch
 
 /**
  * Folio Settings — room to grow, organized into clear sections
- * (Reading / Appearance / Privacy/Data) even though most have one item for now.
+ * (Reading / Library / Appearance / Privacy/Data).
  * Uses existing FolioTheme (deep green / burgundy / amber, heavy sans headers,
  * serif body) so it feels consistent, not generic Android settings.
+ * Library section hosts auto-scan toggle + manual "Scan device" (EpubScanner).
  * Structural inspiration from book-story-master's SettingsScreen (sections -> sub-screens)
  * but Folio-specific and self-contained.
  */
@@ -51,7 +63,26 @@ fun SettingsScreen(
     val context = LocalContext.current
     val repo = SettingsRepository.get(context)
     val alwaysShow by repo.alwaysShowProgressBar.collectAsState(initial = false)
+    val autoScanEnabled by repo.autoScanEnabled.collectAsState(initial = true)
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Share LibraryViewModel (activity-scoped) so scan progress/snackbar are unified with Library screen
+    val activity = context as? ComponentActivity
+    val libraryViewModel: LibraryViewModel = if (activity != null) {
+        viewModel(viewModelStoreOwner = activity)
+    } else {
+        viewModel()
+    }
+    val isScanning by libraryViewModel.isScanning.collectAsState()
+    val scanProgress by libraryViewModel.scanProgress.collectAsState()
+    val hasPermission = EpubScanner.hasStoragePermission(context)
+
+    LaunchedEffect(Unit) {
+        libraryViewModel.scanResult.collect { msg ->
+            snackbarHostState.showSnackbar(msg)
+        }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -59,6 +90,7 @@ fun SettingsScreen(
         topBar = {
             SettingsHeader(onBack = onBack)
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         LazyColumn(
             modifier = Modifier
@@ -84,6 +116,78 @@ fun SettingsScreen(
                         onCheckedChange = { checked ->
                             scope.launch { repo.setAlwaysShowProgressBar(checked) }
                         },
+                    )
+                }
+            }
+
+            item {
+                SettingsSection(
+                    title = "Library",
+                    subtitle = "Device storage & auto-scan",
+                ) {
+                    SettingsToggleRow(
+                        title = "Auto-scan on launch",
+                        subtitle = if (hasPermission) "Search Downloads, Documents & external storage for new EPUBs on app launch" else "Storage permission not granted — auto-scan unavailable",
+                        checked = autoScanEnabled && hasPermission,
+                        onCheckedChange = { checked ->
+                            scope.launch { repo.setAutoScanEnabled(checked) }
+                        },
+                    )
+                    if (!hasPermission) {
+                        Text(
+                            text = "Storage permission denied during onboarding — grant in system settings to enable scanning. Manual import via + still works.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text(
+                                text = "Scan device",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = if (isScanning) (scanProgress ?: "Scanning…")
+                                else if (hasPermission) "Search for .epub files not yet in your library"
+                                else "Unavailable — permission not granted",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (isScanning) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        } else {
+                            Button(
+                                onClick = { libraryViewModel.scanDevice(context) },
+                                enabled = hasPermission,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
+                                shape = RoundedCornerShape(20.dp),
+                            ) {
+                                Text("Scan", style = MaterialTheme.typography.labelLarge)
+                            }
+                        }
+                    }
+                    Text(
+                        text = "Only EPUB for now — PDF parsing doesn't exist yet (plug-in point in EpubScanner + EpubParser). Files are copied to private storage, so originals can be moved/deleted.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        modifier = Modifier.padding(top = 8.dp),
                     )
                 }
             }
@@ -148,7 +252,7 @@ private fun SettingsHeader(
             color = MaterialTheme.colorScheme.onBackground,
         )
         Text(
-            text = "Reading • Appearance • Privacy",
+            text = "Reading • Library • Appearance • Privacy",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

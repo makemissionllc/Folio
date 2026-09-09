@@ -19,6 +19,7 @@ class SettingsRepository(private val context: Context) {
     companion object {
         private val KEY_ALWAYS_SHOW_PROGRESS = booleanPreferencesKey("always_show_progress_bar")
         private val KEY_HAS_SEEN_ONBOARDING = booleanPreferencesKey("has_seen_onboarding")
+        private val KEY_AUTO_SCAN_ENABLED = booleanPreferencesKey("auto_scan_enabled")
 
         @Volatile
         private var INSTANCE: SettingsRepository? = null
@@ -48,6 +49,17 @@ class SettingsRepository(private val context: Context) {
     suspend fun setHasSeenOnboarding(value: Boolean) {
         context.folioSettingsDataStore.edit { prefs ->
             prefs[KEY_HAS_SEEN_ONBOARDING] = value
+        }
+    }
+
+    val autoScanEnabled: Flow<Boolean> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            prefs[KEY_AUTO_SCAN_ENABLED] ?: true
+        }
+
+    suspend fun setAutoScanEnabled(value: Boolean) {
+        context.folioSettingsDataStore.edit { prefs ->
+            prefs[KEY_AUTO_SCAN_ENABLED] = value
         }
     }
 }
