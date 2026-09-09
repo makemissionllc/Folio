@@ -2,7 +2,7 @@
 
 Folio is a premium, distraction-free Android ebook reader by MakeMission LLC (`com.makemission.folio`). It bridges digital convenience and the tactile craft of traditional bookmaking — fluid stylus interactions, magazine-quality typography, and adaptive layouts for phones and tablets.
 
-Jetpack Compose–first. Library (editorial grid + import + Vocabulary badge), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction), bionic reading, chapter time remaining, LCS-anchored highlights, on-device X-Ray, offline dictionary, and spaced-repetition vocabulary (SM-2, pure on-device) are now in place; other algorithmic features come later.
+Jetpack Compose–first. Library (editorial grid + import + Vocabulary badge), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation, true-page numbers via virtual-canvas pre-computation), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction), bionic reading, chapter time remaining, LCS-anchored highlights, on-device X-Ray, offline dictionary, and spaced-repetition vocabulary (SM-2, pure on-device) are now in place; other algorithmic features come later.
 
 ## Tech stack
 
@@ -55,11 +55,12 @@ Folio/
 │       │       │   ├── LibraryViewModel.kt     # import (copy→parse→cover→Room), books Flow, error Snackbar, due vocabulary count
 │       │       │   └── components/ { BookGrid, BookCoverCard (AsyncImage), EmptyLibraryState }
 │       │       ├── reader/
-│       │       │   ├── ReadingScreen.kt        # serif body + chrome/volume + highlight/lasso + bionic toggle + diagram + dictionary→vocabulary
+│       │       │   ├── ReadingScreen.kt        # serif body + chrome/volume + highlight/lasso + bionic toggle + diagram + dictionary→vocabulary + true pages near progress
 │       │       │   ├── ReadingViewModel.kt     # per-book file load, progress + highlights + vocabulary tracking (Flow, pressure/tilt, SM-2 save)
 │       │       │   ├── ReadingViewModelFactory.kt
 │       │       │   ├── BionicReading.kt        # deterministic onset/nucleus/coda syllable splitter
 │       │       │   ├── VelocityEstimator.kt      # Rolling-Weight EMA + outlier + char-density time-remaining
+│       │       │   ├── TruePageEngine.kt       # virtual canvas measurement pass → absolute page numbers (cached on rotate/font)
 │       │       │   ├── ReaderPageTurnHandler.kt# volume-key dispatch bridge
 │       │       │   └── components/ { ReadingProgressBar.kt, HighlightOverlay.kt (pressure/tilt Multiply + lasso), XRayBottomSheet.kt, DictionaryPopup.kt }
 │       │       └── vocabulary/
@@ -99,8 +100,9 @@ Legacy template fragments / Navigation graph from the initial scaffold remain in
 - **EPUB parsing** — `EpubParser` is a native engine: `ZipInputStream` → `container.xml` → OPF manifest/spine → `toc.ncx` → Jsoup extraction of paragraphs, plus cover extraction as above. No network, no AI. Loads the per-book private file (`bookDao.getById(bookId).filePath`) when present; falls back to `assets/sample.epub` and then `sampleFallbackChapters` so the UI is always usable.
 - **Typography** — chapter titles in heavy sans (`headlineSmall` / `titleMedium`), body in Folio serif (`bodyLarge` 17/27, `bodyMedium` on tablet) on the Folio background.
 - **Phone (§3)** — single-column, edge-to-edge, immersive; paragraphs in a `LazyColumn` with Folio spacing and amber rule between chapters.
-- **Tablet (§3)** — landscape + `screenWidthDp >= 840` triggers a two-column spread: chapters split into left/right `LazyColumn`s with a central gutter (book-spine), mimicking a physical spread. More sophisticated virtual-canvas pagination (§5) can replace this later.
-- **Progress (§6)** — `FolioDatabase` (`Room` v5) with `ReadingProgress` (`bookId` PK, `chapterIndex`, `paragraphIndex`, `lastReadMillis`). `ReadingViewModel` observes/saves position via `ReadingProgressDao`; restored on next open.
+- **Tablet (§3)** — landscape + `screenWidthDp >= 840` triggers a two-column spread: chapters split into left/right `LazyColumn`s with a central gutter (book-spine), mimicking a physical spread.
+- **Progress (§6)** — `FolioDatabase` (`Room` v6) with `ReadingProgress` (`bookId` PK, `chapterIndex`, `paragraphIndex`, `lastReadMillis`). `ReadingViewModel` observes/saves position via `ReadingProgressDao`; restored on next open.
+- **True-Page Calculation Engine (§5 — virtual canvas, cached)** — `ui/reader/TruePageEngine.kt`: off-screen measurement pass that pre-computes the entire book's layout for the current screen dimensions and font size (`rememberTextMeasurer` constrained to the column width — 40dp phone / (screen-52dp)/2 tablet — measuring titles with `headlineSmall`/`titleMedium` and body with `bodyLarge`/`bodyMedium` including `BionicReading` bold spans when enabled). Heights per flat item (title + paragraphs + diagram 172dp + gap 17dp) are summed; page breaks are injected every `availableHeightPx` (phone) or `availableHeightPx*2` (tablet spread — physical page turns, not columns), producing `Page X of Y` (e.g., `Page 45 of 312`). The `TruePageInfo` is `remember`ed on `screenWidthDp`/`screenHeightDp`/`orientation`/`fontScale`/`density`/`bionicEnabled`/`chaptersKey` only — not on every scroll — and the current page is derived via `derivedStateOf { info.pageFor(firstVisibleItemIndex) }` so scrolling is cheap while totalPages stays stable; bionic toggle or rotation recalculates. Displayed near the existing progress bar as a `Page X of Y` label in a `Row` alongside `VelocityEstimator`'s time-remaining (inside the chrome-visibility `AnimatedVisibility` so it hides in immersive mode), working for both phone (single-column page) and tablet (spread page count reflects physical turns). Built on top of existing layouts — not a rewrite; reference `book-story-master` consulted for structure only.
 - **Time remaining (§5 — Rolling-Weight Velocity Estimator)** — `VelocityEstimator` tracks delta between page turns, smooths with an Exponential Moving Average (α=0.35) and discards outliers via σ-threshold (e.g., 15-min idle), then predicts from remaining *character density* (upcoming chars / EMA speed) not just page count; displayed as a small “12 min left in chapter” label near the progress bar (pure on-device, no network).
 - **Frictionless navigation (Folio spec §3)** — inspired by `book-story-master`'s `ReaderProgressBar`:
   - *Hardware page turns* — volume up/down advance a page (one-handed phone use). `MainActivity.onKeyDown` forwards to `ReaderPageTurnHandler` → `animateScrollToItem` by a page.

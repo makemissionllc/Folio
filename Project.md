@@ -7,6 +7,30 @@ Active coding branch: `main`.
 
 ---
 
+## Session 16 — 2026-09-09 — True-Page Calculation Engine (virtual canvas, absolute pages)
+
+Branch: `main`.
+
+### Built
+
+- **True-Page Calculation Engine (§5 — off-screen virtual canvas, cached)** — `ui/reader/TruePageEngine.kt`: pre-computes the entire book's text layout for the current screen dimensions and font size on a virtual canvas, then injects synthetic page breaks to produce absolute page numbers (`Page 45 of 312`) instead of vague “location” metrics. Uses `rememberTextMeasurer` constrained to the actual column width (phone: `screenWidth-40dp`, tablet: `(screenWidth-52dp)/2`) with the real Folio styles (`bodyLarge` 17/27 phone, `bodyMedium` tablet for body, `headlineSmall`/`titleMedium` for titles) including `BionicReading` bold spans when `bionicEnabled` — so the measurement matches rendered text. Heights per flat item (titles + paragraphs + diagram 172dp + gap 17dp) are summed via `textMeasurer.measure(...).size.height`; `availableHeightPx` is `screenHeight-140dp` and `perScreen = availableHeight` (phone) or `*2` (tablet spread — physical page turns, not columns), so tablet page count reflects spreads (`ceil(totalHeight / perScreen)`), not individual columns. Page for scroll position is `floor(heightBeforeFlat / perScreen)+1` via prefix sums; current page derives from `firstVisibleItemIndex` via `derivedStateOf` (cheap) while `TruePageInfo` is `remember`ed on `screenWidthDp/screenHeightDp/orientation/fontScale/density/bionicEnabled/chaptersKey` only — recalculates on rotate or typography change, not on every scroll/recomposition. Built on top of existing `SingleColumnReadingContent`/`TwoColumnReadingContent` + `BionicReading`/`VelocityEstimator` layouts — not a rewrite; `book-story-master` consulted for structure only.
+- **Display near progress bar (§5)** — Both phone (`SingleColumnReadingContent`) and tablet (`TwoColumnReadingContent`) now show `Page X of Y` in the bottom chrome `Row` alongside `VelocityEstimator`'s time-remaining, directly above `ReadingProgressBar` inside the same `AnimatedVisibility` (hides in immersive mode). Tablet's `rightState` hoisted to top level so spread page tracks earliest visible content; phone uses `listState.firstVisibleItemIndex`. Label is `labelSmall`/`onSurfaceVariant`, e.g., `Page 45 of 312`.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/ui/reader/TruePageEngine.kt` — new: `TruePageInfo`, `rememberTruePageState(...)` (virtual canvas + prefix sums + cached), `rememberTruePageStateForTablet`.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:1-915` — added `True-Page` to `SingleColumnReadingContent` (`truePageInfo` + `currentPage` via `derivedStateOf`, `Row` with `Page X of Y` + timeRemaining above progress bar) and `TwoColumnReadingContent` (hoisted `rightState`, added `truePageInfo` with `isTabletLandscape=true` and `currentPage` derived from `leftState`, `Row` with page label + timeRemaining), kept existing velocity/progress/highlight/X-Ray/dictionary logic.
+- `README.md:1-157` — intro now lists true-page numbers via virtual-canvas pre-computation, project structure adds `TruePageEngine.kt` + `+ true pages near progress` note, Reading-screen section updates progress to v6, replaces stale “more sophisticated pagination can replace later” with True-Page bullet (virtual canvas detail, cached rotation/font, phone vs tablet spread).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (no new lint issues).
+- Verified cached behavior: `remember` keys include screen dimensions/orientation/fontScale/density/bionicEnabled — scrolling does not recompute totalPages, only `derivedStateOf` for current page.
+- Verified tablet physical pages: `perScreenHeight*2` in `TruePageEngine` ensures spread counts as one physical turn.
+
+---
+
 ## Session 15 — 2026-09-09 — Spaced Repetition Vocabulary (SM-2, on-device)
 
 Branch: `main`.

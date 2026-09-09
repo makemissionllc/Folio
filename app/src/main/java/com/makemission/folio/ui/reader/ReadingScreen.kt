@@ -397,6 +397,17 @@ private fun SingleColumnReadingContent(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
+    // True-Page Calculation Engine (§5) — virtual canvas, cached on rotate/font
+    val truePageInfo = rememberTruePageState(
+        chapters = chapters,
+        isTabletLandscape = false,
+        bionicEnabled = bionicEnabled,
+    )
+    // Current page updates on scroll but totalPages stays cached
+    val currentPage by remember {
+        derivedStateOf { truePageInfo.pageFor(listState.firstVisibleItemIndex) }
+    }
+
     val progress by remember {
         derivedStateOf {
             val first = listState.firstVisibleItemIndex
@@ -560,14 +571,27 @@ private fun SingleColumnReadingContent(
                     .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                timeRemaining?.let {
+                // True-Page + Velocity row — near progress bar, not interrupting reading
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        text = it,
+                        text = "Page $currentPage of ${truePageInfo.totalPages}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
                     )
+                    timeRemaining?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.End,
+                        )
+                    }
                 }
                 ReadingProgressBar(
                     progress = progress,
@@ -604,6 +628,7 @@ private fun TwoColumnReadingContent(
     val right = remember(chapters) { chapters.drop(mid) }
 
     val leftState = rememberLazyListState()
+    val rightState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
     val progress by remember {
@@ -611,6 +636,22 @@ private fun TwoColumnReadingContent(
             val first = leftState.firstVisibleItemIndex
             val total = leftState.layoutInfo.totalItemsCount.coerceAtLeast(1)
             (first.toFloat() / (total - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+        }
+    }
+
+    // True-Page Calculation Engine (§5) — tablet spread: physical page turns (perScreen *2)
+    val truePageInfo = rememberTruePageState(
+        chapters = chapters,
+        isTabletLandscape = true,
+        bionicEnabled = bionicEnabled,
+    )
+    // Tablet spread shows 2 columns per physical page, but totalPages already
+    // reflects physical turns. Current page tracks earliest visible spread.
+    // leftState is earliest (first half), so use its flatIndex for page.
+    val currentPage by remember {
+        derivedStateOf {
+            // leftState covers first half (global 0..mid); its flat maps directly
+            truePageInfo.pageFor(leftState.firstVisibleItemIndex)
         }
     }
 
@@ -769,7 +810,6 @@ private fun TwoColumnReadingContent(
                     )
                 }
             } else {
-                val rightState = rememberLazyListState()
                 LazyColumn(
                     state = rightState,
                     modifier = Modifier
@@ -854,14 +894,26 @@ private fun TwoColumnReadingContent(
                     .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                timeRemaining?.let {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        text = it,
+                        text = "Page $currentPage of ${truePageInfo.totalPages}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
                     )
+                    timeRemaining?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.End,
+                        )
+                    }
                 }
                 ReadingProgressBar(
                     progress = progress,
