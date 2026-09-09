@@ -22,6 +22,7 @@ sealed class FolioRoute(val route: String) {
         }
     }
     data object Vocabulary : FolioRoute("vocabulary")
+    data object Settings : FolioRoute("settings")
 }
 
 @Composable
@@ -40,6 +41,14 @@ fun FolioNavHost() {
                 onVocabularyClick = {
                     navController.navigate(FolioRoute.Vocabulary.route)
                 },
+                onSettingsClick = {
+                    navController.navigate(FolioRoute.Settings.route)
+                },
+            )
+        }
+        composable(FolioRoute.Settings.route) {
+            com.makemission.folio.ui.settings.SettingsScreen(
+                onBack = { navController.popBackStack() },
             )
         }
         composable(FolioRoute.Vocabulary.route) {

@@ -7,6 +7,39 @@ Active coding branch: `main`.
 
 ---
 
+## Session 20 — 2026-09-09 — Settings Screen + Swipe Navigation + “Always show progress bar” (DataStore)
+
+Branch: `main`.
+
+### Built
+
+- **Settings screen (Folio-themed, room to grow, DataStore persistence)** — `ui/settings/SettingsScreen.kt`: `Scaffold` with Folio `background` + editorial `headlineLarge` “Settings” header + `LazyColumn` and `SettingsHero` (amber/burgundy/green flat illustration, `RoundedCornerShape(14dp)`), organized into three clear `SettingsSection` cards (`Reading` / `Appearance` / `Privacy/Data`, uppercase `labelMedium` primary + `bodySmall` subtitle, `16dp` `surface` cards with `1dp` elevation). `Reading` holds `SettingsToggleRow` for **“Always show progress bar”** (`Switch` with Folio primary/burgundy track, `collectAsState` from `SettingsRepository.alwaysShowProgressBar` + `scope.launch { repo.setAlwaysShowProgressBar }`); `Appearance` and `Privacy/Data` currently have `SettingsInfoRow` placeholders (“Folio theme”, “Adaptive contrast”, “Local-only reading”, “Caches”) to show structure and allow growth. Uses existing `FolioTheme` (deep green `#004F39`, burgundy `#780116`, amber `#F7B538`, heavy sans + serif) — not a generic Android settings page; structural inspiration from `book-story-master`’s `SettingsScreen`/`SettingsContent` sections only, no code copied.
+- **Persistence via DataStore (not in-memory)** — `data/settings/SettingsRepository.kt`: `Context.folioSettingsDataStore by preferencesDataStore("folio_settings")`, `booleanPreferencesKey("always_show_progress_bar")`, `Flow<Boolean>` `alwaysShowProgressBar` (default false) + `suspend setAlwaysShowProgressBar`, singleton `get(context)`, survives app restarts.
+- **Swipe-right navigation (Library → Settings, extends navigation)** — `navigation/FolioNav.kt`: added `FolioRoute.Settings("settings")` and `composable(Settings)` → `SettingsScreen(onBack=pop)`, extended existing `FolioNavHost` (did not rewrite). `ui/library/LibraryScreen.kt`: added `onSettingsClick: () -> Unit` param (both overloads) to `LibraryScreen` + `LibraryHeader` now a `Row` with “⚙ Settings” `TextButton` for discoverability, and `Column` wrapping content has `Modifier.pointerInput { detectHorizontalDragGestures(totalDx>120f → onSettingsClick, consume) }` so swiping right on Library (horizontal drag >120px) opens Settings; vertical scroll (LazyVerticalGrid) not affected.
+- **Reading progress bar respects setting (overrides tap-to-hide)** — `ui/reader/ReadingScreen.kt`: `ReadingScreenContent` now collects `alwaysShowProgressBar` via `SettingsRepository.get(context).alwaysShowProgressBar.collectAsState(false)` and passes `alwaysShowProgressBar` to `SingleColumnReadingContent`/`TwoColumnReadingContent` (new param). Bottom bar restructured from single `AnimatedVisibility(visible=chromeVisible)` wrapping `Column` to `Column` with two inner `AnimatedVisibility`: `Row` (Page + time) `visible=chromeVisible` and `ReadingProgressBar` `visible=chromeVisible || alwaysShowProgressBar` (both with `slideIn/Out + fade`), so when toggle is on the bar stays visible despite tapping reading area (chromeVisible false), otherwise hides as before. Built on top of existing chrome/velocity/true-page logic.
+
+### Changed
+
+- `gradle/libs.versions.toml:1-55` — added `datastore = "1.1.1"` + `androidx-datastore-preferences` library.
+- `app/build.gradle.kts:1-74` — added `implementation(libs.androidx.datastore.preferences)`.
+- `app/src/main/java/com/makemission/folio/data/settings/SettingsRepository.kt` — new: DataStore file, singleton, Flow + setter.
+- `app/src/main/java/com/makemission/folio/ui/settings/SettingsScreen.kt` — new: Folio-themed Scaffold + sections + toggle + hero.
+- `app/src/main/java/com/makemission/folio/navigation/FolioNav.kt:1-72` — added `FolioRoute.Settings`, extended `FolioNavHost` with `LibraryScreen(onSettingsClick=navigate Settings)` + `composable(Settings)`.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryScreen.kt:1-270` — added `onSettingsClick` param (both overloads), `LibraryHeader` row with Settings button, `Column` swipe `pointerInput` + `detectHorizontalDragGestures` (>120px), imports `detectHorizontalDragGestures` + `pointerInput`.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:1-1070` — added `SettingsRepository` collect, `alwaysShowProgressBar` param to both column contents, restructured bottom `Column` to two `AnimatedVisibility` (Row chromeVisible, progressBar chromeVisible||alwaysShow).
+- `README.md:1-165` — intro now lists swipe to Settings + persistent always-show progress bar + Settings screen sections, tech stack adds DataStore, project structure adds `data/settings/SettingsRepository` + `ui/settings/SettingsScreen` + navigation note + library swipe note + reader DataStore note, Library bullet adds Settings navigation, Reading bullet adds frictionless progress bar override + new Settings screen bullet (sections, DataStore, FolioTheme).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- Verified swipe: horizontal drag >120px on Library triggers `onSettingsClick` → `navController.navigate(settings)`; vertical scroll unaffected.
+- Verified DataStore persistence: toggle on → `SettingsRepository.set...` writes to `folio_settings.preferences_pb`, kill + relaunch → `collectAsState` reads true, progress bar stays after tap; toggle off → hides as before.
+- Verified FolioTheme: Settings uses `FolioDark/LightColorScheme`, `FolioTypography`, deep green/burgundy/amber, not generic.
+- No rewrite: `FolioNavHost` extended, `FolioTheme` untouched, `ReadingScreen` topBar still `chromeVisible` only.
+
+---
+
 ## Session 19 — 2026-09-09 — Bounding-Box Image Expansion (white-margin stripping, on-device, cached)
 
 Branch: `main`.

@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -50,6 +52,7 @@ import com.makemission.folio.ui.library.components.EmptyLibraryState
 fun LibraryScreen(
     onBookClick: (Book) -> Unit = {},
     onVocabularyClick: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: LibraryViewModel = viewModel(),
 ) {
@@ -82,7 +85,12 @@ fun LibraryScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { LibraryHeader(bookCount = books.size) },
+        topBar = {
+            LibraryHeader(
+                bookCount = books.size,
+                onSettingsClick = onSettingsClick,
+            )
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(
@@ -97,10 +105,28 @@ fun LibraryScreen(
             }
         },
     ) { paddingValues ->
+        // Swipe-right from Library opens Settings (global gesture)
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = paddingValues.calculateTopPadding()),
+                .padding(top = paddingValues.calculateTopPadding())
+                .pointerInput(onSettingsClick) {
+                    var totalDx = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { totalDx = 0f },
+                        onHorizontalDrag = { change, dragAmount ->
+                            totalDx += dragAmount
+                            // Only trigger on a clear right swipe, consume
+                            if (totalDx > 120f) {
+                                change.consume()
+                                onSettingsClick()
+                                totalDx = 0f
+                            }
+                        },
+                        onDragEnd = { totalDx = 0f },
+                        onDragCancel = { totalDx = 0f },
+                    )
+                },
         ) {
             VocabularyTeaser(dueCount = dueCount, onClick = onVocabularyClick)
             Box(
@@ -128,12 +154,13 @@ fun LibraryScreen(
     books: List<Book>,
     onBookClick: (Book) -> Unit = {},
     onVocabularyClick: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { LibraryHeader(bookCount = books.size) },
+        topBar = { LibraryHeader(bookCount = books.size, onSettingsClick = onSettingsClick) },
     ) { paddingValues ->
         Column(
             modifier = Modifier
@@ -159,26 +186,34 @@ fun LibraryScreen(
 @Composable
 private fun LibraryHeader(
     bookCount: Int,
+    onSettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    Column(
+    Row(
         modifier = modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(
-            text = "Library",
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-        Text(
-            text = if (bookCount == 0) "Your curated collection"
-            else "$bookCount titles · editorial grid",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Library",
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                text = if (bookCount == 0) "Your curated collection"
+                else "$bookCount titles · editorial grid",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(onClick = onSettingsClick) {
+            Text("⚙ Settings", style = MaterialTheme.typography.labelMedium)
+        }
     }
 }
 

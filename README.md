@@ -2,7 +2,7 @@
 
 Folio is a premium, distraction-free Android ebook reader by MakeMission LLC (`com.makemission.folio`). It bridges digital convenience and the tactile craft of traditional bookmaking — fluid stylus interactions, magazine-quality typography, and adaptive layouts for phones and tablets.
 
-Jetpack Compose–first. Library (editorial grid + import + Vocabulary badge), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation, true-page numbers via virtual-canvas pre-computation, ambient-light adaptive contrast via WCAG 7:1, Knuth-Plass orphan/widow control with squared-off paragraphs, bounding-box image expansion for diagrams), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction), bionic reading, chapter time remaining, LCS-anchored highlights, on-device X-Ray, offline dictionary, and spaced-repetition vocabulary (SM-2, pure on-device) are now in place; other algorithmic features come later.
+Jetpack Compose–first. Library (editorial grid + import + Vocabulary badge + swipe to Settings), core Reading (native EPUB, adaptive layouts, Room progress + frictionless navigation + persistent “Always show progress bar” via DataStore, true-page numbers via virtual-canvas pre-computation, ambient-light adaptive contrast via WCAG 7:1, Knuth-Plass orphan/widow control with squared-off paragraphs, bounding-box image expansion for diagrams), stylus highlighting (zero-friction, true-ink Multiply, pressure/tilt physics, lasso extraction), bionic reading, chapter time remaining, LCS-anchored highlights, on-device X-Ray, offline dictionary, spaced-repetition vocabulary (SM-2, pure on-device), and a Folio-themed Settings screen (Reading/Appearance/Privacy sections) are now in place; other algorithmic features come later.
 
 ## Tech stack
 
@@ -11,6 +11,7 @@ Jetpack Compose–first. Library (editorial grid + import + Vocabulary badge), c
 - Jetpack Compose (BOM `2025.09.00`): `ui`, `foundation`, `material3`, `activity-compose`
 - Navigation Compose 2.8.4 (`navigation-compose`), lifecycle `viewmodel-compose` / `runtime-compose`
 - Room 2.7.2 (`room-runtime`, `room-ktx`, KSP `room-compiler`) for books, progress, highlights + vocabulary (v6 — SM-2 vocabulary)
+- DataStore Preferences 1.1.1 (`androidx.datastore:datastore-preferences`) for user settings (e.g. “Always show progress bar”)
 - EPUB parsing: native ZIP + `org.jsoup:jsoup:1.18.3` (no network/AI — §6), cover extraction via OPF manifest
 - Offline dictionary: bundled `assets/dictionary.json` (compact WordNet-style, permissively-licensed, ~120 entries) via `DictionaryRepository` — no network
 - Coil 2.7.0 (`io.coil-kt:coil-compose`) for cover images
@@ -39,24 +40,27 @@ Folio/
 │       ├── AndroidManifest.xml
 │       ├── java/com/makemission/folio/
 │       │   ├── MainActivity.kt                 # host — FolioNavHost + volume-key dispatch
-│       │   ├── navigation/FolioNav.kt          # NavHost: library ↔ reader ↔ vocabulary
+│       │   ├── navigation/FolioNav.kt          # NavHost: library ↔ reader ↔ vocabulary ↔ settings (extend, not rewrite)
 │       │   ├── data/
 │       │   │   ├── dictionary/DictionaryRepository.kt # offline asset lookup (WordNet-style)
 │       │   │   ├── vocabulary/Sm2.kt           # SuperMemo-2 scheduling (pure on-device, deterministic)
 │       │   │   ├── xray/{XRayTerm, XRayExtractor (TF-IDF), XRayCache (file)} 
 │       │   │   ├── anchor/LcsAnchor.kt         # LCS diff + anchor relocation (pure on-device)
 │       │   │   ├── image/{BoundingBoxCropper, CroppedImageCache} # white-margin detection + disk cache (on-device)
+│       │   │   ├── settings/SettingsRepository.kt # DataStore preferences (alwaysShowProgressBar, survives restart)
 │       │   │   ├── db/ { FolioDatabase v6, dao/{BookDao, ReadingProgressDao, HighlightDao, VocabularyDao}, entity/{BookEntity, ReadingProgress, Highlight (anchorText), VocabularyCard (SM-2)} }
 │       │   │   ├── epub/EpubParser.kt         # native EPUB3 (ZIP+OPF+Jsoup) + cover extraction + fallback
 │       │   │   └── model/Book.kt              # UI model (coverColor + filePath/coverImagePath) + curated seed
 │       │   └── ui/
 │       │       ├── theme/ { Color, Type, Theme, AdaptiveContrastEngine, AmbientLightSensor }.kt  # WCAG 7:1 ambient-light adaptive contrast
 │       │       ├── library/
-│       │       │   ├── LibraryScreen.kt        # Scaffold + header + FAB import + SAF picker + Vocabulary teaser/badge
+│       │       │   ├── LibraryScreen.kt        # Scaffold + header + FAB import + SAF picker + Vocabulary teaser/badge + swipe-right to Settings (pointerInput)
 │       │       │   ├── LibraryViewModel.kt     # import (copy→parse→cover→Room), books Flow, error Snackbar, due vocabulary count
 │       │       │   └── components/ { BookGrid, BookCoverCard (AsyncImage), EmptyLibraryState }
+│       │       ├── settings/
+│       │       │   └── SettingsScreen.kt       # Folio-themed sections: Reading / Appearance / Privacy-Data (Switch for Always show progress bar via DataStore)
 │       │       ├── reader/
-│       │       │   ├── ReadingScreen.kt        # serif body (Knuth-Plass orphan/widow, squared-off) + chrome/volume + highlight/lasso + bionic toggle + expandable diagram + dictionary→vocabulary + true pages near progress + adaptive contrast toggle
+│       │       │   ├── ReadingScreen.kt        # serif body (Knuth-Plass orphan/widow, squared-off) + chrome/volume + highlight/lasso + bionic toggle + expandable diagram + dictionary→vocabulary + true pages near progress + adaptive contrast toggle + DataStore-backed alwaysShowProgressBar (overrides tap-to-hide)
 │       │       │   ├── ReadingViewModel.kt     # per-book file load, progress + highlights + vocabulary tracking (Flow, pressure/tilt, SM-2 save)
 │       │       │   ├── ReadingViewModelFactory.kt
 │       │       │   ├── BionicReading.kt        # deterministic onset/nucleus/coda syllable splitter
@@ -93,7 +97,8 @@ Legacy template fragments / Navigation graph from the initial scaffold remain in
 - **Import (§6)** — FloatingActionButton (“+”) launches the Storage Access Framework (`ActivityResultContracts.OpenDocument` with `application/epub+zip` + `*/*`). The returned URI is copied into `filesDir/books/<uuid>_name.epub` (private storage — survives if the user moves/deletes the original), parsed with the existing `EpubParser` (title/author + cover via OPF `meta[name=cover]` / `properties="cover-image"` → `covers/<id>.jpg`), and saved as a `BookEntity` (`filePath`, `coverImagePath`) in Room. Invalid/corrupted EPUBs show a Snackbar (“Could not parse EPUB…”) and do not crash.
 - **Grid update** — `LibraryViewModel.books` is `bookDao.observeAll().map { imported + curatedSampleBooks() }` so imported books appear first in the grid alongside the curated samples; covers show the extracted image when present.
 - **Vocabulary teaser (§5 — SM-2, non-intrusive)** — a discreet `Card` below the header shows due-for-review count (`LibraryViewModel.dueVocabularyCount` via `VocabularyDao.observeDueCount()`). When `dueCount > 0` a small amber badge displays the number; otherwise it shows “No words due — keep reading” with an `Open` button. Tapping navigates to the `Vocabulary` review screen (`FolioNav` `vocabulary` route). No reading popups or interruptions — the badge surfaces only on the Library screen.
-- **Header** — weighty sans "Library" title + collection subtitle over the Folio background.
+- **Settings navigation** — Swipe right on the Library (horizontal drag >120px via `detectHorizontalDragGestures` + `pointerInput`, or tap “⚙ Settings” in the header) navigates via `FolioNav` `settings` route to the Settings screen. Built on top of existing `FolioNavHost` (added `FolioRoute.Settings`) — not a rewrite; structural inspiration from `book-story-master`’s settings navigation only.
+- **Header** — weighty sans "Library" title + collection subtitle over the Folio background, now a `Row` with “⚙ Settings” `TextButton` for discoverability.
 
 ## Reading screen (core + frictionless navigation + stylus engine)
 
@@ -112,7 +117,8 @@ Legacy template fragments / Navigation graph from the initial scaffold remain in
 - **Frictionless navigation (Folio spec §3)** — inspired by `book-story-master`'s `ReaderProgressBar`:
   - *Hardware page turns* — volume up/down advance a page (one-handed phone use). `MainActivity.onKeyDown` forwards to `ReaderPageTurnHandler` → `animateScrollToItem` by a page.
   - *Minimalist progress bar* — thin amber fill on muted track at the bottom. The bar shows `firstVisibleIndex / total` and tapping it seeks (`animateScrollToItem` to tapped fraction).
-  - *Tap-to-toggle chrome* — tapping the reading area toggles the top bar + progress bar (with `AnimatedVisibility` slide/fade) for a fully distraction-free immersive view.
+  - *Tap-to-toggle chrome* — tapping the reading area toggles the top bar + progress bar (with `AnimatedVisibility` slide/fade) for a fully distraction-free immersive view. The **“Always show progress bar”** setting (DataStore, `SettingsRepository.alwaysShowProgressBar`) overrides this to keep the bar visible: `ReadingScreen` collects the `Flow<Boolean>` and `SingleColumn`/`TwoColumn` use `AnimatedVisibility(visible = chromeVisible || alwaysShowProgressBar)` for the bar while the top bar/row still obeys `chromeVisible`.
+- **Settings screen (Folio-themed, DataStore, room to grow)** — `ui/settings/SettingsScreen.kt`: `Scaffold` with Folio `background` + editorial `headlineLarge` header, `LazyColumn` with `SettingsHero` (amber sun + burgundy/green books illustration) and three `SettingsSection` cards (`Reading` / `Appearance` / `Privacy/Data`, uppercase `labelMedium` + `bodySmall` subtitle, rounded `16dp` `surface` cards). `Reading` holds `SettingsToggleRow` for “Always show progress bar” (`Switch` with Folio primary/burgundy colors, `collectAsState` + `scope.launch { repo.setAlwaysShowProgressBar }`). `Appearance` and `Privacy/Data` currently have `SettingsInfoRow` placeholders (“Folio theme”, “Adaptive contrast”, “Local-only reading”, “Caches”) to show structure and allow growth. Uses existing `FolioTheme` (deep green, burgundy, amber, heavy sans + serif) — not a generic Android settings page; structural inspiration from `book-story-master`’s `SettingsScreen`/`SettingsContent` sections only.
 - **Stylus engine (§4)** — `HighlightOverlay` captures only stylus (`MotionEvent.TOOL_TYPE_STYLUS`, finger passes through for scroll/tap), so a stylus touch instantly draws with no menu or toolbar (zero-friction) and stores in Room (`highlights`: `bookId`, `chapterIndex`, normalized `pointsData` + `pressuresData`/`tiltsData`, `anchorText`, `color`):
   - *True-ink* — strokes render with `BlendMode.Multiply` in Folio amber `#F7B538` so serif text stays crisp.
   - *Organic physics* — `MotionEvent` pressure (0..1) and `AXIS_TILT` (0..π/2) dynamically scale stroke width (`base 28dp * pressureFactor * tiltFactor`) for a natural hand feel.

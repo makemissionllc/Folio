@@ -195,6 +195,10 @@ private fun ReadingScreenContent(
     val readingSurface = readingBg
     val readingOnSurface = readingText
 
+    // Settings: "Always show progress bar" — persisted via DataStore, overrides tap-to-hide
+    val settingsRepo = remember(context) { com.makemission.folio.data.settings.SettingsRepository.get(context) }
+    val alwaysShowProgressBar by settingsRepo.alwaysShowProgressBar.collectAsState(initial = false)
+
     val onWordDoubleTap: (String) -> Unit = { word ->
         val def = DictionaryRepository.lookup(word, context)
         dictPopup = word to def
@@ -343,6 +347,7 @@ private fun ReadingScreenContent(
                     onWordDoubleTap = onWordDoubleTap,
                     readingText = readingText,
                     readingBackground = readingBg,
+                    alwaysShowProgressBar = alwaysShowProgressBar,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -359,6 +364,7 @@ private fun ReadingScreenContent(
                     onWordDoubleTap = onWordDoubleTap,
                     readingText = readingText,
                     readingBackground = readingBg,
+                    alwaysShowProgressBar = alwaysShowProgressBar,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -457,6 +463,7 @@ private fun SingleColumnReadingContent(
     onWordDoubleTap: (String) -> Unit,
     readingText: Color = MaterialTheme.colorScheme.onBackground,
     readingBackground: Color = MaterialTheme.colorScheme.background,
+    alwaysShowProgressBar: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -640,19 +647,19 @@ private fun SingleColumnReadingContent(
             modifier = Modifier.fillMaxSize(),
         )
 
-        AnimatedVisibility(
-            visible = chromeVisible,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter),
+        // Bottom bar: progress bar respects "Always show progress bar" setting (overrides tap-to-hide)
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(readingBackground.copy(alpha = 0.92f)),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(readingBackground.copy(alpha = 0.92f)),
-                horizontalAlignment = Alignment.CenterHorizontally,
+            AnimatedVisibility(
+                visible = chromeVisible,
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut(),
             ) {
-                // True-Page + Velocity row — near progress bar, not interrupting reading
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -674,6 +681,12 @@ private fun SingleColumnReadingContent(
                         )
                     }
                 }
+            }
+            AnimatedVisibility(
+                visible = chromeVisible || alwaysShowProgressBar,
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut(),
+            ) {
                 ReadingProgressBar(
                     progress = progress,
                     onSeek = { fraction ->
@@ -704,6 +717,7 @@ private fun TwoColumnReadingContent(
     onWordDoubleTap: (String) -> Unit,
     readingText: Color = MaterialTheme.colorScheme.onBackground,
     readingBackground: Color = MaterialTheme.colorScheme.background,
+    alwaysShowProgressBar: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val mid = (chapters.size + 1) / 2
@@ -990,17 +1004,17 @@ private fun TwoColumnReadingContent(
             modifier = Modifier.fillMaxSize(),
         )
 
-        AnimatedVisibility(
-            visible = chromeVisible,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter),
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(readingBackground.copy(alpha = 0.92f)),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(readingBackground.copy(alpha = 0.92f)),
-                horizontalAlignment = Alignment.CenterHorizontally,
+            AnimatedVisibility(
+                visible = chromeVisible,
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut(),
             ) {
                 Row(
                     modifier = Modifier
@@ -1023,6 +1037,12 @@ private fun TwoColumnReadingContent(
                         )
                     }
                 }
+            }
+            AnimatedVisibility(
+                visible = chromeVisible || alwaysShowProgressBar,
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut(),
+            ) {
                 ReadingProgressBar(
                     progress = progress,
                     onSeek = { fraction ->
