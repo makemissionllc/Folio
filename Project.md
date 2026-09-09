@@ -7,6 +7,29 @@ Active coding branch: `main`.
 
 ---
 
+## Session 18 — 2026-09-09 — Knuth-Plass Line Breaking / Orphan & Widow Control (squared-off)
+
+Branch: `main`.
+
+### Built
+
+- **Knuth-Plass Line Breaking / Orphan & Widow Control (§5 — scoring, micro-kerning, squared-off, coordinated with True-Page)** — `ui/reader/KnuthPlassEngine.kt`: adapts Knuth-Plass to score breaks across a whole paragraph (not greedily). Measures each paragraph on the same virtual canvas as `TruePageEngine` (same column width `40dp` phone / `(screen-52dp)/2` tablet, same `bodyLarge` 17/27 phone / `bodyMedium` tablet + `BionicReading` bold spans, same `lineHeight`/`availableHeight`/`perScreenHeight*2` for tablet spread), computes `linesPerPage = perScreenHeight/lineHeight` and prefix start lines, then for each paragraph detects page splits and orphan (`linesOnFirstPage==1`) / widow (`linesOnLastPage==1`) penalties (`ORPHAN_PENALTY=12000`, `WIDOW_PENALTY=12000`). Tries candidate `letterSpacing` deltas `[-0.4,-0.2,-0.1,0,0.15,0.3,-0.35,0.5,0.6]sp`, re-measures `lineCount` via `textMeasurer.measure(..., styleWithDelta, Constraints(maxWidth))`, scores as `stretchBadness=delta²*600 + orphan/widow penalties + tie-breaker |delta|*2`, picks minimal-score delta. `rememberKnuthAdjustments(chapters, isTablet, bionic)` is `remember`ed on `screenWidthDp/screenHeightDp/orientation/fontScale/density/bionicEnabled/chaptersKey` (same keys as TruePage, cached) and returns `Map<"cIdx-pIdx", KnuthAdjustment(letterSpacingDelta, useJustify)>`; phone and tablet each compute separately so page breaks agree (tablet uses `perScreen*2`). `ReadingScreen` (`SingleColumnReadingContent` + `TwoColumnReadingContent`) now computes `knuthAdjustments` alongside `truePageInfo` and wraps each paragraph `Text`'s `TextStyle` (`bodyLarge`/`bodyMedium`) with `copy(letterSpacing = base.letterSpacing + delta, textAlign = Justify)` when adjustment exists, giving squared-off, printed-book look while eliminating single-line stranded pages. Pure on-device, builds on existing text layout (no rewrite); `book-story-master` structure only.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/ui/reader/KnuthPlassEngine.kt` — new: `KnuthPlassEngine` (`ORPHAN_PENALTY`, `WIDOW_PENALTY`, `scoreForDelta`), `KnuthAdjustment`, `rememberKnuthAdjustments(...)` (virtual canvas sharing, TextMeasurer, candidate scoring, Justify).
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:1-1045` — added `Knuth-Plass` to `SingleColumnReadingContent` (computed `knuthAdjustments` for phone, changed `itemsIndexed` to capture `paraIndex`, Text now uses `baseStyle.copy(letterSpacingDelta, textAlign=Justify)` with `readingText`) and `TwoColumnReadingContent` (added `knuthAdjustments` for tablet, fixed `L-c`/`R-c` keys to global `cIdx-pIdx` with `mid` offset, left/right Text likewise wrapped with knuth style, added `import sp`), fixed `TwoColumn` bottom chrome to use `readingBackground`/`readingText` (was still `MaterialTheme` after adaptive addition), imported `sp`.
+- `README.md:1-160` — intro now lists Knuth-Plass orphan/widow squared-off, project structure adds `KnuthPlassEngine.kt` + reader note, Reading-screen section adds Knuth-Plass bullet (scoring, micro-kerning, squared-off, coordination with TruePage, phone/tablet, cached).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (fixed `TextUnit` plus `sp` import).
+- Verified coordination: `KnuthPlass` uses identical `availableWidthPx`/`availableHeightPx`/`lineHeightPx` math as `TruePageEngine` so page breaks agree, not conflicting.
+- Verified phone/tablet: `rememberKnuthAdjustments` called with `isTabletLandscape=false/true` so spread `perScreen*2` correctly avoids single-line widows on spreads.
+
+---
+
 ## Session 17 — 2026-09-09 — Colorimetric Contrast Optimization (ambient-light WCAG 7:1)
 
 Branch: `main`.

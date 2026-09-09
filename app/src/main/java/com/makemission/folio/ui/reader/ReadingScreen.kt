@@ -71,6 +71,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.dictionary.DictionaryRepository
@@ -470,6 +471,12 @@ private fun SingleColumnReadingContent(
     val currentPage by remember {
         derivedStateOf { truePageInfo.pageFor(listState.firstVisibleItemIndex) }
     }
+    // Knuth-Plass Orphan/Widow control (§5) — scores breaks, micro-kerning, squared-off
+    val knuthAdjustments = rememberKnuthAdjustments(
+        chapters = chapters,
+        isTabletLandscape = false,
+        bionicEnabled = bionicEnabled,
+    )
 
     val progress by remember {
         derivedStateOf {
@@ -561,14 +568,23 @@ private fun SingleColumnReadingContent(
                 itemsIndexed(
                     chapter.paragraphs,
                     key = { paraIndex, _ -> "c${chapterIndex}-p$paraIndex" },
-                ) { _, paragraph ->
+                ) { paraIndex, paragraph ->
                     var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
                     val annotated = if (bionicEnabled) {
                         remember(paragraph) { BionicReading.toBionicAnnotated(paragraph, BionicReading.boldSpan()) }
                     } else null
+                    val knuth = knuthAdjustments["c${chapterIndex}-p${paraIndex}"]
+                    val baseStyle = MaterialTheme.typography.bodyLarge
+                    val knuthStyle = if (knuth != null) {
+                        val ls = if (baseStyle.letterSpacing.isSp) (baseStyle.letterSpacing.value + knuth.letterSpacingDelta.value).sp else knuth.letterSpacingDelta
+                        baseStyle.copy(
+                            letterSpacing = ls,
+                            textAlign = if (knuth.useJustify) TextAlign.Justify else baseStyle.textAlign ?: TextAlign.Start,
+                        )
+                    } else baseStyle
                     Text(
                         text = annotated ?: androidx.compose.ui.text.AnnotatedString(paragraph),
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = knuthStyle,
                         color = readingText,
                         onTextLayout = { layoutResult = it },
                         modifier = Modifier
@@ -703,6 +719,12 @@ private fun TwoColumnReadingContent(
             (first.toFloat() / (total - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
         }
     }
+    // Knuth-Plass Orphan/Widow control (§5) — tablet spread
+    val knuthAdjustments = rememberKnuthAdjustments(
+        chapters = chapters,
+        isTabletLandscape = true,
+        bionicEnabled = bionicEnabled,
+    )
 
     // True-Page Calculation Engine (§5) — tablet spread: physical page turns (perScreen *2)
     val truePageInfo = rememberTruePageState(
@@ -804,12 +826,21 @@ private fun TwoColumnReadingContent(
                             modifier = Modifier.padding(top = 20.dp, bottom = 10.dp),
                         )
                     }
-                    itemsIndexed(chapter.paragraphs, key = { i, _ -> "L-c$chapterIndex-p$i" }) { _, p ->
+                    itemsIndexed(chapter.paragraphs, key = { i, _ -> "L-c$chapterIndex-p$i" }) { paraIndex, p ->
                         var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
                         val annotated = if (bionicEnabled) remember(p) { BionicReading.toBionicAnnotated(p, BionicReading.boldSpan()) } else null
+                        val knuth = knuthAdjustments["c${chapterIndex}-p${paraIndex}"]
+                        val baseStyleLeft = MaterialTheme.typography.bodyMedium
+                        val leftStyle = if (knuth != null) {
+                            val lsL = if (baseStyleLeft.letterSpacing.isSp) (baseStyleLeft.letterSpacing.value + knuth.letterSpacingDelta.value).sp else knuth.letterSpacingDelta
+                            baseStyleLeft.copy(
+                                letterSpacing = lsL,
+                                textAlign = if (knuth.useJustify) TextAlign.Justify else baseStyleLeft.textAlign ?: TextAlign.Start,
+                            )
+                        } else baseStyleLeft
                         Text(
                             text = annotated ?: androidx.compose.ui.text.AnnotatedString(p),
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = leftStyle,
                             color = readingText,
                             onTextLayout = { layoutResult = it },
                             modifier = Modifier
@@ -892,12 +923,22 @@ private fun TwoColumnReadingContent(
                                 modifier = Modifier.padding(top = 20.dp, bottom = 10.dp),
                             )
                         }
-                        itemsIndexed(chapter.paragraphs, key = { i, _ -> "R-c$chapterIndex-p$i" }) { _, p ->
+                        itemsIndexed(chapter.paragraphs, key = { i, _ -> "R-c$chapterIndex-p$i" }) { paraIndex, p ->
                             var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
                             val annotated = if (bionicEnabled) remember(p) { BionicReading.toBionicAnnotated(p, BionicReading.boldSpan()) } else null
+                            val globalCIdx = mid + chapterIndex
+                            val knuthR = knuthAdjustments["c${globalCIdx}-p${paraIndex}"]
+                            val baseStyleR = MaterialTheme.typography.bodyMedium
+                            val rightStyle = if (knuthR != null) {
+                                val lsR = if (baseStyleR.letterSpacing.isSp) (baseStyleR.letterSpacing.value + knuthR.letterSpacingDelta.value).sp else knuthR.letterSpacingDelta
+                                baseStyleR.copy(
+                                    letterSpacing = lsR,
+                                    textAlign = if (knuthR.useJustify) TextAlign.Justify else baseStyleR.textAlign ?: TextAlign.Start,
+                                )
+                            } else baseStyleR
                             Text(
                                 text = annotated ?: androidx.compose.ui.text.AnnotatedString(p),
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = rightStyle,
                                 color = readingText,
                                 onTextLayout = { layoutResult = it },
                                 modifier = Modifier
@@ -956,7 +997,7 @@ private fun TwoColumnReadingContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
+                    .background(readingBackground.copy(alpha = 0.92f)),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Row(
@@ -969,13 +1010,13 @@ private fun TwoColumnReadingContent(
                     Text(
                         text = "Page $currentPage of ${truePageInfo.totalPages}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = readingText.copy(alpha = 0.85f),
                     )
                     timeRemaining?.let {
                         Text(
                             text = it,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = readingText.copy(alpha = 0.85f),
                             textAlign = TextAlign.End,
                         )
                     }
