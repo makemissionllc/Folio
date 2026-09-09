@@ -77,6 +77,7 @@ import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.dictionary.DictionaryRepository
 import com.makemission.folio.data.epub.EpubParser
 import com.makemission.folio.ui.reader.components.DictionaryPopup
+import com.makemission.folio.ui.reader.components.ExpandableDiagram
 import com.makemission.folio.ui.reader.components.HighlightOverlay
 import com.makemission.folio.ui.reader.components.ReadingProgressBar
 import com.makemission.folio.ui.reader.components.XRayBottomSheet
@@ -609,10 +610,11 @@ private fun SingleColumnReadingContent(
                             },
                     )
                 }
-                // Insert diagram after first chapter for lasso-image demo.
+                // Insert expandable diagram after first chapter — demonstrates Bounding-Box Image Expansion
+                // (existing diagram + lasso placeholder now with white-margin stripping, on-device, cached).
                 if (chapterIndex == 0) {
                     item(key = "diagram-$chapterIndex") {
-                        DiagramPlaceholder(modifier = Modifier.padding(vertical = 16.dp))
+                        ExpandableDiagram(modifier = Modifier.padding(vertical = 16.dp))
                     }
                 }
                 item(key = "chapter-gap-$chapterIndex") {
@@ -867,7 +869,7 @@ private fun TwoColumnReadingContent(
                     }
                     if (chapterIndex == 0) {
                         item(key = "L-diagram-$chapterIndex") {
-                            DiagramPlaceholder(modifier = Modifier.padding(vertical = 12.dp))
+                            ExpandableDiagram(modifier = Modifier.padding(vertical = 12.dp))
                         }
                     }
                     item(key = "L-gap-$chapterIndex") {

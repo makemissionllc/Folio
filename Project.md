@@ -7,6 +7,32 @@ Active coding branch: `main`.
 
 ---
 
+## Session 19 — 2026-09-09 — Bounding-Box Image Expansion (white-margin stripping, on-device, cached)
+
+Branch: `main`.
+
+### Built
+
+- **Bounding-Box Image Expansion (§5 — lightweight contour detection, tap to expand, cached, full-width)** — `data/image/BoundingBoxCropper.kt`: pure on-device algorithm that, instead of rendering diagrams awkwardly small, runs a contour-detection pass on tap to find the bounding box of non-white pixels. Scans `Bitmap`'s `IntArray` pixels (via single `getPixels`), `isWhite` checks `alpha < 10` (transparent) or `R,G,B > 242` (tolerates JPEG artifacts near 255), step-samples every 2nd pixel for >3MP images then refines edge bands at 1px, finds `minX/maxX/minY/maxY`, adds `2px` padding, returns `Rect`. `crop()` returns original gracefully when all-white, content `<8px`, or already tightly cropped (`maxMargin ≤4px` + `coverage ≥92%` or `≥98%`), so tightly cropped images aren't over-cropped or distorted. `data/image/CroppedImageCache.kt`: caches the cropped result to `filesDir/bbox_cache/<sha256>.png` (SHA-256 of `key:WxH`, 24 hex chars, `MAX_DISK_FILES=80` LRU by `lastModified`) plus in-memory `Map`, `getOrCreate()` via `BoundingBoxCropper.crop()` on `Dispatchers.Default`, no network. `ui/reader/components/ExpandableDiagram.kt`: demo diagram for `ReadingScreen` that builds on top of existing `EpubParser`/`DiagramPlaceholder` (not a rewrite). Generates a sample `600×360` bitmap with large baked white margins (`100px` sides, `80px` top/bottom, white `AndroidColor.WHITE` background, inner amber `400×160` diagram with Folio burgundy accents/bars/text), shows `fillMaxWidth` thumbnail with `aspectRatio` + `ContentScale.FillWidth`; on tap (via `clickable`) checks `CroppedImageCache.getBitmap()`, otherwise runs detection/crop off the main thread, caches via `putBitmap()`, then swaps to the cropped `Image(bitmap.asImageBitmap())` which now fills the available width on both phone (single-column `20dp` padding) and tablet (two-column spread) without distortion. Status text shows `600×360 → 404×164 • cached • phone & tablet full-width`. `ExpandableEpubImage` reuses the same cropper/cache for real EPUB `<img>` bytes (extension point for `EpubParser` without rewriting it). Pure on-device, `book-story-master` structure only.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/image/BoundingBoxCropper.kt` — new: `isWhite`, `findBoundingBox` (O(W×H) with step sampling + refine, padding), `crop` (graceful tightly-cropped handling).
+- `app/src/main/java/com/makemission/folio/data/image/CroppedImageCache.kt` — new: `keyFor`, `cacheFile`, `isCached`, `getBitmap`, `putBitmap` (eviction), `getOrCreate`, `getOrCreateForFile`, `clear`, memory + disk cache.
+- `app/src/main/java/com/makemission/folio/ui/reader/components/ExpandableDiagram.kt` — new: `ExpandableDiagram` (sample bitmap generation, tap → detection + cache + expand full-width, `LaunchedEffect` cached load, status text, dual-mode original/cropped toggle) + `ExpandableEpubImage` (generic bitmap with same behavior, `aspectRatio`/`FillWidth`).
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:1-1050` — imported `ExpandableDiagram`, replaced `DiagramPlaceholder` items after chapter 0 in both `SingleColumnReadingContent` (`diagram-$chapterIndex`) and `TwoColumnReadingContent` (`L-diagram-$chapterIndex`) with `ExpandableDiagram` (preserves lasso `HighlightOverlay` separately, now diagram is tappable for bounding-box expansion while stylus still lasso-extracts). Kept `DiagramPlaceholder` definition for reference (not removed, built on top).
+- `README.md:1-164` — intro now lists bounding-box image expansion, project structure adds `data/image/{BoundingBoxCropper, CroppedImageCache}` + `ui/reader/components/ExpandableDiagram` with note `+ expandable diagram`, Reading-screen section adds Bounding-Box bullet (contour detection, thresholds, graceful, pure on-device, cached, full-width phone/tablet, on top of EpubParser/placeholder).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (no new lint).
+- Verified tap-to-expand: generated sample has white margins, tap runs `BoundingBoxCropper.crop()` on `Dispatchers.Default`, cached file appears in `filesDir/bbox_cache`, re-tap uses cache without recomputation, cropped fills `fillMaxWidth`.
+- Verified tightly cropped: small-margin image returns original (no distortion), full-white returns original.
+- Verified phone/tablet: `fillMaxWidth` + `aspectRatio` ensures cropped fills available width in both `SingleColumn` (20dp padding) and `TwoColumn` spread.
+
+---
+
 ## Session 18 — 2026-09-09 — Knuth-Plass Line Breaking / Orphan & Widow Control (squared-off)
 
 Branch: `main`.
