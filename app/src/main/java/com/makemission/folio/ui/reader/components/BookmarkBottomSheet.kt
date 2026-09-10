@@ -1,5 +1,7 @@
 package com.makemission.folio.ui.reader.components
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -102,6 +104,11 @@ fun BookmarkBottomSheet(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
+                                .animateItem(
+                                    fadeInSpec = tween(220, easing = FastOutSlowInEasing),
+                                    fadeOutSpec = tween(200),
+                                    placementSpec = tween(220, easing = FastOutSlowInEasing)
+                                )
                                 .clickable { onBookmarkClick(bm) },
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                             shape = RoundedCornerShape(12.dp),

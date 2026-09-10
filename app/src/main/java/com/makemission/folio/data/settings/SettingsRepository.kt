@@ -20,6 +20,7 @@ class SettingsRepository(private val context: Context) {
         private val KEY_ALWAYS_SHOW_PROGRESS = booleanPreferencesKey("always_show_progress_bar")
         private val KEY_HAS_SEEN_ONBOARDING = booleanPreferencesKey("has_seen_onboarding")
         private val KEY_AUTO_SCAN_ENABLED = booleanPreferencesKey("auto_scan_enabled")
+        private val KEY_HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
 
         @Volatile
         private var INSTANCE: SettingsRepository? = null
@@ -60,6 +61,17 @@ class SettingsRepository(private val context: Context) {
     suspend fun setAutoScanEnabled(value: Boolean) {
         context.folioSettingsDataStore.edit { prefs ->
             prefs[KEY_AUTO_SCAN_ENABLED] = value
+        }
+    }
+
+    val hapticsEnabled: Flow<Boolean> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            prefs[KEY_HAPTICS_ENABLED] ?: true
+        }
+
+    suspend fun setHapticsEnabled(value: Boolean) {
+        context.folioSettingsDataStore.edit { prefs ->
+            prefs[KEY_HAPTICS_ENABLED] = value
         }
     }
 }

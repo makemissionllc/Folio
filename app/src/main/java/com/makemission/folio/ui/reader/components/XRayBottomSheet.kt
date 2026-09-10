@@ -1,5 +1,13 @@
 package com.makemission.folio.ui.reader.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -91,6 +99,11 @@ fun XRayBottomSheet(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
+                                .animateItem(
+                                    fadeInSpec = tween(220, easing = FastOutSlowInEasing),
+                                    fadeOutSpec = tween(200),
+                                    placementSpec = tween(220, easing = FastOutSlowInEasing)
+                                )
                                 .clickable { selected = if (isSelected) null else term },
                             color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer
                             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
@@ -129,15 +142,21 @@ fun XRayBottomSheet(
                                             .padding(0.dp),
                                     ) {}
                                 }
-                                if (isSelected) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = term.chapterIndices.joinToString(", ") { idx ->
-                                            chapters.getOrNull(idx)?.title ?: "Ch ${idx + 1}"
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
+                                AnimatedVisibility(
+                                    visible = isSelected,
+                                    enter = expandVertically(tween(180, easing = LinearOutSlowInEasing)) + fadeIn(tween(180)),
+                                    exit = shrinkVertically(tween(180, easing = FastOutSlowInEasing)) + fadeOut(tween(150))
+                                ) {
+                                    Column {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = term.chapterIndices.joinToString(", ") { idx ->
+                                                chapters.getOrNull(idx)?.title ?: "Ch ${idx + 1}"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -213,7 +232,14 @@ fun XRayBottomSheet(
                 ) {
                     val sorted = xrayIndex.entries.sortedBy { it.key }
                     items(sorted, key = { it.key }) { (chIdx, terms) ->
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = tween(220, easing = FastOutSlowInEasing),
+                                fadeOutSpec = tween(200),
+                                placementSpec = tween(220, easing = FastOutSlowInEasing)
+                            )
+                        ) {
                             Text(
                                 text = chapters.getOrNull(chIdx)?.title ?: "Chapter ${chIdx + 1}",
                                 style = MaterialTheme.typography.titleSmall,
@@ -262,15 +288,21 @@ fun XRayBottomSheet(
                                                     style = MaterialTheme.typography.labelSmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 )
-                                                if (isSelected) {
-                                                    Spacer(modifier = Modifier.height(8.dp))
-                                                    Text(
-                                                        text = term.chapterIndices.joinToString(", ") { idx ->
-                                                            chapters.getOrNull(idx)?.title ?: "Ch ${idx + 1}"
-                                                        },
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    )
+                                                AnimatedVisibility(
+                                                    visible = isSelected,
+                                                    enter = expandVertically(tween(180, easing = LinearOutSlowInEasing)) + fadeIn(tween(180)),
+                                                    exit = shrinkVertically(tween(180, easing = FastOutSlowInEasing)) + fadeOut(tween(150))
+                                                ) {
+                                                    Column {
+                                                        Spacer(modifier = Modifier.height(8.dp))
+                                                        Text(
+                                                            text = term.chapterIndices.joinToString(", ") { idx ->
+                                                                chapters.getOrNull(idx)?.title ?: "Ch ${idx + 1}"
+                                                            },
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }

@@ -1,5 +1,9 @@
 package com.makemission.folio.ui.settings
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -37,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.activity.ComponentActivity
@@ -64,6 +69,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     val repo = SettingsRepository.get(context)
     val alwaysShow by repo.alwaysShowProgressBar.collectAsState(initial = false)
+    val hapticsEnabled by repo.hapticsEnabled.collectAsState(initial = true)
     val autoScanEnabled by repo.autoScanEnabled.collectAsState(initial = true)
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -116,6 +122,15 @@ fun SettingsScreen(
                         checked = alwaysShow,
                         onCheckedChange = { checked ->
                             scope.launch { repo.setAlwaysShowProgressBar(checked) }
+                        },
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SettingsToggleRow(
+                        title = "Haptic feedback",
+                        subtitle = "Subtle vibration on chapter boundaries via volume keys or scroll — not on every page turn",
+                        checked = hapticsEnabled,
+                        onCheckedChange = { checked ->
+                            scope.launch { repo.setHapticsEnabled(checked) }
                         },
                     )
                 }
@@ -356,7 +371,9 @@ private fun SettingsSection(
             )
         }
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing)),
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
@@ -376,6 +393,11 @@ private fun SettingsToggleRow(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val scale by animateFloatAsState(
+        targetValue = if (checked) 1.03f else 1f,
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+        label = "toggleScale"
+    )
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -399,6 +421,10 @@ private fun SettingsToggleRow(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            modifier = Modifier.graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            },
             colors = SwitchDefaults.colors(
                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                 checkedTrackColor = MaterialTheme.colorScheme.primary,

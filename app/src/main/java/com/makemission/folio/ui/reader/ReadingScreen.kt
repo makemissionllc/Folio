@@ -56,6 +56,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -67,8 +68,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -254,6 +257,7 @@ private fun ReadingScreenContent(
     // Settings: "Always show progress bar" — persisted via DataStore, overrides tap-to-hide
     val settingsRepo = remember(context) { com.makemission.folio.data.settings.SettingsRepository.get(context) }
     val alwaysShowProgressBar by settingsRepo.alwaysShowProgressBar.collectAsState(initial = false)
+    val hapticsEnabled by settingsRepo.hapticsEnabled.collectAsState(initial = true)
 
     // --- Bookmarks: hoisted list states so TopBar knows current position ---
     val singleListState = rememberLazyListState()
@@ -378,8 +382,8 @@ private fun ReadingScreenContent(
             Column {
                 AnimatedVisibility(
                     visible = chromeVisible,
-                    enter = slideInVertically { -it } + fadeIn(),
-                    exit = slideOutVertically { -it } + fadeOut(),
+                    enter = slideInVertically(animationSpec = tween(280, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(220)),
+                    exit = slideOutVertically(animationSpec = tween(220, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180)),
                 ) {
                     TopAppBar(
                     title = {
@@ -460,11 +464,11 @@ private fun ReadingScreenContent(
                     windowInsets = WindowInsets.statusBars,
                 )
                 }
-                // In-book pull-to-reveal search bar (on-device, contextual)
+                // In-book pull-to-reveal search bar (on-device, contextual) — subtle premium tween
                 androidx.compose.animation.AnimatedVisibility(
                     visible = showInBookSearch,
-                    enter = androidx.compose.animation.expandVertically() + fadeIn(),
-                    exit = androidx.compose.animation.shrinkVertically() + fadeOut(),
+                    enter = androidx.compose.animation.expandVertically(animationSpec = tween(220, easing = FastOutSlowInEasing)) + fadeIn(tween(180)),
+                    exit = androidx.compose.animation.shrinkVertically(animationSpec = tween(200, easing = FastOutSlowInEasing)) + fadeOut(tween(150)),
                 ) {
                     androidx.compose.material3.Card(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
@@ -508,11 +512,11 @@ private fun ReadingScreenContent(
                             )
                         }
                     }
-                    // Contextual in-book results (on-device, highlights/bookmarks priority)
+                    // Contextual in-book results (on-device, highlights/bookmarks priority) — subtle
                     androidx.compose.animation.AnimatedVisibility(
                         visible = inBookQuery.isNotBlank(),
-                        enter = androidx.compose.animation.expandVertically() + fadeIn(),
-                        exit = androidx.compose.animation.shrinkVertically() + fadeOut(),
+                        enter = androidx.compose.animation.expandVertically(tween(200, easing = FastOutSlowInEasing)) + fadeIn(tween(180)),
+                        exit = androidx.compose.animation.shrinkVertically(tween(180)) + fadeOut(tween(150)),
                     ) {
                         androidx.compose.material3.Card(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 6.dp),
@@ -657,6 +661,7 @@ private fun ReadingScreenContent(
                             readingText = readingText,
                             readingBackground = readingBg,
                             alwaysShowProgressBar = alwaysShowProgressBar,
+                            hapticsEnabled = hapticsEnabled,
                             leftListState = tabletLeftState,
                             rightListState = tabletRightState,
                             pendingBookmarkJump = pendingBookmarkJump,
@@ -678,6 +683,7 @@ private fun ReadingScreenContent(
                             readingText = readingText,
                             readingBackground = readingBg,
                             alwaysShowProgressBar = alwaysShowProgressBar,
+                            hapticsEnabled = hapticsEnabled,
                             listState = singleListState,
                             pendingBookmarkJump = pendingBookmarkJump,
                             onJumpConsumed = { pendingBookmarkJump = null },
@@ -794,12 +800,14 @@ private fun SingleColumnReadingContent(
     readingText: Color = MaterialTheme.colorScheme.onBackground,
     readingBackground: Color = MaterialTheme.colorScheme.background,
     alwaysShowProgressBar: Boolean = false,
+    hapticsEnabled: Boolean = true,
     listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     pendingBookmarkJump: Bookmark? = null,
     onJumpConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
 
     // Bookmark jump — works on phone layout
     LaunchedEffect(pendingBookmarkJump) {
@@ -863,6 +871,19 @@ private fun SingleColumnReadingContent(
             }
     }
 
+    // Haptics: subtle tick on chapter boundary (scroll or volume key), not every page — respects Settings toggle
+    var lastChapterForHaptics by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(listState, chapters, hapticsEnabled) {
+        snapshotFlow { flatIndexToChapterParagraph(listState.firstVisibleItemIndex, chapters).first }
+            .distinctUntilChanged()
+            .collect { newChapter ->
+                if (lastChapterForHaptics != null && lastChapterForHaptics != newChapter && hapticsEnabled) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+                lastChapterForHaptics = newChapter
+            }
+    }
+
     DisposableEffect(listState) {
         ReaderPageTurnHandler.onVolumeKey = { isUp ->
             scope.launch {
@@ -916,7 +937,13 @@ private fun SingleColumnReadingContent(
                         text = chapter.title,
                         style = MaterialTheme.typography.headlineSmall,
                         color = readingText,
-                        modifier = Modifier.padding(top = 28.dp, bottom = 12.dp),
+                        modifier = Modifier
+                            .padding(top = 28.dp, bottom = 12.dp)
+                            .animateItem(
+                                fadeInSpec = tween(220, easing = FastOutSlowInEasing),
+                                fadeOutSpec = tween(180),
+                                placementSpec = tween(260, easing = FastOutSlowInEasing)
+                            ),
                     )
                 }
                 itemsIndexed(
@@ -943,6 +970,11 @@ private fun SingleColumnReadingContent(
                         onTextLayout = { layoutResult = it },
                         modifier = Modifier
                             .padding(bottom = 14.dp)
+                            .animateItem(
+                                fadeInSpec = tween(200, easing = LinearOutSlowInEasing),
+                                fadeOutSpec = tween(180),
+                                placementSpec = tween(240, easing = FastOutSlowInEasing)
+                            )
                             .pointerInput(paragraph, bionicEnabled) {
                                 detectTapGestures(
                                     onDoubleTap = { offset ->
@@ -967,18 +999,34 @@ private fun SingleColumnReadingContent(
                 // (existing diagram + lasso placeholder now with white-margin stripping, on-device, cached).
                 if (chapterIndex == 0) {
                     item(key = "diagram-$chapterIndex") {
-                        ExpandableDiagram(modifier = Modifier.padding(vertical = 16.dp))
+                        ExpandableDiagram(
+                            modifier = Modifier
+                                .padding(vertical = 16.dp)
+                                .animateItem(
+                                    fadeInSpec = tween(220, easing = FastOutSlowInEasing),
+                                    fadeOutSpec = tween(180),
+                                    placementSpec = tween(240, easing = FastOutSlowInEasing)
+                                )
+                        )
                     }
                 }
                 item(key = "chapter-gap-$chapterIndex") {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(1.dp)
-                            .background(MaterialTheme.colorScheme.outlineVariant),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Column(
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = tween(200),
+                            fadeOutSpec = tween(180),
+                            placementSpec = tween(240, easing = FastOutSlowInEasing)
+                        )
+                    ) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(MaterialTheme.colorScheme.outlineVariant),
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
                 }
             }
         }
@@ -993,7 +1041,21 @@ private fun SingleColumnReadingContent(
             modifier = Modifier.fillMaxSize(),
         )
 
-        // Bottom bar: progress bar respects "Always show progress bar" setting (overrides tap-to-hide)
+        // Top/bottom scroll fade (iOS-like) — subtle gradient so text doesn't hard-cutoff; respects immersive toggle
+        val canScrollUp by remember { derivedStateOf { listState.canScrollBackward } }
+        val canScrollDown by remember { derivedStateOf { listState.canScrollForward } }
+        com.makemission.folio.ui.reader.components.TopReadingFade(
+            backgroundColor = readingBackground,
+            visible = canScrollUp,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
+        com.makemission.folio.ui.reader.components.BottomReadingFade(
+            backgroundColor = readingBackground,
+            visible = canScrollDown,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp),
+        )
+
+        // Bottom bar: progress bar respects "Always show progress bar" setting (overrides tap-to-hide) — premium slide/fade
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -1003,8 +1065,8 @@ private fun SingleColumnReadingContent(
         ) {
             AnimatedVisibility(
                 visible = chromeVisible,
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut(),
+                enter = slideInVertically(animationSpec = tween(260, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(200)),
+                exit = slideOutVertically(animationSpec = tween(220, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(180)),
             ) {
                 Row(
                     modifier = Modifier
@@ -1030,8 +1092,8 @@ private fun SingleColumnReadingContent(
             }
             AnimatedVisibility(
                 visible = chromeVisible || alwaysShowProgressBar,
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut(),
+                enter = slideInVertically(animationSpec = tween(260, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(200)),
+                exit = slideOutVertically(animationSpec = tween(220, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(180)),
             ) {
                 ReadingProgressBar(
                     progress = progress,
@@ -1064,6 +1126,7 @@ private fun TwoColumnReadingContent(
     readingText: Color = MaterialTheme.colorScheme.onBackground,
     readingBackground: Color = MaterialTheme.colorScheme.background,
     alwaysShowProgressBar: Boolean = false,
+    hapticsEnabled: Boolean = true,
     leftListState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     rightListState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     pendingBookmarkJump: Bookmark? = null,
@@ -1077,6 +1140,7 @@ private fun TwoColumnReadingContent(
     val leftState = leftListState
     val rightState = rightListState
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
 
     // Bookmark jump — works on tablet spread (jump to appropriate column)
     LaunchedEffect(pendingBookmarkJump) {
@@ -1152,6 +1216,30 @@ private fun TwoColumnReadingContent(
             }
     }
 
+    // Haptics: subtle tick on chapter boundary for tablet (left primary, also right)
+    var lastChapterForHapticsLeft by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(leftState, chapters, hapticsEnabled) {
+        snapshotFlow { flatIndexToChapterParagraph(leftState.firstVisibleItemIndex, left).first }
+            .distinctUntilChanged()
+            .collect { newChapter ->
+                if (lastChapterForHapticsLeft != null && lastChapterForHapticsLeft != newChapter && hapticsEnabled) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+                lastChapterForHapticsLeft = newChapter
+            }
+    }
+    var lastChapterForHapticsRight by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(rightState, chapters, hapticsEnabled) {
+        snapshotFlow { flatIndexToChapterParagraph(rightState.firstVisibleItemIndex, right).first + mid }
+            .distinctUntilChanged()
+            .collect { newGlobalChapter ->
+                if (lastChapterForHapticsRight != null && lastChapterForHapticsRight != newGlobalChapter && hapticsEnabled) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+                lastChapterForHapticsRight = newGlobalChapter
+            }
+    }
+
     DisposableEffect(leftState) {
         ReaderPageTurnHandler.onVolumeKey = { isUp ->
             scope.launch {
@@ -1209,7 +1297,13 @@ private fun TwoColumnReadingContent(
                             text = chapter.title,
                             style = MaterialTheme.typography.titleMedium,
                             color = readingText,
-                            modifier = Modifier.padding(top = 20.dp, bottom = 10.dp),
+                            modifier = Modifier
+                                .padding(top = 20.dp, bottom = 10.dp)
+                                .animateItem(
+                                    fadeInSpec = tween(220, easing = FastOutSlowInEasing),
+                                    fadeOutSpec = tween(180),
+                                    placementSpec = tween(260, easing = FastOutSlowInEasing)
+                                ),
                         )
                     }
                     itemsIndexed(chapter.paragraphs, key = { i, _ -> "L-c$chapterIndex-p$i" }) { paraIndex, p ->
@@ -1231,6 +1325,11 @@ private fun TwoColumnReadingContent(
                             onTextLayout = { layoutResult = it },
                             modifier = Modifier
                                 .padding(bottom = 12.dp)
+                                .animateItem(
+                                    fadeInSpec = tween(200, easing = LinearOutSlowInEasing),
+                                    fadeOutSpec = tween(180),
+                                    placementSpec = tween(240, easing = FastOutSlowInEasing)
+                                )
                                 .pointerInput(p, bionicEnabled) {
                                     detectTapGestures(
                                         onDoubleTap = { offset ->
@@ -1253,18 +1352,34 @@ private fun TwoColumnReadingContent(
                     }
                     if (chapterIndex == 0) {
                         item(key = "L-diagram-$chapterIndex") {
-                            ExpandableDiagram(modifier = Modifier.padding(vertical = 12.dp))
+                            ExpandableDiagram(
+                                modifier = Modifier
+                                    .padding(vertical = 12.dp)
+                                    .animateItem(
+                                        fadeInSpec = tween(220, easing = FastOutSlowInEasing),
+                                        fadeOutSpec = tween(180),
+                                        placementSpec = tween(240, easing = FastOutSlowInEasing)
+                                    )
+                            )
                         }
                     }
                     item(key = "L-gap-$chapterIndex") {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(MaterialTheme.colorScheme.outlineVariant),
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Column(
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = tween(200),
+                                fadeOutSpec = tween(180),
+                                placementSpec = tween(240, easing = FastOutSlowInEasing)
+                            )
+                        ) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(MaterialTheme.colorScheme.outlineVariant),
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
                     }
                 }
             }
@@ -1306,7 +1421,13 @@ private fun TwoColumnReadingContent(
                                 text = chapter.title,
                                 style = MaterialTheme.typography.titleMedium,
                                 color = readingText,
-                                modifier = Modifier.padding(top = 20.dp, bottom = 10.dp),
+                                modifier = Modifier
+                                    .padding(top = 20.dp, bottom = 10.dp)
+                                    .animateItem(
+                                        fadeInSpec = tween(220, easing = FastOutSlowInEasing),
+                                        fadeOutSpec = tween(180),
+                                        placementSpec = tween(260, easing = FastOutSlowInEasing)
+                                    ),
                             )
                         }
                         itemsIndexed(chapter.paragraphs, key = { i, _ -> "R-c$chapterIndex-p$i" }) { paraIndex, p ->
@@ -1329,6 +1450,11 @@ private fun TwoColumnReadingContent(
                                 onTextLayout = { layoutResult = it },
                                 modifier = Modifier
                                     .padding(bottom = 12.dp)
+                                    .animateItem(
+                                        fadeInSpec = tween(200, easing = LinearOutSlowInEasing),
+                                        fadeOutSpec = tween(180),
+                                        placementSpec = tween(240, easing = FastOutSlowInEasing)
+                                    )
                                     .pointerInput(p, bionicEnabled) {
                                         detectTapGestures(
                                             onDoubleTap = { offset ->
@@ -1350,14 +1476,22 @@ private fun TwoColumnReadingContent(
                             )
                         }
                         item(key = "R-gap-$chapterIndex") {
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(1.dp)
-                                    .background(MaterialTheme.colorScheme.outlineVariant),
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Column(
+                                modifier = Modifier.animateItem(
+                                    fadeInSpec = tween(200),
+                                    fadeOutSpec = tween(180),
+                                    placementSpec = tween(240, easing = FastOutSlowInEasing)
+                                )
+                            ) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(1.dp)
+                                        .background(MaterialTheme.colorScheme.outlineVariant),
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
                         }
                     }
                 }
@@ -1372,6 +1506,20 @@ private fun TwoColumnReadingContent(
             },
             onLassoFinished = { pts, bounds -> onLasso(pts, bounds) },
             modifier = Modifier.fillMaxSize(),
+        )
+
+        // Tablet scroll fades — cover both columns, respect chrome
+        val canScrollUpTablet by remember { derivedStateOf { leftState.canScrollBackward || rightState.canScrollBackward } }
+        val canScrollDownTablet by remember { derivedStateOf { leftState.canScrollForward || rightState.canScrollForward } }
+        com.makemission.folio.ui.reader.components.TopReadingFade(
+            backgroundColor = readingBackground,
+            visible = canScrollUpTablet,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
+        com.makemission.folio.ui.reader.components.BottomReadingFade(
+            backgroundColor = readingBackground,
+            visible = canScrollDownTablet,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp),
         )
 
         Column(
