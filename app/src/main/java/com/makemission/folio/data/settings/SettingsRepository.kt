@@ -24,6 +24,7 @@ class SettingsRepository(private val context: Context) {
         private val KEY_AUTO_SCAN_ENABLED = booleanPreferencesKey("auto_scan_enabled")
         private val KEY_HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
         private val KEY_DARK_PALETTE = stringPreferencesKey("dark_palette")
+        private val KEY_TIME_TINT_ENABLED = booleanPreferencesKey("time_tint_enabled")
 
         @Volatile
         private var INSTANCE: SettingsRepository? = null
@@ -86,6 +87,17 @@ class SettingsRepository(private val context: Context) {
     suspend fun setDarkPalette(palette: FolioPalette) {
         context.folioSettingsDataStore.edit { prefs ->
             prefs[KEY_DARK_PALETTE] = palette.name
+        }
+    }
+
+    val timeTintEnabled: Flow<Boolean> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            prefs[KEY_TIME_TINT_ENABLED] ?: false
+        }
+
+    suspend fun setTimeTintEnabled(value: Boolean) {
+        context.folioSettingsDataStore.edit { prefs ->
+            prefs[KEY_TIME_TINT_ENABLED] = value
         }
     }
 }

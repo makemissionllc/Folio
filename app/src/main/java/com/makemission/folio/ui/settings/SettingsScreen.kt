@@ -243,6 +243,7 @@ fun SettingsScreen(
                     subtitle = "Theme & contrast",
                 ) {
                     val selectedPalette by repo.darkPalette.collectAsState(initial = com.makemission.folio.ui.theme.FolioPalette.DEFAULT)
+                    val timeTintEnabled by repo.timeTintEnabled.collectAsState(initial = false)
                     Text(
                         text = "Dark palette — editorial alternatives alongside the default deep green",
                         style = MaterialTheme.typography.labelMedium,
@@ -263,9 +264,16 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                     )
                     Spacer(modifier = Modifier.height(12.dp))
+                    SettingsToggleRow(
+                        title = "Evening warmth",
+                        subtitle = "Time-aware tint — gradually warmer/redder tones in the evening (on-device, system clock, no location). Layers with palette + adaptive contrast.",
+                        checked = timeTintEnabled,
+                        onCheckedChange = { checked -> scope.launch { repo.setTimeTintEnabled(checked) } }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
                     SettingsInfoRow(
                         title = "Adaptive contrast",
-                        subtitle = "Controlled in the reader (Top Bar → Contrast Auto) and via ambient light sensor — now palette-aware",
+                        subtitle = "Controlled in the reader (Top Bar → Contrast Auto) and via ambient light sensor — now palette-aware and time-tint-coordinated",
                     )
                 }
             }

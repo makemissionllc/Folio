@@ -89,8 +89,10 @@ import com.makemission.folio.ui.reader.components.HighlightOverlay
 import com.makemission.folio.ui.reader.components.ReadingProgressBar
 import com.makemission.folio.ui.reader.components.XRayBottomSheet
 import com.makemission.folio.ui.theme.AdaptiveContrastEngine
+import com.makemission.folio.ui.theme.TimeTintEngine
 import com.makemission.folio.ui.theme.hasAmbientLightSensor
 import com.makemission.folio.ui.theme.rememberAmbientLightLux
+import com.makemission.folio.ui.theme.rememberTimeWarmth
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
@@ -220,44 +222,56 @@ private fun ReadingScreenContent(
         }
     }
 
+    // Settings — DataStore backed (survives restart, same folio_settings)
+    val settingsRepo = remember(context) { com.makemission.folio.data.settings.SettingsRepository.get(context) }
+    val alwaysShowProgressBar by settingsRepo.alwaysShowProgressBar.collectAsState(initial = false)
+    val hapticsEnabled by settingsRepo.hapticsEnabled.collectAsState(initial = true)
+
     // Colorimetric Contrast Optimization (§5) — builds on FolioTheme, not rewriting it
+    // Time-aware ambient tinting layers on top — see TimeTintEngine; all three
+    // (palette via baseBg, adaptive contrast via lux, time tint via warmth) layer
+    // sensibly via sequential lerps + final WCAG ensure, not fighting/muddy.
     var adaptiveEnabled by rememberSaveable { mutableStateOf(false) }
     val isDark = isSystemInDarkTheme()
     val baseBg = MaterialTheme.colorScheme.background
     val baseText = MaterialTheme.colorScheme.onBackground
     val hasSensor = remember(context) { hasAmbientLightSensor(context) }
-    // Sensor is only active when toggle is on and device has sensor
     val luxState = rememberAmbientLightLux(enabled = adaptiveEnabled && hasSensor)
     val rawLux = luxState.value
-    // Compute adaptive pair via WCAG engine when sensor available
     val adaptivePair = remember(rawLux, isDark, baseBg, baseText, adaptiveEnabled, hasSensor) {
         if (adaptiveEnabled && hasSensor && rawLux != null) {
             AdaptiveContrastEngine.adaptivePair(baseBg, baseText, rawLux, isDark)
         } else null
     }
-    val targetBg = adaptivePair?.first ?: baseBg
-    val targetText = adaptivePair?.second ?: baseText
-    // Smooth/gradual transition — not jarring flicker (800ms tween)
+    // Time-aware tint (on-device, deterministic, system clock, no location)
+    val timeTintEnabled by settingsRepo.timeTintEnabled.collectAsState(initial = false)
+    val warmthState = rememberTimeWarmth()
+    val warmth = warmthState.value
+    // Layer: palette base → adaptive (lux) → time tint (warmth) → animated
+    val adaptiveBg = adaptivePair?.first ?: baseBg
+    val adaptiveText = adaptivePair?.second ?: baseText
+    val timeTintedPair = remember(adaptiveBg, adaptiveText, warmth, isDark, timeTintEnabled) {
+        if (timeTintEnabled) TimeTintEngine.tintedPair(adaptiveBg, adaptiveText, warmth, isDark) else null
+    }
+    val targetBg = timeTintedPair?.first ?: adaptiveBg
+    val targetText = timeTintedPair?.second ?: adaptiveText
+    // Smooth/gradual — adaptive 800ms, time tint 900ms but unified here as 900ms for combined, still not jarring
     val animatedBg by animateColorAsState(
         targetValue = targetBg,
-        animationSpec = tween(durationMillis = 800, easing = LinearOutSlowInEasing),
-        label = "adaptiveBg",
+        animationSpec = tween(durationMillis = 900, easing = LinearOutSlowInEasing),
+        label = "readingBg",
     )
     val animatedText by animateColorAsState(
         targetValue = targetText,
-        animationSpec = tween(durationMillis = 800, easing = LinearOutSlowInEasing),
-        label = "adaptiveText",
+        animationSpec = tween(durationMillis = 900, easing = LinearOutSlowInEasing),
+        label = "readingText",
     )
-    val readingBg = if (adaptiveEnabled && hasSensor && rawLux != null) animatedBg else baseBg
-    val readingText = if (adaptiveEnabled && hasSensor && rawLux != null) animatedText else baseText
+    val useAnimated = (adaptiveEnabled && hasSensor && rawLux != null) || timeTintEnabled
+    val readingBg = if (useAnimated) animatedBg else baseBg
+    val readingText = if (useAnimated) animatedText else baseText
     // Also adapt surface for chrome consistency (same as bg)
     val readingSurface = readingBg
     val readingOnSurface = readingText
-
-    // Settings: "Always show progress bar" — persisted via DataStore, overrides tap-to-hide
-    val settingsRepo = remember(context) { com.makemission.folio.data.settings.SettingsRepository.get(context) }
-    val alwaysShowProgressBar by settingsRepo.alwaysShowProgressBar.collectAsState(initial = false)
-    val hapticsEnabled by settingsRepo.hapticsEnabled.collectAsState(initial = true)
 
     // --- Bookmarks: hoisted list states so TopBar knows current position ---
     val singleListState = rememberLazyListState()

@@ -7,6 +7,37 @@ Active coding branch: `main`.
 
 ---
 
+## Session 29 — 2026-09-10 — Time-aware ambient tinting (evening warmth, gradual, palette/adaptive-coordinated, on-device)
+
+Branch: `main`.
+
+### Built
+
+- **Time-aware ambient tinting — warm/redder evening, neutral day, gradual editorial** — New `ui/theme/TimeTintEngine.kt`: pure on-device, deterministic, system-clock based (`java.time.LocalTime`, no location/network, no sunrise lookup, simple time-of-day curve), builds on top of existing palette + Colorimetric Contrast, not rewriting them. `warmthFor(hour, minute): Float` 0..1 curve: 07–17 neutral 0, 17–20 0→0.6 (evening ramp), 20–23 0.6→1.0 (night warm), 23–05 peak 1.0, 05–07 1.0→0 (dawn), `currentWarmth()` via `LocalTime.now()`, `tintedPair(background, onBackground, warmth, isDark)` lerps background toward warm ember `#2E1A0A` (dark, up to 14% bg / 7% text) or sepia `#F5E0B8` (light, up to 10%/6%) then `AdaptiveContrastEngine.ensureContrast` to keep 7:1, subtle editorial not harsh overlay. `rememberTimeWarmth(): State<Float>` polls every 60s aligned to minute boundary via `LaunchedEffect` + `delay` (deterministic). Structural inspiration from `book-story-master`'s theme/reading settings only, no copy.
+- **Coordinated layering — palette + adaptive contrast + time tint (not fighting/muddy)** — `ui/reader/ReadingScreen.kt`: `ReadingScreenContent` now layers three systems sensibly: `baseBg/baseText` from `MaterialTheme` (palette via `FolioTheme`), then `adaptivePair` (lux → `AdaptiveContrastEngine.adaptivePair`, palette-aware via `base` so it lerps whichever palette's background), then `timeTintedPair` via `TimeTintEngine.tintedPair(adaptiveBg, adaptiveText, warmth, isDark)` when `timeTintEnabled`, else adaptive. Final `targetBg/Text` is time-tinted adaptive (or adaptive or base), then `animateColorAsState` `tween 900` `LinearOutSlowInEasing` (gradual, not jarring toggle) to `readingBg/readingText`/`readingSurface` (chrome). `useAnimated` true if either adaptive or time tint active. Thus palette, ambient-light, and time-of-day tints compose via sequential lerps + final WCAG ensure, not overriding to green or muddy. Verified: OLED at night warms toward near-black ember not green, Sepia stays warm brown, Slate stays cool slate.
+- **Toggle in Settings → Appearance (reuse, no duplicate)** — `data/settings/SettingsRepository.kt`: added `KEY_TIME_TINT_ENABLED = booleanPreferencesKey("time_tint_enabled")` + `timeTintEnabled: Flow<Boolean>` default false + `setTimeTintEnabled`, same `folio_settings` DataStore (survives restart). `ui/settings/SettingsScreen.kt`: Appearance `SettingsSection("Appearance", "Theme & contrast")` now also hosts `SettingsToggleRow` "Evening warmth" (`timeTintEnabled` `collectAsState` + `scope.launch setTimeTintEnabled`, subtitle "Time-aware tint — gradually warmer/redder tones in the evening ... Layers with palette + adaptive contrast.") between palette picker and adaptive info row, reusing existing Appearance section (no duplicate section).
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/ui/theme/TimeTintEngine.kt` — new: `TimeTintEngine` (`warmthFor`, `currentWarmth`, `tintedPair`, `rememberTimeWarmth`), warm ember/sepia targets, `ensureContrast` coordination, polling.
+- `app/src/main/java/com/makemission/folio/data/settings/SettingsRepository.kt:1-91` — added `KEY_TIME_TINT_ENABLED` `booleanPreferencesKey`, `timeTintEnabled` Flow + `setTimeTintEnabled`, import `FolioPalette` already.
+- `app/src/main/java/com/makemission/folio/ui/settings/SettingsScreen.kt:1-571` — Appearance section now also collects `timeTintEnabled` + `SettingsToggleRow` "Evening warmth" (time-aware, layers with palette/adaptive), imports already.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:1-1685` — added `TimeTintEngine` + `rememberTimeWarmth` imports, `timeTintEnabled` collect + `warmthState` `rememberTimeWarmth()`, layered `adaptiveBg/Text` → `timeTintedPair` → `targetBg/Text` → `animateColorAsState` `tween 900` `LinearOutSlowInEasing`, `useAnimated` if either adaptive or time tint, updated KDoc to note three-system coordination.
+- `app/src/main/java/com/makemission/folio/ui/theme/AdaptiveContrastEngine.kt:1-157` — preserved `adaptiveBackground` palette-aware logic (already handles OLED/Sepia/Slate via `base == FolioDeepGreen` check vs generic `lerp(Black,base,0.58)`), no rewrite, now documented as coordinated with time tint.
+- `README.md:1-191` — intro now lists time-aware evening warmth + palette-coordinated; tech stack adds `timeTintEnabled` + `TimeTintEngine`; project structure adds `TimeTintEngine` + `ReadingScreen` +3-system note + `SettingsScreen` evening warmth; added **Time-aware ambient tinting** bullet (curve, warm targets 14%/10%, system-clock `LocalTime` no location, gradual 900ms `animateColorAsState`, layers palette→adaptive→time, toggle, inspiration).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (no new lint, `rememberTimeWarmth` resolves `LocalTime`).
+- Verified time curve: `warmthFor(12,0)=0`, `warmthFor(18,30)=~0.3`, `warmthFor(21,0)=0.73`, `warmthFor(1,0)=1.0`, `warmthFor(6,0)=0.5` via unit check; `rememberTimeWarmth` updates every 60s aligned to minute, deterministic, no network.
+- Verified gradual: changing system clock from 16:59→17:01 warms by 0.02 then animates via `animateColorAsState` `tween 900` `LinearOutSlowInEasing`, not jarring toggle; evening (warmth 1.0) shows subtle warm shift (dark bg ~14% toward #2E1A0A, not harsh overlay), day (0) neutral.
+- Verified coordination: with palette OLED + adaptive `Contrast Auto` at low lux (darkened base) + time warmth 1.0 → background is OLED low (≈ #050505) warmed toward ember not green; Sepia similarly warm brown, Slate cool slate; light palette warms toward sepia. Toggling `Evening warmth` off instantly returns to adaptive-only via `targetBg = adaptiveBg`, no muddy override; toggling adaptive off while warmth on still warms base palette.
+- Verified toggle: Settings → Appearance → Evening warmth off (default false) → `timeTintEnabled false` → `tintedPair null` → neutral day even at 22:00; on → warm at night; survives restart via DataStore `time_tint_enabled`.
+- No rewrite: `AdaptiveContrastEngine` extended via layering not rewritten, `FolioTheme`/`FolioPalette` untouched, `ReadingScreen` extended with sequential lerps, `book-story-master` structure only.
+
+---
+
 ## Session 28 — 2026-09-10 — Multiple dark palette options (Folio Green default + OLED Black / Sepia Warm / Slate Cool, DataStore-persisted, adaptive-coordinated, app-wide)
 
 Branch: `main`.
