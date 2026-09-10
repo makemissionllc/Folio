@@ -7,6 +7,33 @@ Active coding branch: `main`.
 
 ---
 
+## Session 30 — 2026-09-10 — Smart Features explainer (editorial guide, plain English, on-brand, 12 on-device features)
+
+Branch: `main`.
+
+### Built
+
+- **Smart Features guide — 12 intelligences in plain English, editorial, on-brand** — New `ui/settings/SmartFeaturesScreen.kt`: `Scaffold` `background` deep green, `SmartFeaturesHeader` (← Back + "Smart Features" `headlineLarge` + "A thoughtful guide..." `bodySmall`, `statusBarsPadding`), `LazyColumn` `SmartFeaturesHero` (surface card `16dp` `1dp`, `Row` 56dp `CircleShape` amber/green/burgundy `Canvas` editorial illustration + "Folio thinks alongside you" `titleMedium` + "Twelve small, careful ideas..." `bodySmall`) + "How to read this guide" card (`surfaceVariant 0.5f`, `titleSmall` + `bodySmall` + `labelSmall`) + `SmartFeatureCard` per feature (`surface` card `16dp` `1dp`, `Row` 6dp amber dot + `labelMedium` uppercase number + `titleMedium` + three `FeatureBlock`s). Each `FeatureBlock` shows `labelSmall` uppercase ("The small annoyance" / "How Folio quietly helps" / "Why it matters to you") + `bodySmall` plain English. 12 `SmartFeature` entries (hard-coded `rememberFeatures()`): 01 Guided reading (Bionic) — slip/re-read → gentle bold of word beginnings → momentum; 02 Honest time left (Velocity) — average jumps on pause → recent pace + ignore long pause + text ahead → steady estimate → decision; 03 Who's who (X-Ray) — forget names in long story → on-device frequency scan → small sheet without leaving page; 04 Words that stay (Vocabulary SM-2) — lookup fades → private save + bring back at forgetting curve → growth without pressure; 05 Real pages (True-Page) — location vague → measure whole book vs screen → invisible breaks → shareable "Page 47 of 312"; 06 Breathing paragraphs (Knuth-Plass) — orphan/widow unsettled → whole-paragraph micro-kerning + justify → squared calm block; 07 Marks that stay (LCS) — publisher typo shift → save anchor snippet + LCS search → reattach or leave aside → trustworthy highlights; 08 Comfort in any light (Colorimetric Contrast 7:1) — dimming muddy → sensor + WCAG luminance → shift paper/ink → comfortable in sun/dim; 09 Diagrams that fit (Bounding-Box) — wide white frames → on-device non-white bounding box → full-width → see detail; 10 Evening warmth (Time-Aware Tinting) — harsh cool evening → clock-driven warm drift → kinder late reading; 11 Find any line (Search) — flipping breaks flow → pull-down Library search, highlights/bookmarks first → jump straight; 12 Meaning where you are (Dictionary offline + Explain) — leaving page → double-tap/selection Explain → on-device 12k word list → popup + save for practice. All `Text` uses `FolioTypography` serif body + sans header, deep-green/burgundy/amber, no jargon (TF-IDF/SM-2/LCS/Knuth not shown), closing "All on-device, all private" card. Structural inspiration from `book-story-master`'s info lists only, no code copied.
+- **New destination on top of existing Settings — no rewrite** — `navigation/FolioNav.kt`: added `FolioRoute.SmartFeatures("smart_features")` + `composable(SmartFeatures)` → `SmartFeaturesScreen(onBack=pop)`. `ui/settings/SettingsScreen.kt`: added `onSmartFeaturesClick: () -> Unit = {}` param to `SettingsScreen` (both overloads preserved via default), inserted new `SettingsSection("Smart Features", "What Folio does quietly, in plain language")` between Insights and Appearance with `Column` `bodySmall` + `Button("Meet the twelve", primary)` → `onSmartFeaturesClick`, updated `SettingsHeader` subtitle to "Reading • Library • Insights • Smart Features • Appearance • Privacy". `FolioNavHost` Settings composable now passes `onSmartFeaturesClick = { navController.navigate(SmartFeatures.route) }`. Extends existing `FolioNavHost` + `SettingsScreen`, no rewrite.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/ui/settings/SmartFeaturesScreen.kt` — new: `SmartFeature` data class + `SmartFeaturesScreen` (Scaffold + Header + Hero + guide card + 12 `SmartFeatureCard` + closing private card, `LazyColumn` `16dp`, FolioTheme styling, plain English).
+- `app/src/main/java/com/makemission/folio/navigation/FolioNav.kt:1-136` — added `FolioRoute.SmartFeatures`, `composable(Settings)` now passes `onSmartFeaturesClick`, added `composable(SmartFeatures)` → `SmartFeaturesScreen`.
+- `app/src/main/java/com/makemission/folio/ui/settings/SettingsScreen.kt:1-579` — added `onSmartFeaturesClick` param, new `Smart Features` `SettingsSection` (plain-English entry, `Button("Meet the twelve")`) between Insights and Appearance, updated `SettingsHeader` subtitle to include Smart Features.
+- `README.md:1-192` — intro now lists dedicated Smart Features guide; project structure adds `SmartFeaturesScreen.kt` (editorial guide) + `SettingsScreen` Smart Features entry + `FolioNav` SmartFeatures route; added **Smart Features screen** section (editorial guide, 12 features plain English, problem/fix/why, FolioTheme, no jargon, accessible via Settings, inspiration); Settings screen bullet now documents six sections (adds Smart Features entry).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (no new lint, SmartFeaturesScreen resolves MaterialTheme).
+- Verified navigation: Settings → Smart Features section → "Meet the twelve" → `SmartFeatures` destination via `FolioNav`; Back (← Back) → `popBackStack` to Settings; no rewrite of `SettingsScreen`/`FolioNavHost` structure beyond extension; deep-green `background`, `surface` cards `16dp`, amber dot, serif/sans verified.
+- Verified content: 12 cards each show `number.uppercase` `labelMedium` amber dot + `titleMedium` + three blocks (THE SMALL ANNOYANCE / HOW FOLIO QUIETLY HELPS / WHY IT MATTERS) in `bodySmall` plain English, no TF-IDF/SM-2/LCS/Knuth jargon in UI; editorial tone ("You keep momentum...") not changelog/marketing.
+- Verified on-brand: uses `FolioTheme` `Color.kt`/`Type.kt`/`Theme.kt` (deep green, burgundy, amber, heavy sans header + serif body), hero Canvas amber sun + books, closing "All on-device, all private" card.
+- No duplication: `ui/settings/SmartFeaturesScreen.kt` is new; `SettingsScreen` extended with new param default `{}`, existing calls without `onSmartFeaturesClick` still compile (default); `FolioRoute` extended, no existing route overwritten.
+
+---
+
 ## Session 29 — 2026-09-10 — Time-aware ambient tinting (evening warmth, gradual, palette/adaptive-coordinated, on-device)
 
 Branch: `main`.

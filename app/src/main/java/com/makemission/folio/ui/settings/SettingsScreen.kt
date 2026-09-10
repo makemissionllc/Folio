@@ -67,6 +67,7 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     onBack: () -> Unit,
     onInsightsClick: () -> Unit = {},
+    onSmartFeaturesClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -239,6 +240,32 @@ fun SettingsScreen(
 
             item {
                 SettingsSection(
+                    title = "Smart Features",
+                    subtitle = "What Folio does quietly, in plain language",
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "Twelve thoughtful helpers — from guided reading to evening warmth — all on-device, all private. An editorial guide, not a changelog.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = onSmartFeaturesClick,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                        ) {
+                            Text("Meet the twelve", style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
+            }
+
+            item {
+                SettingsSection(
                     title = "Appearance",
                     subtitle = "Theme & contrast",
                 ) {
@@ -321,7 +348,7 @@ private fun SettingsHeader(
             color = MaterialTheme.colorScheme.onBackground,
         )
         Text(
-            text = "Reading • Library • Insights • Appearance • Privacy",
+            text = "Reading • Library • Insights • Smart Features • Appearance • Privacy",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
