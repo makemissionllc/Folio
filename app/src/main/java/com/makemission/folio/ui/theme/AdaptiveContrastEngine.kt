@@ -51,10 +51,16 @@ object AdaptiveContrastEngine {
     }
 
     /**
-     * Lerp background for ambient light.
+     * Lerp background for ambient light — now palette-aware and coordinated.
      * Dark theme: low lux -> darker (reduce glare), high lux -> lighter (visibility).
-     * Light theme: low lux -> slightly darker warm paper, high lux -> bright paper.
-     * Factor is smoothed lux.
+     * The adaptive background lerps **whichever palette is currently selected**
+     * (via [base] which comes from `MaterialTheme.colorScheme.background`), not
+     * hard-override to Folio green. For the classic Folio green we preserve the
+     * original editorial low/high (#001A12 → #004F39 → #0B5C45) for exact parity;
+     * for OLED/Sepia/Slate we derive low/high from the palette's own background
+     * so the adaptive shift stays coherent (e.g., OLED stays near-black, Sepia
+     * stays warm brown) rather than snapping back to green.
+     * Light theme: unchanged warm paper.
      */
     fun adaptiveBackground(
         base: Color,
@@ -62,10 +68,22 @@ object AdaptiveContrastEngine {
         isDark: Boolean,
     ): Color {
         return if (isDark) {
-            // Dark: 0 -> #001A12 (very dark), 0.5 -> #004F39 (base), 1 -> #0A5C45 (lighter)
-            val low = Color(0xFF001A12)
-            val mid = base // FolioDeepGreen #004F39
-            val high = FolioDeepGreenContainer // #0B5C45 -> adjusted to #0A5C45-ish but use container
+            // Preserve exact Folio green editorial values when base is the default deep green
+            val isFolioGreen = base == FolioDeepGreen
+            val low: Color
+            val high: Color
+            val mid = base
+            if (isFolioGreen) {
+                // Original curated values: 0 -> #001A12, 0.5 -> #004F39, 1 -> #0B5C45
+                low = Color(0xFF001A12)
+                high = FolioDeepGreenContainer
+            } else {
+                // Generic palette-coherent derivation: darken/lighten the selected palette's base
+                // Low: base darkened toward black (keep editorial, not pure black)
+                low = lerp(Color.Black, base, 0.58f)
+                // High: base lightened toward white / container (subtle, not washed)
+                high = lerp(base, Color.White, 0.14f)
+            }
             when {
                 luxFactor < 0.5f -> lerp(low, mid, luxFactor * 2f)
                 else -> lerp(mid, high, (luxFactor - 0.5f) * 2f)

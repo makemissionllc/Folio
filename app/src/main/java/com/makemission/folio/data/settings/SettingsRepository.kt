@@ -3,7 +3,9 @@ package com.makemission.folio.data.settings
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.makemission.folio.ui.theme.FolioPalette
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -21,6 +23,7 @@ class SettingsRepository(private val context: Context) {
         private val KEY_HAS_SEEN_ONBOARDING = booleanPreferencesKey("has_seen_onboarding")
         private val KEY_AUTO_SCAN_ENABLED = booleanPreferencesKey("auto_scan_enabled")
         private val KEY_HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
+        private val KEY_DARK_PALETTE = stringPreferencesKey("dark_palette")
 
         @Volatile
         private var INSTANCE: SettingsRepository? = null
@@ -72,6 +75,17 @@ class SettingsRepository(private val context: Context) {
     suspend fun setHapticsEnabled(value: Boolean) {
         context.folioSettingsDataStore.edit { prefs ->
             prefs[KEY_HAPTICS_ENABLED] = value
+        }
+    }
+
+    val darkPalette: Flow<FolioPalette> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            FolioPalette.fromKey(prefs[KEY_DARK_PALETTE] ?: FolioPalette.DEFAULT.name)
+        }
+
+    suspend fun setDarkPalette(palette: FolioPalette) {
+        context.folioSettingsDataStore.edit { prefs ->
+            prefs[KEY_DARK_PALETTE] = palette.name
         }
     }
 }

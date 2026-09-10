@@ -6,6 +6,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -239,14 +242,30 @@ fun SettingsScreen(
                     title = "Appearance",
                     subtitle = "Theme & contrast",
                 ) {
-                    SettingsInfoRow(
-                        title = "Folio theme",
-                        subtitle = "Deep green • Burgundy • Amber — editorial elegance",
+                    val selectedPalette by repo.darkPalette.collectAsState(initial = com.makemission.folio.ui.theme.FolioPalette.DEFAULT)
+                    Text(
+                        text = "Dark palette — editorial alternatives alongside the default deep green",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
+                    com.makemission.folio.ui.theme.FolioPalette.entries.forEach { palette ->
+                        PaletteOptionRow(
+                            palette = palette,
+                            selected = selectedPalette == palette,
+                            onClick = { scope.launch { repo.setDarkPalette(palette) } }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    Text(
+                        text = "Applies across Library, Reading, Settings & Insights. Adaptive contrast (Colorimetric 7:1) adjusts whichever palette is selected — it lerps the chosen dark background, not overriding to green.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
                     SettingsInfoRow(
                         title = "Adaptive contrast",
-                        subtitle = "Controlled in the reader (Top Bar → Contrast Auto) and via ambient light sensor",
+                        subtitle = "Controlled in the reader (Top Bar → Contrast Auto) and via ambient light sensor — now palette-aware",
                     )
                 }
             }
@@ -453,5 +472,100 @@ private fun SettingsInfoRow(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun PaletteOptionRow(
+    palette: com.makemission.folio.ui.theme.FolioPalette,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = com.makemission.folio.ui.theme.folioDarkSchemeFor(palette)
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                shape = RoundedCornerShape(12.dp)
+            ),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = scheme.surface,
+            contentColor = scheme.onSurface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 2.dp else 0.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            // Preview swatches: background / surfaceVariant / amber / burgundy
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(scheme.background)
+                        .border(1.dp, scheme.outlineVariant.copy(alpha = 0.6f), CircleShape)
+                )
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .clip(CircleShape)
+                        .background(scheme.surfaceVariant)
+                        .border(1.dp, scheme.outlineVariant.copy(alpha = 0.4f), CircleShape)
+                )
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .clip(CircleShape)
+                        .background(com.makemission.folio.ui.theme.FolioAmber)
+                )
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .clip(CircleShape)
+                        .background(com.makemission.folio.ui.theme.FolioBurgundy)
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = palette.displayName,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = scheme.onSurface,
+                )
+                Text(
+                    text = palette.description,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.9f),
+                )
+            }
+            if (selected) {
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "✓",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            }
+        }
     }
 }

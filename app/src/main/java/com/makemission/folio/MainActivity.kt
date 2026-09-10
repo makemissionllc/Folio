@@ -5,8 +5,12 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.navigation.FolioNavHost
 import com.makemission.folio.ui.reader.ReaderPageTurnHandler
+import com.makemission.folio.ui.theme.FolioPalette
 import com.makemission.folio.ui.theme.FolioTheme
 
 /**
@@ -22,7 +26,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            FolioTheme {
+            val palette by SettingsRepository.get(this).darkPalette.collectAsState(initial = FolioPalette.DEFAULT)
+            FolioTheme(palette = palette) {
                 FolioNavHost()
             }
         }

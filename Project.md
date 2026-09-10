@@ -7,6 +7,40 @@ Active coding branch: `main`.
 
 ---
 
+## Session 28 — 2026-09-10 — Multiple dark palette options (Folio Green default + OLED Black / Sepia Warm / Slate Cool, DataStore-persisted, adaptive-coordinated, app-wide)
+
+Branch: `main`.
+
+### Built
+
+- **Dark palette options — 4 editorial dark themes alongside default, coherent accents** — New `ui/theme/FolioPalette.kt`: `enum FolioPalette { DEFAULT ("Folio Green" "#004F39 editorial default"), OLED ("True Black" "Pure black · OLED-friendly, max contrast"), SEPIA ("Warm Sepia" "Dark brown · warm paper, low light"), SLATE ("Cool Slate" "Blue-slate · calm, cool reading") }` with `fromKey()` + `folioDarkSchemeFor()` mapping. Each keeps Folio burgundy `#780116` / amber `#F7B538` accents coherent while background/surface diverge editorially: `FolioDarkColorScheme` (existing deep green #004F39 / #0B5C45), `FolioOledColorScheme` (background #080808 / surface #0A0A0A / variant #1E1E1E / containers #000000→#333333), `FolioSepiaColorScheme` (background #1F140E umber / surface #251A12 / variant #3D2F20 / onSurface #FFF1D6 warm), `FolioSlateColorScheme` (background #0F1A20 / surface #14202B / variant #233241 / containers #080F14→#3A4B5E) — all darkColorScheme with amber primary, burgundy primaryContainer, appropriate outline/scrim. Editorial spirit, not arbitrary hues; structural inspiration from `book-story-master`'s `Theme` enum + `colorScheme(theme,dark,isPureDark)` mapping and `ColorPickerWithTitle` only.
+- **Persistence via existing DataStore pattern** — `data/settings/SettingsRepository.kt`: added `KEY_DARK_PALETTE = stringPreferencesKey("dark_palette")` + `darkPalette: Flow<FolioPalette>` (default `DEFAULT` via `fromKey`, `folio_settings` DataStore, survives restart, no new DataStore) + `setDarkPalette(palette)` (`edit { prefs[KEY_DARK_PALETTE]=name }`). Reuses same singleton `get(context)` pattern.
+- **App-wide application + adaptive coordination** — `ui/theme/Theme.kt`: extended `FolioTheme(darkTheme, palette: FolioPalette = DEFAULT)` to pick `folioDarkSchemeFor(palette)` when dark else `FolioLightColorScheme` (warm paper light unchanged). `MainActivity.kt`: collects `SettingsRepository.darkPalette` (`collectAsState(initial=DEFAULT)`) inside `setContent` and passes `FolioTheme(palette=palette)` so Library, Reading, Settings, Insights, Vocabulary, Onboarding all reflect consistently via `MaterialTheme.colorScheme`, not one screen. `ui/theme/AdaptiveContrastEngine.kt`: `adaptiveBackground` now palette-aware — preserves exact Folio green low/high (#001A12→#004F39→#0B5C45) when `base == FolioDeepGreen` for parity, otherwise derives low `lerp(Black, base, 0.58)` / high `lerp(base, White, 0.14)` from the selected palette's `base` (`MaterialTheme.colorScheme.background`) so the colorimetric 7:1 contrast adjusts whichever palette is active rather than hard-overriding to green. Keeps WCAG `TARGET_CONTRAST=7.0` + `ensureContrast` binary search.
+- **Palette picker in Settings → Appearance (reuse, no duplicate)** — `ui/settings/SettingsScreen.kt`: Appearance `SettingsSection("Appearance", "Theme & contrast")` now hosts picker: `selectedPalette collectAsState`, explanatory text, `FolioPalette.entries.forEach { PaletteOptionRow(palette, selected, onClick={ scope.launch { repo.setDarkPalette(palette) } }) }`, then info text "Applies across Library, Reading, Settings & Insights. Adaptive contrast adjusts whichever palette...". New `PaletteOptionRow` composable: `Card` `fillMaxWidth` `clip 12dp` `clickable` `border` 2dp primary when selected else 1dp outlineVariant, `containerColor scheme.surface`, preview swatches `Row` (28dp `scheme.background` circle `border` + 14dp `surfaceVariant` + 14dp `FolioAmber` + 14dp `FolioBurgundy` `CircleShape`), `displayName`/`description`, check `✓` 22dp `primary` circle when selected. Reuses existing Appearance section, no duplicate section.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/ui/theme/FolioPalette.kt` — new: enum `FolioPalette` (DEFAULT/OLED/SEPIA/SLATE) + `fromKey` + 3 `darkColorScheme` (`FolioOledColorScheme`, `FolioSepiaColorScheme`, `FolioSlateColorScheme`) + `folioDarkSchemeFor()`.
+- `app/src/main/java/com/makemission/folio/ui/theme/Color.kt:1-95` — retained `FolioDarkColorScheme` as default; no removal.
+- `app/src/main/java/com/makemission/folio/ui/theme/Theme.kt:1-50` — extended `FolioTheme(darkTheme, palette, content)` to pick dark scheme via `folioDarkSchemeFor(palette)`, updated KDoc to document palette + adaptive coordination, kept dynamic color off.
+- `app/src/main/java/com/makemission/folio/data/settings/SettingsRepository.kt:1-77` — added `KEY_DARK_PALETTE` `stringPreferencesKey`, `darkPalette` Flow + `setDarkPalette`, import `stringPreferencesKey` + `FolioPalette`, same `folio_settings` DataStore.
+- `app/src/main/java/com/makemission/folio/MainActivity.kt:1-40` — collects `darkPalette` via `collectAsState` in `setContent` and passes `FolioTheme(palette=palette)`, imports `collectAsState`, `getValue`, `SettingsRepository`, `FolioPalette`.
+- `app/src/main/java/com/makemission/folio/ui/theme/AdaptiveContrastEngine.kt:1-139` — made `adaptiveBackground` palette-aware: preserves Folio green low/high when `base==FolioDeepGreen` else derives low/high from `base` via `lerp(Black,base,0.58)` / `lerp(base,White,0.14)`, updated KDoc to note coordination.
+- `app/src/main/java/com/makemission/folio/ui/settings/SettingsScreen.kt:1-473` — Appearance section now palette picker (`FolioPalette.entries` + `PaletteOptionRow`), added `selectedPalette` collect, explanatory texts, new `PaletteOptionRow` composable (Card border/check/swatches), imports `border`, `clickable`, `CircleShape`, `graphicsLayer` already, `FolioPalette`/`folioDarkSchemeFor`.
+- `README.md:1-190` — intro now lists 4 dark palettes; tech stack adds `darkPalette` + `FolioPalette`; project structure adds `FolioPalette` + `ReadingFadeOverlay` already + `Theme` palette param + `Settings` palette picker + `Color` retains default; added **Dark palette options** bullet (enum, schemes, persistence, app-wide, picker UI, adaptive coordination, inspiration).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (no new lint, palette enum resolves, FolioTheme palette param defaults correctly).
+- Verified palette persistence: Settings → Appearance → pick OLED → `repo.setDarkPalette(OLED)` → `folio_settings.preferences_pb` stores `dark_palette=OLED`, kill + relaunch → `collectAsState` reads OLED → `FolioTheme` shows true black Library/Reading; pick Sepia → warm brown, Slate → cool slate, DEFAULT → deep green; all survive restart.
+- Verified app-wide: changing palette in Settings instantly reflects in Library (grid background, header), Reading (serif body background `readingBg` via `MaterialTheme.colorScheme.background`), Settings itself (Scaffold background), Insights (journal background) without extra wiring — all via `MaterialTheme.colorScheme` from `FolioTheme`.
+- Verified adaptive coordination: Reading with Contrast Auto on, palette DEFAULT at low lux → background #001A12 (original green low); same lux with OLED → background near #050505 (derived from OLED base, not green), with Sepia → near #120C08 (warm), with Slate → near #080F14 (cool); high lux similarly lightens each palette's own base, not snapping to green; `ensureContrast` still maintains 7:1 via `adaptivePair`.
+- Verified Appearance not duplicated: single `SettingsSection("Appearance")` reused, now contains palette picker + Adaptive contrast info row; no second Appearance section.
+- No rewrite: `FolioTheme` extended (new param, default DEFAULT), `Color.kt` retained `FolioDarkColorScheme`, `SettingsRepository` extended same DataStore, `MainActivity` extended to pass palette, `AdaptiveContrastEngine` extended to be palette-aware, `book-story-master` structure only.
+
+---
+
 ## Session 27 — 2026-09-10 — Tactile & visual polish (chapter haptics, scroll fades, premium micro-animations, haptics toggle)
 
 Branch: `main`.
