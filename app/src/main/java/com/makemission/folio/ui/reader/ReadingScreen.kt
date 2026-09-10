@@ -80,6 +80,7 @@ import com.makemission.folio.data.dictionary.DictionaryRepository
 import com.makemission.folio.data.epub.EpubParser
 import com.makemission.folio.ui.reader.components.BookmarkBottomSheet
 import com.makemission.folio.ui.reader.components.DictionaryPopup
+import com.makemission.folio.ui.reader.components.ExplainSelectionContainer
 import com.makemission.folio.ui.reader.components.ExpandableDiagram
 import com.makemission.folio.ui.reader.components.HighlightOverlay
 import com.makemission.folio.ui.reader.components.ReadingProgressBar
@@ -628,47 +629,62 @@ private fun ReadingScreenContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-            } else if (isTabletLandscape) {
-                TwoColumnReadingContent(
-                    chapters = uiState.chapters,
-                    restoredChapterIndex = uiState.restoredChapterIndex,
-                    chromeVisible = chromeVisible,
-                    bionicEnabled = bionicEnabled,
-                    highlights = highlights,
-                    onToggleChrome = { chromeVisible = !chromeVisible },
-                    onSaveProgress = onSaveProgress,
-                    onAddHighlight = onAddHighlight,
-                    onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
-                    onWordDoubleTap = onWordDoubleTap,
-                    readingText = readingText,
-                    readingBackground = readingBg,
-                    alwaysShowProgressBar = alwaysShowProgressBar,
-                    leftListState = tabletLeftState,
-                    rightListState = tabletRightState,
-                    pendingBookmarkJump = pendingBookmarkJump,
-                    onJumpConsumed = { pendingBookmarkJump = null },
-                    modifier = Modifier.fillMaxSize(),
-                )
             } else {
-                SingleColumnReadingContent(
-                    chapters = uiState.chapters,
-                    restoredChapterIndex = uiState.restoredChapterIndex,
-                    chromeVisible = chromeVisible,
-                    bionicEnabled = bionicEnabled,
-                    highlights = highlights,
-                    onToggleChrome = { chromeVisible = !chromeVisible },
-                    onSaveProgress = onSaveProgress,
-                    onAddHighlight = onAddHighlight,
-                    onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
-                    onWordDoubleTap = onWordDoubleTap,
-                    readingText = readingText,
-                    readingBackground = readingBg,
-                    alwaysShowProgressBar = alwaysShowProgressBar,
-                    listState = singleListState,
-                    pendingBookmarkJump = pendingBookmarkJump,
-                    onJumpConsumed = { pendingBookmarkJump = null },
-                    modifier = Modifier.fillMaxSize(),
-                )
+                // Selection "Explain" — extends double-tap flow, same popup/backing dataset, fully offline
+                ExplainSelectionContainer(
+                    onExplainRequested = { selected ->
+                        val phrase = selected.trim().replace(Regex("\\s+"), " ").take(140)
+                        if (phrase.isNotBlank()) {
+                            val def = DictionaryRepository.lookupPhrase(phrase, context)
+                                ?: DictionaryRepository.lookup(phrase, context)
+                            dictPopup = phrase to def
+                            if (def != null) onTrackVocabulary(phrase, def)
+                        }
+                    }
+                ) {
+                    if (isTabletLandscape) {
+                        TwoColumnReadingContent(
+                            chapters = uiState.chapters,
+                            restoredChapterIndex = uiState.restoredChapterIndex,
+                            chromeVisible = chromeVisible,
+                            bionicEnabled = bionicEnabled,
+                            highlights = highlights,
+                            onToggleChrome = { chromeVisible = !chromeVisible },
+                            onSaveProgress = onSaveProgress,
+                            onAddHighlight = onAddHighlight,
+                            onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
+                            onWordDoubleTap = onWordDoubleTap,
+                            readingText = readingText,
+                            readingBackground = readingBg,
+                            alwaysShowProgressBar = alwaysShowProgressBar,
+                            leftListState = tabletLeftState,
+                            rightListState = tabletRightState,
+                            pendingBookmarkJump = pendingBookmarkJump,
+                            onJumpConsumed = { pendingBookmarkJump = null },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        SingleColumnReadingContent(
+                            chapters = uiState.chapters,
+                            restoredChapterIndex = uiState.restoredChapterIndex,
+                            chromeVisible = chromeVisible,
+                            bionicEnabled = bionicEnabled,
+                            highlights = highlights,
+                            onToggleChrome = { chromeVisible = !chromeVisible },
+                            onSaveProgress = onSaveProgress,
+                            onAddHighlight = onAddHighlight,
+                            onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
+                            onWordDoubleTap = onWordDoubleTap,
+                            readingText = readingText,
+                            readingBackground = readingBg,
+                            alwaysShowProgressBar = alwaysShowProgressBar,
+                            listState = singleListState,
+                            pendingBookmarkJump = pendingBookmarkJump,
+                            onJumpConsumed = { pendingBookmarkJump = null },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
             }
         }
     }

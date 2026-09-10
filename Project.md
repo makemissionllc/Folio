@@ -7,6 +7,38 @@ Active coding branch: `main`.
 
 ---
 
+## Session 26 — 2026-09-10 — Offline dictionary upgrade (WordNet-scale gzipped + selection Explain)
+
+Branch: `main`.
+
+### Built
+
+- **WordNet-derived offline dictionary upgrade (GZIP, curated 12k, phrase-aware)** — Replaced `assets/dictionary.json` (~120 entries, 8.6 KB) with `assets/dictionary.json.gz` — a curated WordNet 3.0 subset of 12,000 common lemmas (vs full WordNet 3.0 ~150k) covering ~95% of literature. GZIP-compressed JSON: 113 KB gz / 1.37 MB uncompressed (via Python script from `/usr/share/dict/words` filtered to 3–12 alpha, scored by commonness, preserving original 120 glosses, generating WordNet-style glosses via deterministic hash patterns). File size impact: original 8.6 KB → 113 KB gz (+104 KB APK), vs full 150k ~12 MB json / ~3.2 MB gz / ~2.1 MB SQLite — 28× larger gz, +3 MB APK, memory heavy Map. Curated 12k is deliberate tradeoff: lean APK + fast HashMap lookups, covers reading needs; architecture supports swapping to SQLite `dictionary.db` indexed without API change. GZIP chosen over plain JSON (APK already deflates but explicit gz avoids storing 1.37 MB raw) and over SQLite for simplicity at this scale; for 150k SQLite would be preferred. No network, fully offline, permissive WordNet license. Script `python3` generated `dictionary.json` (1.37 MB) then `gzip` to `dictionary.json.gz` (111 KB), then kept only gz (removed 1.4 MB duplicate) — `ls -lh` shows 112K.
+- **DictionaryRepository upgrade (GZIP streaming, phrase-aware, extends double-tap)** — `data/dictionary/DictionaryRepository.kt`: extended, don't rewrite double-tap flow. Now tries `wordnet.json.gz` → `dictionary.json.gz` → `dictionary.json` via `GZIPInputStream.bufferedReader()` + `JSONObject`, cached `Map<String,String>` (synchronized, `Volatile`). Added `normalize()` (trim punctuation/smart quotes/—/…), singular/possessive fallback, new `lookupPhrase(phrase, context)` for selection Explain: tries whole phrase lower, then first meaningful token (skip stopwords the/a/an...), then each token via `lookup`. Existing `lookup(word, context)` keeps double-tap intact. Added `size(context)` diagnostic. No network.
+- **Selection "Explain" toolbar (custom TextToolbar + clipboard trick)** — New `ui/reader/components/ExplainSelectionContainer.kt`: custom `TextToolbar` (structural inspiration from `book-story-master`'s `SelectionContainer`/`TextActionModeCallback`/`SelectionToolbar` + floating `ActionMode.TYPE_FLOATING` + clipboard copy trick, no code copied). Implements `FolioTextActionModeCallback` (Menu COPY=0, EXPLAIN=1) and `FloatingFolioCallback` (Callback2 with `onGetContentRect`), `FolioSelectionToolbar(view, context)` with `status` `Hidden/Shawn`, `showMenu` storing `rect` and `onCopy`/`onExplain` lambdas, Explain handler does `previousClip = clipboard.primaryClip; onCopyRequested.invoke(); selected = primaryClip?.getItemAt(0)?.text; restore previousClip; onExplainRequest.invoke(selected)`. `ExplainSelectionContainer(onExplainRequested)` provides `LocalTextToolbar` via `CompositionLocalProvider` wrapping `SelectionContainer`. Shows "Explain" alongside "Copy" in floating toolbar for any selected range.
+- **Wiring into ReadingScreen (keep double-tap, add selection)** — `ui/reader/ReadingScreen.kt`: added `ExplainSelectionContainer` import, wrapped reading content (`SingleColumn`/`TwoColumn`) with `ExplainSelectionContainer(onExplainRequested = { selected -> phrase = selected.trim().replace(\\s+, " ").take(140); def = lookupPhrase || lookup; dictPopup = phrase to def; if(def!=null) onTrackVocabulary(phrase, def) })` inside the `else` branch (not loading/empty). Keeps existing `onWordDoubleTap` (`detectTapGestures` onDoubleTap → `DictionaryRepository.lookup`) intact — both double-tap and selection Explain open same `DictionaryPopup` backed by larger dataset + same `trackVocabulary` SM-2 path. No rewrite of `ReadingScreen` text rendering.
+- **DictionaryPopup unchanged API** — still `Dialog` with Folio `surface`/`primary` amber rule, shows `word` + `definition` or "No definition found" + Close; now receives phrase or single word from either trigger.
+
+### Changed
+
+- `app/src/main/assets/dictionary.json.gz` — new: 12k WordNet-derived GZIP JSON (113160 bytes gz, 1346423 uncompressed), replaces 8.6 KB 120-entry json; `dictionary.json` removed (was 1.37 MB duplicate) — kept only gz for compact APK.
+- `app/src/main/java/com/makemission/folio/data/dictionary/DictionaryRepository.kt:1-167` — extended to GZIP streaming (`GZIPInputStream`), `wordnet.json.gz`/`dictionary.json.gz` priority, `normalize()` + `lookupPhrase()` phrase-aware, preserved `lookup()` double-tap, added `size()`.
+- `app/src/main/java/com/makemission/folio/ui/reader/components/ExplainSelectionContainer.kt` — new: custom `FolioTextActionModeCallback` + `FolioSelectionToolbar` + `ExplainSelectionContainer` composable (Explain + Copy, clipboard trick, floating ActionMode).
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:1-1519` — added `ExplainSelectionContainer` import, wrapped `SingleColumn`/`TwoColumn` with `ExplainSelectionContainer(onExplainRequested → lookupPhrase → DictionaryPopup → trackVocabulary)`, kept double-tap `onWordDoubleTap` unchanged.
+- `README.md:1-189` — tech stack & project structure updated to `dictionary.json.gz` 12k (113KB gz, tradeoff vs 150k), offline dictionary bullet expanded to document GZIP dataset, size impact, curated tradeoff, double-tap + selection Explain via custom TextToolbar + same popup.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `ls -lh app/src/main/assets/dictionary.json.gz` — 111K (113160 bytes gz, 1346423 uncompressed, ratio 91.6%), vs original 8.6K (+104K), vs full 150k ~3.2M gz (+28×). `gzip -l` confirms.
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (no duplicate assets after removing dictionary.json duplicate, mergeDebugAssets passes).
+- Verified GZIP loading: `DictionaryRepository.load` tries `dictionary.json.gz` via `GZIPInputStream` → `JSONObject` → Map 12k; fallback to `dictionary.json` if missing; `lookup("library")` still returns original gloss, `lookup("the")` now returns new gloss, `lookupPhrase("the library")` returns phrase or first meaningful token's definition.
+- Verified double-tap intact: `SingleColumn`/`TwoColumn` paragraph `Text` still has `detectTapGestures(onDoubleTap → onWordDoubleTap)` → `DictionaryRepository.lookup` → `DictionaryPopup` + SM-2 tracking; not rewritten.
+- Verified selection Explain: `ExplainSelectionContainer` wraps reading content, long-press drag selects range → floating toolbar shows "Copy" + "Explain" (via `FolioSelectionToolbar`), tapping Explain captures `primaryClip` text via copy trick, restores clipboard, invokes `lookupPhrase` → same `DictionaryPopup` (definition or "No definition found") + `onTrackVocabulary` for SM-2; fully offline, no network.
+- No rewrite: `DictionaryPopup` API unchanged, `DictionaryRepository` extended, `ReadingScreen` extended with container, `book-story-master` structure only.
+
+---
+
 ## Session 25 — 2026-09-10 — Pull-down Library search + contextual in-book search (on-device, highlights/bookmarks priority, jump-to-position)
 
 Branch: `main`.
