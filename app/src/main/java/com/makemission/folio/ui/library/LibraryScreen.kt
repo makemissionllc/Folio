@@ -1,10 +1,9 @@
 package com.makemission.folio.ui.library
 
 import android.content.Intent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -28,7 +27,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -101,21 +99,6 @@ fun LibraryScreen(
     val settingsRepo = remember { SettingsRepository.get(context) }
     val autoScanEnabled by settingsRepo.autoScanEnabled.collectAsState(initial = null)
 
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri != null) {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            } catch (_: Exception) {
-            }
-            viewModel.importEpub(uri, context)
-        }
-    }
-
     LaunchedEffect(Unit) {
         viewModel.importError.collect { msg ->
             snackbarHostState.showSnackbar(msg)
@@ -138,6 +121,11 @@ fun LibraryScreen(
         }
     }
 
+    // Long-press bottom sheet state
+    var selectedBook by remember { mutableStateOf<Book?>(null) }
+    var showBookActions by remember { mutableStateOf(false) }
+    var showInfoDialog by remember { mutableStateOf(false) }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -150,18 +138,6 @@ fun LibraryScreen(
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    // EPUB mime + fallback; SAF filter is advisory — we validate after pick
-                    launcher.launch(arrayOf("application/epub+zip", "application/octet-stream", "*/*"))
-                },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) {
-                Text("+", style = MaterialTheme.typography.headlineMedium)
-            }
-        },
     ) { paddingValues ->
         // Swipe-right opens Settings; pull-down reveals search (standard pull-to-reveal, not pull-to-refresh)
         // Combined gesture handling — single pointerInput to avoid two competing detectors blocking each other.
@@ -200,11 +176,17 @@ fun LibraryScreen(
                             if (kotlin.math.abs(dx) < 0.5f && kotlin.math.abs(dy) < 0.5f) continue
                             totalDx += dx
                             totalDy += dy
-                            // Horizontal swipe prioritized when |dx| > |dy|
+                            // Horizontal swipe prioritized when |dx| > |dy| — right to Settings, left to Insights (keep teaser too)
                             if (totalDx > 120f && kotlin.math.abs(totalDx) > kotlin.math.abs(totalDy)) {
                                 drag.consume()
                                 hasNavigated = true
                                 onSettingsClick()
+                                totalDx = 0f
+                                totalDy = 0f
+                            } else if (totalDx < -120f && kotlin.math.abs(totalDx) > kotlin.math.abs(totalDy)) {
+                                drag.consume()
+                                hasNavigated = true
+                                onInsightsClick()
                                 totalDx = 0f
                                 totalDy = 0f
                             } else if (totalDy > 80f && kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx) && !isSearchRevealed) {
@@ -300,10 +282,33 @@ fun LibraryScreen(
                     else -> BookGrid(
                         books = books,
                         onBookClick = onBookClick,
+                        onLongClick = { book ->
+                            selectedBook = book
+                            showBookActions = true
+                        },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
             }
+        }
+        // Long-press actions sheet (reuse existing data, no new logic)
+        if (showBookActions && selectedBook != null) {
+            val book = selectedBook!!
+            val isCurated = viewModel.isCuratedBook(book)
+            com.makemission.folio.ui.library.components.LibraryBookActionsSheet(
+                book = book,
+                isCurated = isCurated,
+                onDismiss = { showBookActions = false },
+                onRemove = { viewModel.removeBook(book, context) },
+                onResetProgress = { viewModel.resetProgress(book.id) },
+                onBookInfo = { showInfoDialog = true },
+            )
+        }
+        if (showInfoDialog && selectedBook != null) {
+            com.makemission.folio.ui.library.components.BookInfoDialog(
+                book = selectedBook!!,
+                onDismiss = { showInfoDialog = false },
+            )
         }
     }
 }

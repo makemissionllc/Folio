@@ -194,6 +194,7 @@ private fun ReadingScreenContent(
     var showXRay by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
     var showInBookSearch by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
     var lassoCapture by remember { mutableStateOf<LassoCapture?>(null) }
     var dictPopup by remember { mutableStateOf<Pair<String, String?>?>(null) }
     // Pending jump targets (reuse flatIndex logic from bookmarks for search)
@@ -413,61 +414,12 @@ private fun ReadingScreenContent(
                         }
                     },
                     actions = {
-                        // In-book search (on-device, highlights/bookmarks priority, same SearchRepository)
-                        TextButton(onClick = { showInBookSearch = !showInBookSearch }) {
+                        // Single menu icon — replaces cluttered individual buttons (Bionic, X-Ray, Bookmarks, Search, Contrast)
+                        TextButton(onClick = { showMenu = true }) {
                             Text(
-                                "⌕",
+                                "☰",
                                 style = MaterialTheme.typography.titleMedium,
-                                color = if (showInBookSearch) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        // Bookmark icon — filled when current position is bookmarked (distinct from highlights)
-                        TextButton(onClick = {
-                            val (ch, para) = currentBookmarkPos
-                            onToggleBookmark(ch, para)
-                        }) {
-                            Text(
-                                text = if (isCurrentBookmarked) "🔖" else "☆",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = if (isCurrentBookmarked) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        TextButton(onClick = { showBookmarks = true }) {
-                            Text(
-                                text = if (bookmarks.isEmpty()) "Bookmarks" else "Bookmarks ${bookmarks.size}",
-                                style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        TextButton(onClick = { showXRay = true }) {
-                            Text(
-                                "X-Ray",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        TextButton(onClick = { bionicEnabled = !bionicEnabled }) {
-                            Text(
-                                if (bionicEnabled) "Bionic On" else "Bionic Off",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (bionicEnabled) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        TextButton(
-                            onClick = { if (hasSensor) adaptiveEnabled = !adaptiveEnabled },
-                            enabled = hasSensor,
-                        ) {
-                            Text(
-                                text = when {
-                                    !hasSensor -> "No sensor"
-                                    adaptiveEnabled -> "Contrast Auto"
-                                    else -> "Contrast Fixed"
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (adaptiveEnabled && hasSensor) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     },
@@ -709,6 +661,25 @@ private fun ReadingScreenContent(
         }
     }
 
+    if (showMenu) {
+        com.makemission.folio.ui.reader.components.ReaderMenuSheet(
+            bionicEnabled = bionicEnabled,
+            onToggleBionic = { bionicEnabled = !bionicEnabled },
+            onOpenXRay = { showXRay = true },
+            contrastEnabled = adaptiveEnabled,
+            hasSensor = hasSensor,
+            onToggleContrast = { if (hasSensor) adaptiveEnabled = !adaptiveEnabled },
+            bookmarksCount = bookmarks.size,
+            isCurrentBookmarked = isCurrentBookmarked,
+            onToggleBookmark = {
+                val (ch, para) = currentBookmarkPos
+                onToggleBookmark(ch, para)
+            },
+            onOpenBookmarks = { showBookmarks = true },
+            onToggleSearch = { showInBookSearch = !showInBookSearch },
+            onDismiss = { showMenu = false },
+        )
+    }
     if (showXRay) {
         XRayBottomSheet(
             xrayIndex = xrayIndex,

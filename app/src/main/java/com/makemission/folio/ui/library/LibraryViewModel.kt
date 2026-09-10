@@ -364,6 +364,50 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** Library long-press actions — sensible given existing data, no new feature logic. */
+    fun isCuratedBook(book: Book): Boolean =
+        curatedSampleBooks().any { it.id == book.id }
+
+    fun removeBook(book: Book, context: Context) {
+        if (isCuratedBook(book)) {
+            viewModelScope.launch { _scanResult.emit("Curated sample — can't be removed") }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val entity = withContext(Dispatchers.IO) { try { bookDao.getById(book.id) } catch (_: Exception) { null } }
+                // Delete private files (book file + cover) if present
+                entity?.filePath?.let { try { File(it).delete() } catch (_: Exception) {} }
+                entity?.coverImagePath?.let { try { File(it).delete() } catch (_: Exception) {} }
+                withContext(Dispatchers.IO) {
+                    try { bookDao.delete(book.id) } catch (_: Exception) {}
+                    try { db.readingProgressDao().clear(book.id) } catch (_: Exception) {}
+                    try { db.highlightDao().clearForBook(book.id) } catch (_: Exception) {}
+                    try { db.bookmarkDao().clearForBook(book.id) } catch (_: Exception) {}
+                    try { XRayCache.invalidate(context, book.id) } catch (_: Exception) {}
+                }
+                FolioLogger.i("Library", "Removed book ${book.id} ${book.title.take(60)}")
+                _scanResult.emit("Removed \"${book.title}\"")
+            } catch (e: Exception) {
+                FolioLogger.w("Library", "Remove failed ${book.id}: ${e.message}", e)
+                _scanResult.emit("Could not remove book")
+            }
+        }
+    }
+
+    fun resetProgress(bookId: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { db.readingProgressDao().clear(bookId) }
+                FolioLogger.i("Library", "Reset progress $bookId")
+                _scanResult.emit("Progress reset")
+            } catch (e: Exception) {
+                FolioLogger.w("Library", "Reset progress failed $bookId: ${e.message}", e)
+                _scanResult.emit("Could not reset progress")
+            }
+        }
+    }
+
     private fun computeSha256(file: File): String? {
         return try {
             if (!file.exists() || !file.isFile) return null

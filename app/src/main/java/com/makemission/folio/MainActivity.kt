@@ -1,5 +1,6 @@
 package com.makemission.folio
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -7,8 +8,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.ViewModelProvider
 import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.navigation.FolioNavHost
+import com.makemission.folio.ui.library.LibraryViewModel
 import com.makemission.folio.ui.reader.ReaderPageTurnHandler
 import com.makemission.folio.ui.theme.FolioPalette
 import com.makemission.folio.ui.theme.FolioTheme
@@ -24,6 +27,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleEpubViewIntent(intent)
         enableEdgeToEdge()
         setContent {
             val palette by SettingsRepository.get(this).darkPalette.collectAsState(initial = FolioPalette.DEFAULT)
@@ -31,6 +35,26 @@ class MainActivity : ComponentActivity() {
                 FolioNavHost()
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleEpubViewIntent(intent)
+    }
+
+    private fun handleEpubViewIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        // Only handle epub-like intents (mime or extension) — reuse existing import pipeline, no duplication
+        val isEpub = intent.type?.contains("epub", ignoreCase = true) == true ||
+            intent.type == "application/octet-stream" && uri.toString().contains(".epub", ignoreCase = true) ||
+            uri.toString().contains(".epub", ignoreCase = true)
+        if (!isEpub && intent.type != "*/*") return
+        try {
+            val vm = ViewModelProvider(this)[LibraryViewModel::class.java]
+            vm.importEpub(uri, this)
+        } catch (_: Exception) {}
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {

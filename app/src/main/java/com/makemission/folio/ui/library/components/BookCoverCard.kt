@@ -1,7 +1,8 @@
 package com.makemission.folio.ui.library.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -27,10 +28,12 @@ import coil.compose.AsyncImage
 import com.makemission.folio.data.model.Book
 import java.io.File
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BookCoverCard(
     book: Book,
     onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -41,7 +44,13 @@ fun BookCoverCard(
                 .clip(RoundedCornerShape(16.dp))
                 .background(book.coverColor)
                 .let { m ->
-                    if (onClick != null) m.clickable(onClick = onClick) else m
+                    when {
+                        onClick != null || onLongClick != null -> m.combinedClickable(
+                            onClick = { onClick?.invoke() },
+                            onLongClick = onLongClick,
+                        )
+                        else -> m
+                    }
                 },
         ) {
             // Cover image when available (imported EPUB), otherwise palette color
