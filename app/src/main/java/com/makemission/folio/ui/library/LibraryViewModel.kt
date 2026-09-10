@@ -123,7 +123,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             }
             imported + curatedSampleBooks()
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, curatedSampleBooks())
 
     private fun pickCoverColor(id: String): androidx.compose.ui.graphics.Color {
         val idx = (id.hashCode() and Int.MAX_VALUE) % FolioCoverPalette.size

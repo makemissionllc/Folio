@@ -79,13 +79,19 @@ fun FolioNavHost() {
                     navController.navigate(FolioRoute.Reader.create(book.id, book.title))
                 },
                 onVocabularyClick = {
-                    navController.navigate(FolioRoute.Vocabulary.route)
+                    navController.navigate(FolioRoute.Vocabulary.route) {
+                        launchSingleTop = true
+                    }
                 },
                 onSettingsClick = {
-                    navController.navigate(FolioRoute.Settings.route)
+                    navController.navigate(FolioRoute.Settings.route) {
+                        launchSingleTop = true
+                    }
                 },
                 onInsightsClick = {
-                    navController.navigate(FolioRoute.Insights.route)
+                    navController.navigate(FolioRoute.Insights.route) {
+                        launchSingleTop = true
+                    }
                 },
                 onSearchResultClick = { result ->
                     navController.navigate(
@@ -97,9 +103,9 @@ fun FolioNavHost() {
         composable(FolioRoute.Settings.route) {
             com.makemission.folio.ui.settings.SettingsScreen(
                 onBack = { navController.popBackStack() },
-                onInsightsClick = { navController.navigate(FolioRoute.Insights.route) },
-                onSmartFeaturesClick = { navController.navigate(FolioRoute.SmartFeatures.route) },
-                onLogsClick = { navController.navigate(FolioRoute.Logs.route) },
+                onInsightsClick = { navController.navigate(FolioRoute.Insights.route) { launchSingleTop = true } },
+                onSmartFeaturesClick = { navController.navigate(FolioRoute.SmartFeatures.route) { launchSingleTop = true } },
+                onLogsClick = { navController.navigate(FolioRoute.Logs.route) { launchSingleTop = true } },
             )
         }
         composable(FolioRoute.Insights.route) {

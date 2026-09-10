@@ -165,6 +165,7 @@ fun LibraryScreen(
     ) { paddingValues ->
         // Swipe-right opens Settings; pull-down reveals search (standard pull-to-reveal, not pull-to-refresh)
         // Combined gesture handling — single pointerInput to avoid two competing detectors blocking each other.
+        // Fix: debounce navigation so one swipe = one push (launchSingleTop alone isn't enough if gesture fires multiple times per drag).
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -172,16 +173,27 @@ fun LibraryScreen(
                 .pointerInput(onSettingsClick, isSearchRevealed) {
                     var totalDx = 0f
                     var totalDy = 0f
+                    var hasNavigated = false
                     awaitPointerEventScope {
                         while (true) {
                             val event = awaitPointerEvent()
                             val drag = event.changes.firstOrNull() ?: continue
                             // Only react when at least one finger is dragging; ignore hover
+                            // Reset on finger lift so next swipe can trigger again
+                            if (event.changes.all { !it.pressed }) {
+                                totalDx = 0f
+                                totalDy = 0f
+                                pullOffset = 0f
+                                hasNavigated = false
+                                continue
+                            }
                             if (!drag.pressed) {
                                 totalDx = 0f
                                 totalDy = 0f
                                 continue
                             }
+                            // If already navigated this gesture, ignore until lift
+                            if (hasNavigated) continue
                             val dx = drag.position.x - drag.previousPosition.x
                             val dy = drag.position.y - drag.previousPosition.y
                             // Accumulate only when movement is significant to avoid jitter
@@ -191,6 +203,7 @@ fun LibraryScreen(
                             // Horizontal swipe prioritized when |dx| > |dy|
                             if (totalDx > 120f && kotlin.math.abs(totalDx) > kotlin.math.abs(totalDy)) {
                                 drag.consume()
+                                hasNavigated = true
                                 onSettingsClick()
                                 totalDx = 0f
                                 totalDy = 0f
@@ -203,12 +216,6 @@ fun LibraryScreen(
                                     drag.consume()
                                     totalDy = 0f
                                 }
-                            }
-                            // Reset accumulators when finger lifted
-                            if (event.changes.all { !it.pressed }) {
-                                totalDx = 0f
-                                totalDy = 0f
-                                pullOffset = 0f
                             }
                         }
                     }

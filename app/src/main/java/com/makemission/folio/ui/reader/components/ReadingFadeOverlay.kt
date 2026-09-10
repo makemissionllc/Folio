@@ -19,6 +19,11 @@ import androidx.compose.ui.unit.dp
  * Works for both phone (single column) and tablet (spread), respects immersive chrome
  * toggle by being drawn inside the text Box (not over TopAppBar). Structural inspiration
  * from book-story-master's fade/edge treatments only.
+ *
+ * Fixed: previously used a 2-stop 0.96→0 gradient over 28/32dp which rendered as a
+ * faint hard band rather than a smooth iOS-style feather. Now uses a taller 36/40dp
+ * box with 3-stop opaque→mid→transparent stops so text feathers smoothly into the
+ * background without a visible line.
  */
 @Composable
 fun TopReadingFade(
@@ -35,13 +40,14 @@ fun TopReadingFade(
         Box(
             modifier = modifier
                 .fillMaxWidth()
-                .height(28.dp)
+                .height(36.dp)
                 .graphicsLayer { this.alpha = alpha }
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(
-                            backgroundColor.copy(alpha = 0.96f),
-                            backgroundColor.copy(alpha = 0f),
+                        colorStops = arrayOf(
+                            0.0f to backgroundColor,
+                            0.55f to backgroundColor.copy(alpha = 0.55f),
+                            1.0f to backgroundColor.copy(alpha = 0f),
                         )
                     )
                 )
@@ -64,13 +70,14 @@ fun BottomReadingFade(
         Box(
             modifier = modifier
                 .fillMaxWidth()
-                .height(32.dp)
+                .height(40.dp)
                 .graphicsLayer { this.alpha = alpha }
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(
-                            backgroundColor.copy(alpha = 0f),
-                            backgroundColor.copy(alpha = 0.96f),
+                        colorStops = arrayOf(
+                            0.0f to backgroundColor.copy(alpha = 0f),
+                            0.45f to backgroundColor.copy(alpha = 0.55f),
+                            1.0f to backgroundColor,
                         )
                     )
                 )

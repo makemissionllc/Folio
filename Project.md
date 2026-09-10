@@ -7,6 +7,35 @@ Active coding branch: `main`.
 
 ---
 
+## Session 32 — 2026-09-10 — Bug fixes: Library empty, Settings back-stack, Reading fade
+
+Branch: `main`.
+
+### Fixed
+
+- **BUG 1 — Library "No books found" even though curated samples should always show** — Root cause: `ui/library/LibraryViewModel.kt:112` `books` was `stateIn(..., SharingStarted.WhileSubscribed(5_000), emptyList())`. With `WhileSubscribed`, when Library had no active collector (e.g., during onboarding, after navigating to Settings, or on first composition before Room emitted), the upstream `bookDao.observeAll()` was cancelled and the StateFlow reset to `emptyList()`. The `map { imported + curatedSampleBooks() }` was therefore not applied until the next DB emission, so `LibraryScreen` saw `books.isEmpty()==true` and rendered `EmptyLibraryState` ("Your library is empty" — reported as "No books found") even though `curatedSampleBooks()` (8 titles) should make the grid never empty before first import. Manual import and auto-scan both feed via the same Room `books` table, so their inserts also depended on this flow; the UI would stay empty until a new DB emission after import. Fix: `LibraryViewModel` now `stateIn(..., SharingStarted.Eagerly, curatedSampleBooks())` — eager collection keeps Room observed, and the initial value is the 8 curated titles so the grid is populated instantly even before the first DB load; subsequent DB emissions still prepend `imported` before `curated`. Verified: `LibraryScreen` `when { searchQuery.isNotBlank() -> SearchResultsList; books.isEmpty() -> Empty; else -> BookGrid }` now shows 8 curated covers on fresh install and `imported + curated` after import/scan without a flash of empty. No feature added, only the StateFlow wiring corrected; auto-scan (`EpubScanner` → `persistParsedEpub` → `bookDao.insert`) and manual import (`importEpub` → `persistParsedEpub`) already shared the same pipeline and now correctly surface via the eager flow.
+
+- **BUG 2 — Settings back required 2-3 swipes** — Root cause: two compounding issues. (a) `navigation/FolioNav.kt:84` `onSettingsClick = { navController.navigate(Settings.route) }` used default `navigate` without `launchSingleTop`, so every swipe-right gesture pushed a new `Settings` destination even if one was already on top. (b) `ui/library/LibraryScreen.kt:168` swipe handler used a single `awaitPointerEventScope` loop that accumulated `totalDx` and called `onSettingsClick()` each time `totalDx>120` without debouncing; a single long swipe could accumulate past 120 multiple times as `totalDx` was reset to 0 but the finger was still down, firing 2-3 navigations from one gesture. The back stack became `[Library, Settings, Settings, Settings]`, so one `popBackStack()` only popped one entry and the user had to swipe back repeatedly. Fix: `FolioNav` now `navigate(...) { launchSingleTop = true }` for `Settings`, `Vocabulary`, `Insights`, `SmartFeatures`, `Logs` so duplicates are coalesced; `LibraryScreen` pointerInput now tracks `hasNavigated` per gesture and only fires once until finger lift (`event.changes.all { !it.pressed }` resets), with early `if (hasNavigated) continue` guard. Verified: one swipe-right from Library pushes exactly one Settings; one system back or header "← Back" (`popBackStack`) returns to Library immediately.
+
+- **BUG 3 — Top/bottom scroll fade not smooth (hard band)** — Root cause: `ui/reader/components/ReadingFadeOverlay.kt:24` `TopReadingFade`/`BottomReadingFade` used a 2-stop `Brush.verticalGradient` (`0.96f → 0f` over 28dp / `0f → 0.96f` over 32dp). Over a short box with only two stops the gradient rendered as a faint hard band rather than a feathered iOS-style edge, and starting at 0.96 instead of 1.0 left a visible line where the fade met the background. Fix: both fades now use a taller box (36dp top / 40dp bottom) with a 3-stop gradient `0f→background, 0.55f→background@0.55, 1f→transparent` (top) and mirrored for bottom (`transparent→0.55→background`). This produces a smooth feather over a longer ramp, matching the iOS reference, and the opaque stop is now `1.0` for a seamless blend. Usage in `ui/reader/ReadingScreen.kt:1061` (`SingleColumn`) and `:1528` (`TwoColumn`) unchanged (still `TopReadingFade(readingBackground, canScrollUp, align TopCenter)` / `BottomReadingFade(..., canScrollDown, align BottomCenter padding 48dp)`), heights are now intrinsic to the component. Verified visually and via `assembleDebug`: gradient now feathers without a hard line on both phone single-column and tablet spread, respects `chromeVisible` and `canScroll` visibility.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryViewModel.kt:111` — `books` `stateIn` now `SharingStarted.Eagerly` with initial `curatedSampleBooks()` instead of `WhileSubscribed(5_000)` + `emptyList()`.
+- `app/src/main/java/com/makemission/folio/navigation/FolioNav.kt:76` — all `navigate` calls for `Settings`/`Vocabulary`/`Insights`/`SmartFeatures`/`Logs` now `{ launchSingleTop = true }`.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryScreen.kt:167` — swipe handler added `hasNavigated` per-gesture debounce; now checks `hasNavigated` and only resets on `all { !pressed }`, preventing multiple `onSettingsClick` per drag.
+- `app/src/main/java/com/makemission/folio/ui/reader/components/ReadingFadeOverlay.kt:1` — `TopReadingFade` 28dp→36dp and `Bottom` 32dp→40dp, 2-stop `0.96f` gradient replaced with 3-stop `1.0→0.55→0f` / `0f→0.55→1.0` for smooth iOS feather; KDoc updated.
+- `README.md` / `Project.md` — this changelog; README Library/Settings/Reading sections note the fixes.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (40 tasks).
+- Bug 1: fresh install (clear data) → Library shows 8 curated covers immediately (no "Your library is empty"); manual SAF import → grid shows 9 (imported first + 8 curated); auto-scan on launch with permission → same pipeline via `persistParsedEpub` → eager flow shows new books without empty flash.
+- Bug 2: Library swipe-right once → Settings (1 entry); `adb shell dumpsys` back stack depth +1 only; header "← Back" or system back returns to Library in one pop; rapid swipe or long drag no longer pushes duplicates (hasNavigated debounce + launchSingleTop).
+- Bug 3: Reading phone + tablet spread — top fade 36dp feathers from opaque background at edge to transparent over text, bottom fade 40dp opposite; no hard band, smooth gradient verified via layout preview; `canScrollBackward`/`Forward` visibility still drives `animateFloatAsState` 220ms.
+
+---
+
 ## Session 31 — 2026-09-10 — Debug logging (local rolling log, crash capture, Settings Logs + export, privacy-safe)
 
 Branch: `main`.
