@@ -29,10 +29,11 @@ import kotlinx.coroutines.launch
 
 sealed class FolioRoute(val route: String) {
     data object Library : FolioRoute("library")
-    data object Reader : FolioRoute("reader/{bookId}/{bookTitle}") {
-        fun create(bookId: String, bookTitle: String): String {
+    data object Reader : FolioRoute("reader/{bookId}/{bookTitle}?ch={ch}&para={para}") {
+        fun create(bookId: String, bookTitle: String, chapterIndex: Int = -1, paragraphIndex: Int = -1): String {
             val encTitle = URLEncoder.encode(bookTitle, StandardCharsets.UTF_8.name())
-            return "reader/$bookId/$encTitle"
+            return if (chapterIndex >= 0 && paragraphIndex >= 0) "reader/$bookId/$encTitle?ch=$chapterIndex&para=$paragraphIndex"
+            else "reader/$bookId/$encTitle"
         }
     }
     data object Vocabulary : FolioRoute("vocabulary")
@@ -84,6 +85,11 @@ fun FolioNavHost() {
                 onInsightsClick = {
                     navController.navigate(FolioRoute.Insights.route)
                 },
+                onSearchResultClick = { result ->
+                    navController.navigate(
+                        FolioRoute.Reader.create(result.bookId, result.bookTitle, result.chapterIndex, result.paragraphIndex)
+                    )
+                },
             )
         }
         composable(FolioRoute.Settings.route) {
@@ -105,6 +111,8 @@ fun FolioNavHost() {
             arguments = listOf(
                 navArgument("bookId") { type = NavType.StringType },
                 navArgument("bookTitle") { type = NavType.StringType },
+                navArgument("ch") { type = NavType.IntType; defaultValue = -1 },
+                navArgument("para") { type = NavType.IntType; defaultValue = -1 },
             ),
         ) { backStackEntry ->
             val bookId = backStackEntry.arguments?.getString("bookId").orEmpty()
@@ -114,10 +122,14 @@ fun FolioNavHost() {
             } catch (_: Exception) {
                 rawTitle
             }
+            val ch = backStackEntry.arguments?.getInt("ch") ?: -1
+            val para = backStackEntry.arguments?.getInt("para") ?: -1
             ReadingScreen(
                 bookId = bookId,
                 bookTitle = bookTitle.ifBlank { "Reading" },
                 onBack = { navController.popBackStack() },
+                initialChapterIndex = ch.takeIf { it >= 0 },
+                initialParagraphIndex = para.takeIf { it >= 0 },
             )
         }
     }

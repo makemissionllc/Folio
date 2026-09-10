@@ -13,14 +13,18 @@ import com.makemission.folio.data.model.Book
 import com.makemission.folio.data.model.FolioCoverPalette
 import com.makemission.folio.data.model.curatedSampleBooks
 import com.makemission.folio.data.scan.EpubScanner
+import com.makemission.folio.data.search.SearchRepository
 import com.makemission.folio.data.xray.XRayCache
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -53,6 +57,54 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     val dueVocabularyCount = vocabularyDao.observeDueCount()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    // --- Pull-down Library search (on-device, highlights/bookmarks priority) ---
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _searchResults = MutableStateFlow<List<SearchRepository.SearchResult>>(emptyList())
+    val searchResults: StateFlow<List<SearchRepository.SearchResult>> = _searchResults.asStateFlow()
+
+    private val _isSearching = MutableStateFlow(false)
+    val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
+
+    init {
+        observeLibrarySearch()
+    }
+
+    @OptIn(FlowPreview::class)
+    private fun observeLibrarySearch() {
+        viewModelScope.launch {
+            _searchQuery
+                .debounce(280)
+                .distinctUntilChanged()
+                .collect { q ->
+                    if (q.isBlank()) {
+                        _searchResults.value = emptyList()
+                        _isSearching.value = false
+                    } else {
+                        _isSearching.value = true
+                        try {
+                            val results = SearchRepository.searchLibrary(q, getApplication<Application>().applicationContext)
+                            _searchResults.value = results
+                        } catch (_: Exception) {
+                            _searchResults.value = emptyList()
+                        } finally {
+                            _isSearching.value = false
+                        }
+                    }
+                }
+        }
+    }
+
+    fun onSearchQueryChange(query: String) {
+        _searchQuery.value = query
+    }
+
+    fun clearSearch() {
+        _searchQuery.value = ""
+        _searchResults.value = emptyList()
+    }
 
     /** Imported books + curated samples so the grid is never empty before first import. */
     val books: StateFlow<List<Book>> = bookDao.observeAll()

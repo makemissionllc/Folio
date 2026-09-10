@@ -16,12 +16,16 @@ import com.makemission.folio.data.vocabulary.Sm2
 import com.makemission.folio.data.xray.XRayCache
 import com.makemission.folio.data.xray.XRayExtractor
 import com.makemission.folio.data.xray.XRayTerm
+import com.makemission.folio.data.search.SearchRepository
 import com.makemission.folio.ui.reader.components.encodeFloats
 import com.makemission.folio.ui.reader.components.encodePoints
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -66,6 +70,16 @@ class ReadingViewModel(
             initialValue = emptyList(),
         )
 
+    // In-book search (on-device, highlights/bookmarks priority, same SearchRepository)
+    private val _inBookQuery = MutableStateFlow("")
+    val inBookQuery: StateFlow<String> = _inBookQuery
+
+    private val _inBookResults = MutableStateFlow<List<SearchRepository.SearchResult>>(emptyList())
+    val inBookResults: StateFlow<List<SearchRepository.SearchResult>> = _inBookResults
+
+    private val _isInBookSearching = MutableStateFlow(false)
+    val isInBookSearching: StateFlow<Boolean> = _isInBookSearching
+
     private val _xrayIndex = MutableStateFlow<Map<Int, List<XRayTerm>>>(emptyMap())
     val xrayIndex: StateFlow<Map<Int, List<XRayTerm>>> = _xrayIndex.asStateFlow()
 
@@ -109,7 +123,39 @@ class ReadingViewModel(
 
             // LCS re-anchoring (§5): if the EPUB file changed, relocate highlights
             reanchorHighlightsIfNeeded(chapters)
+            observeInBookSearch()
         }
+    }
+
+    @OptIn(FlowPreview::class)
+    private fun observeInBookSearch() {
+        viewModelScope.launch {
+            _inBookQuery
+                .debounce(260)
+                .distinctUntilChanged()
+                .collect { q ->
+                    if (q.isBlank()) {
+                        _inBookResults.value = emptyList()
+                        _isInBookSearching.value = false
+                    } else {
+                        _isInBookSearching.value = true
+                        try {
+                            val results = SearchRepository.searchInBook(bookId, q, getApplication<Application>().applicationContext)
+                            _inBookResults.value = results
+                        } catch (_: Exception) {
+                            _inBookResults.value = emptyList()
+                        } finally {
+                            _isInBookSearching.value = false
+                        }
+                    }
+                }
+        }
+    }
+
+    fun onInBookQueryChange(query: String) { _inBookQuery.value = query }
+    fun clearInBookSearch() {
+        _inBookQuery.value = ""
+        _inBookResults.value = emptyList()
     }
 
     private fun launchXRayIfNeeded(
