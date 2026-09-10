@@ -12,6 +12,7 @@ import com.makemission.folio.data.db.entity.Bookmark
 import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.db.entity.ReadingProgress
 import com.makemission.folio.data.epub.EpubParser
+import com.makemission.folio.data.logging.FolioLogger
 import com.makemission.folio.data.vocabulary.Sm2
 import com.makemission.folio.data.xray.XRayCache
 import com.makemission.folio.data.xray.XRayExtractor
@@ -88,17 +89,28 @@ class ReadingViewModel(
 
     init {
         viewModelScope.launch {
-            val saved = dao.observe(bookId).firstOrNull()
+            FolioLogger.i("Reading", "Opening bookId=$bookId")
+            val saved = try { dao.observe(bookId).firstOrNull() } catch (e: Exception) {
+                FolioLogger.w("Reading", "Failed to load progress for $bookId: ${e.message}", e)
+                null
+            }
             // Try to load the imported book's private file first (SAF copy), then assets, then fallback
             val app = getApplication<Application>()
-            val stored = try { db.bookDao().getById(bookId) } catch (_: Exception) { null }
+            val stored = try { db.bookDao().getById(bookId) } catch (e: Exception) {
+                FolioLogger.w("Reading", "Failed to lookup book $bookId: ${e.message}", e)
+                null
+            }
             val epub = when {
                 stored?.filePath != null -> {
                     val f = java.io.File(stored.filePath)
-                    if (f.exists() && f.canRead()) EpubParser.parse(f) else null
+                    if (f.exists() && f.canRead()) EpubParser.parse(f) else {
+                        FolioLogger.w("Reading", "Stored file missing/unreadable for $bookId: ${stored.filePath?.take(80)}")
+                        null
+                    }
                 }
                 else -> null
-            } ?: EpubParser.loadFromAssetsOrNull(app) 
+            } ?: EpubParser.loadFromAssetsOrNull(app)
+            if (epub == null) FolioLogger.w("Reading", "EPUB parse null for $bookId, using fallback")
             val chapters = epub?.chapters ?: EpubParser.sampleFallbackChapters(bookTitle)
 
             // Prefer stored title/author when available (keeps library grid consistent)
@@ -142,7 +154,8 @@ class ReadingViewModel(
                         try {
                             val results = SearchRepository.searchInBook(bookId, q, getApplication<Application>().applicationContext)
                             _inBookResults.value = results
-                        } catch (_: Exception) {
+                        } catch (e: Exception) {
+                            FolioLogger.w("Search", "In-book search failed q='${q.take(60)}' ${e.message}", e)
                             _inBookResults.value = emptyList()
                         } finally {
                             _isInBookSearching.value = false
@@ -167,15 +180,23 @@ class ReadingViewModel(
             _isXRayLoading.value = true
             try {
                 // Try disk cache first (computed on import/first open)
-                val cached = XRayCache.load(app, bookId)
+                val cached = try { XRayCache.load(app, bookId) } catch (e: Exception) {
+                    FolioLogger.w("XRay", "Cache load failed for $bookId: ${e.message}", e)
+                    null
+                }
                 if (cached != null && cached.isNotEmpty()) {
                     _xrayIndex.value = cached
                     return@launch
                 }
                 // Compute locally, deterministic, no network/dictionary
-                val index = XRayExtractor.extract(chapters, topK = 8)
+                val index = try { XRayExtractor.extract(chapters, topK = 8) } catch (e: Exception) {
+                    FolioLogger.w("XRay", "Extract failed for $bookId: ${e.message}", e)
+                    emptyMap()
+                }
                 _xrayIndex.value = index
-                XRayCache.save(app, bookId, index)
+                try { XRayCache.save(app, bookId, index) } catch (e: Exception) {
+                    FolioLogger.w("XRay", "Cache save failed for $bookId: ${e.message}", e)
+                }
             } finally {
                 _isXRayLoading.value = false
             }
@@ -201,21 +222,26 @@ class ReadingViewModel(
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            FolioLogger.w("LCS", "Re-anchor failed for $bookId: ${e.message}", e)
             // Never crash on anchoring — orphaned highlights are acceptable
         }
     }
 
     fun saveProgress(chapterIndex: Int, paragraphIndex: Int) {
         viewModelScope.launch {
-            dao.upsert(
-                ReadingProgress(
-                    bookId = bookId,
-                    chapterIndex = chapterIndex,
-                    paragraphIndex = paragraphIndex,
-                    lastReadMillis = System.currentTimeMillis(),
-                ),
-            )
+            try {
+                dao.upsert(
+                    ReadingProgress(
+                        bookId = bookId,
+                        chapterIndex = chapterIndex,
+                        paragraphIndex = paragraphIndex,
+                        lastReadMillis = System.currentTimeMillis(),
+                    ),
+                )
+            } catch (e: Exception) {
+                FolioLogger.w("Progress", "saveProgress failed $bookId $chapterIndex/$paragraphIndex: ${e.message}", e)
+            }
         }
     }
 
@@ -231,18 +257,22 @@ class ReadingViewModel(
         val anchor = if (anchorText.isNotBlank()) anchorText
         else LcsAnchor.snippetForHighlight(_uiState.value.chapters, chapterIndex)
         viewModelScope.launch {
-            highlightDao.insert(
-                Highlight(
-                    bookId = bookId,
-                    chapterIndex = chapterIndex,
-                    pointsData = encodePoints(normalizedPoints),
-                    pressuresData = if (pressures.size == normalizedPoints.size) encodeFloats(pressures) else "",
-                    tiltsData = if (tilts.size == normalizedPoints.size) encodeFloats(tilts) else "",
-                    anchorText = anchor.take(LcsAnchor.ANCHOR_SNIPPET_LEN),
-                    isOrphaned = false,
-                    color = color.toArgb(),
-                ),
-            )
+            try {
+                highlightDao.insert(
+                    Highlight(
+                        bookId = bookId,
+                        chapterIndex = chapterIndex,
+                        pointsData = encodePoints(normalizedPoints),
+                        pressuresData = if (pressures.size == normalizedPoints.size) encodeFloats(pressures) else "",
+                        tiltsData = if (tilts.size == normalizedPoints.size) encodeFloats(tilts) else "",
+                        anchorText = anchor.take(LcsAnchor.ANCHOR_SNIPPET_LEN),
+                        isOrphaned = false,
+                        color = color.toArgb(),
+                    ),
+                )
+            } catch (e: Exception) {
+                FolioLogger.w("Highlight", "addHighlight failed $bookId ch=$chapterIndex: ${e.message}", e)
+            }
         }
     }
 
@@ -263,7 +293,11 @@ class ReadingViewModel(
     ) = addHighlight(normalizedPoints, pressures, tilts, chapterIndex, anchorText, color)
 
     fun clearHighlights() {
-        viewModelScope.launch { highlightDao.clearForBook(bookId) }
+        viewModelScope.launch {
+            try { highlightDao.clearForBook(bookId) } catch (e: Exception) {
+                FolioLogger.w("Highlight", "clearHighlights failed $bookId: ${e.message}", e)
+            }
+        }
     }
 
     // ---- Bookmarks (distinct from highlights) ----
@@ -275,50 +309,66 @@ class ReadingViewModel(
     fun addBookmark(chapterIndex: Int, paragraphIndex: Int, preview: String = "") {
         val safePreview = preview.take(120)
         viewModelScope.launch {
-            // Avoid duplicates at exact position (idempotent)
-            val existing = bookmarkDao.findExact(bookId, chapterIndex, paragraphIndex)
-            if (existing != null) return@launch
-            val chapters = _uiState.value.chapters
-            val autoPreview = if (safePreview.isNotBlank()) safePreview
-            else chapters.getOrNull(chapterIndex)?.paragraphs?.getOrNull(paragraphIndex)?.take(120) ?: ""
-            bookmarkDao.insert(
-                Bookmark(
-                    bookId = bookId,
-                    chapterIndex = chapterIndex.coerceAtLeast(0),
-                    paragraphIndex = paragraphIndex.coerceAtLeast(0),
-                    previewText = autoPreview,
-                ),
-            )
-        }
-    }
-
-    fun removeBookmark(bookmark: Bookmark) {
-        viewModelScope.launch { bookmarkDao.delete(bookmark) }
-    }
-
-    fun removeBookmark(chapterIndex: Int, paragraphIndex: Int) {
-        viewModelScope.launch {
-            val exact = bookmarkDao.findExact(bookId, chapterIndex, paragraphIndex) ?: return@launch
-            bookmarkDao.delete(exact)
-        }
-    }
-
-    fun toggleBookmark(chapterIndex: Int, paragraphIndex: Int) {
-        viewModelScope.launch {
-            val exact = bookmarkDao.findExact(bookId, chapterIndex, paragraphIndex)
-            if (exact != null) {
-                bookmarkDao.delete(exact)
-            } else {
+            try {
+                // Avoid duplicates at exact position (idempotent)
+                val existing = bookmarkDao.findExact(bookId, chapterIndex, paragraphIndex)
+                if (existing != null) return@launch
                 val chapters = _uiState.value.chapters
-                val preview = chapters.getOrNull(chapterIndex)?.paragraphs?.getOrNull(paragraphIndex)?.take(120) ?: ""
+                val autoPreview = if (safePreview.isNotBlank()) safePreview
+                else chapters.getOrNull(chapterIndex)?.paragraphs?.getOrNull(paragraphIndex)?.take(120) ?: ""
                 bookmarkDao.insert(
                     Bookmark(
                         bookId = bookId,
                         chapterIndex = chapterIndex.coerceAtLeast(0),
                         paragraphIndex = paragraphIndex.coerceAtLeast(0),
-                        previewText = preview,
+                        previewText = autoPreview,
                     ),
                 )
+            } catch (e: Exception) {
+                FolioLogger.w("Bookmark", "addBookmark failed $bookId $chapterIndex/$paragraphIndex: ${e.message}", e)
+            }
+        }
+    }
+
+    fun removeBookmark(bookmark: Bookmark) {
+        viewModelScope.launch {
+            try { bookmarkDao.delete(bookmark) } catch (e: Exception) {
+                FolioLogger.w("Bookmark", "removeBookmark failed: ${e.message}", e)
+            }
+        }
+    }
+
+    fun removeBookmark(chapterIndex: Int, paragraphIndex: Int) {
+        viewModelScope.launch {
+            try {
+                val exact = bookmarkDao.findExact(bookId, chapterIndex, paragraphIndex) ?: return@launch
+                bookmarkDao.delete(exact)
+            } catch (e: Exception) {
+                FolioLogger.w("Bookmark", "removeBookmark pos failed: ${e.message}", e)
+            }
+        }
+    }
+
+    fun toggleBookmark(chapterIndex: Int, paragraphIndex: Int) {
+        viewModelScope.launch {
+            try {
+                val exact = bookmarkDao.findExact(bookId, chapterIndex, paragraphIndex)
+                if (exact != null) {
+                    bookmarkDao.delete(exact)
+                } else {
+                    val chapters = _uiState.value.chapters
+                    val preview = chapters.getOrNull(chapterIndex)?.paragraphs?.getOrNull(paragraphIndex)?.take(120) ?: ""
+                    bookmarkDao.insert(
+                        Bookmark(
+                            bookId = bookId,
+                            chapterIndex = chapterIndex.coerceAtLeast(0),
+                            paragraphIndex = paragraphIndex.coerceAtLeast(0),
+                            previewText = preview,
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
+                FolioLogger.w("Bookmark", "toggleBookmark failed: ${e.message}", e)
             }
         }
     }
@@ -343,7 +393,9 @@ class ReadingViewModel(
                         vocabularyDao.upsert(existing.copy(definition = definition))
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                FolioLogger.w("Vocabulary", "trackVocabulary failed '${key.take(30)}': ${e.message}", e)
+            }
         }
     }
 }

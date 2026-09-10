@@ -7,6 +7,45 @@ Active coding branch: `main`.
 
 ---
 
+## Session 31 — 2026-09-10 — Debug logging (local rolling log, crash capture, Settings Logs + export, privacy-safe)
+
+Branch: `main`.
+
+### Built
+
+- **Local debug logger — rolling file, privacy-safe, no network** — New `data/logging/FolioLogger.kt`: `object FolioLogger` with `Level {DEBUG,INFO,WARN,ERROR}` + single-thread `Executor` for file I/O (callers never block), `SimpleDateFormat "yyyy-MM-dd HH:mm:ss.SSS"` + `[LEVEL] [Tag] message | stack` lines (`MAX_MESSAGE_LEN 2000`, tag sanitize `[^A-Za-z0-9._-]`), `filesDir/logs/folio.log` capped at `256 KB` rolling (when over, reads lines and keeps most recent half `≥200`, rewrite, else append), `MAX_MESSAGE_LEN` truncation + newline strip. Privacy: callers pass ids/titles truncated to 60–80 chars, no book text; logger additionally truncates any overlong message. Methods `d/i/w/e` + `log(level,tag,msg,throwable)` (async via executor + `Log.d/i/w/e` echo) + `logSync` for crash handler (synchronous `writeEntry`), `getLogDir/File`, `fileSizeBytes`, `readRecent(context, 400/500)` tail, `readAllText`, `clear` (async) + `clearSync`, `init(context)` ensures dir/file + `installCrashHandler` (`Thread.setDefaultUncaughtExceptionHandler` chains to previous, `logSync ERROR Crash` with `thread.name`). Early `init` via new `FolioApp : Application` (`onCreate FolioLogger.init + i App onCreate`). No network. Structural inspiration from `book-story-master` crash/layout only.
+- **Wired into key error paths (useful for debugging, not every UI)** — `data/epub/EpubParser.kt`: `parse(InputStream)` logs `WARN` no-chapters, `INFO` title/chapters on success, `WARN` exception; `parse(File)` `WARN` on file fail; `extractCoverToFile` `INFO` bytes / `WARN` fail; `loadFromAssetsOrNull` `WARN`. `ui/library/LibraryViewModel.kt`: `importEpub` `INFO` started + `WARN` parse null + `INFO` success + `ERROR` exception; `observeLibrarySearch` `WARN` on exception; `scanDevice` `INFO` started + `WARN` permission + `INFO` done `found/imported/skipped` + `ERROR` on catch. `ui/reader/ReadingViewModel.kt`: init `INFO` opening + `WARN` progress lookup fail, `WARN` book lookup fail, `WARN` stored file missing, `WARN` fallback null; `observeInBookSearch` `WARN`; `launchXRayIfNeeded` `WARN` cache load/extract/save; `reanchor` `WARN`; `saveProgress`/`addHighlight`/`clearHighlights`/`addBookmark`/`removeBookmark`/`toggleBookmark`/`trackVocabulary` each `WARN` on catch with `bookId/chapter` context, truncated. All without logging full text/preview beyond 60–120 chars.
+- **Logs screen — Support/Developer destination, view + export + clear, on-device only** — New `ui/settings/LogsScreen.kt`: `Scaffold` `background` deep green, top `Column` `statusBarsPadding` `← Back` + `headlineLarge "Logs"` + bodySmall subtitle, `LazyColumn` with `SUPPORT · DEVELOPER` `Card` (`surface` `16dp` `1dp`, `Row` 8dp primary dot + `labelMedium`, bodySmall explanation `technical events only — not your reading content`, `labelSmall` storage `filesDir/logs/folio.log · 256 KB rolling · 500 lines`, privacy `Nothing is sent automatically…`), `Row` `Button Export logs` (`primary` `20dp`) → `FileProvider.getUriForFile` `ACTION_SEND text/plain` `EXTRA_STREAM uri` + `EXTRA_SUBJECT` + `EXTRA_TEXT` `createChooser`, `OutlinedButton Refresh` (reloads `readRecent 500` + `fileSizeBytes` on `Dispatchers.IO`), `OutlinedButton Clear` (`FolioLogger.clear` async + 200ms delay refresh). Then `Card` recent entries: empty → `No log entries yet` + encouraging copy, else `RECENT ENTRIES — NEWEST LAST` `labelSmall` + `Card` `surface` horizontally scrollable (`rememberScrollState`) monospace `FontFamily.Monospace` `bodySmall` lines colored `ERROR error` / `WARN primary` / else `onSurface`. Empty/loading handled. FolioTheme editorial.
+- **Settings integration — new Support / Developer section + navigation (no rewrite)** — `ui/settings/SettingsScreen.kt`: added `onLogsClick: () -> Unit = {}` param (default preserves existing calls), inserted new `SettingsSection("Support / Developer", "Debug logs · on-device only")` between Appearance and Privacy/Data with `Column` explainer texts (on-device only, technical events not book text) + `Button("View logs", primary)` → `onLogsClick` + `labelSmall` storage note `256 KB rolling · share via system sheet`, updated `SettingsHeader` subtitle to `Reading • Library • Insights • Smart Features • Appearance • Support • Privacy`. `navigation/FolioNav.kt`: added `FolioRoute.Logs("logs")` + `composable(Settings)` now passes `onLogsClick = { navigate Logs }` + new `composable(Logs)` → `LogsScreen(onBack=pop)`. Extends existing `FolioNavHost`/`SettingsScreen`, no rewrite.
+- **FileProvider + manifest + app init** — `app/src/main/res/xml/file_paths.xml`: new `<files-path name="logs" path="logs/" />` + fallback `files` + `cache`. `app/src/main/AndroidManifest.xml`: added `android:name=".FolioApp"` to `<application>` + `<provider FileProvider authorities="${applicationId}.fileprovider" exported false grantUriPermissions true meta-data file_paths>`. `app/src/main/java/com/makemission/folio/FolioApp.kt`: new `Application` installs logger early.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/logging/FolioLogger.kt` — new: rolling log, levels, executor, crash handler, file helpers.
+- `app/src/main/java/com/makemission/folio/FolioApp.kt` — new: `Application` `onCreate FolioLogger.init`.
+- `app/src/main/java/com/makemission/folio/ui/settings/LogsScreen.kt` — new: `LogsScreen` (Scaffold + Support card + Export/Refresh/Clear + monospace list, `FileProvider` share, `Dispatchers.IO`).
+- `app/src/main/res/xml/file_paths.xml` — new: `files-path logs/` + `files` + `cache` for `FileProvider`.
+- `app/src/main/AndroidManifest.xml:1-40` — added `android:name=".FolioApp"` + `FileProvider` provider + `file_paths` meta-data.
+- `app/src/main/java/com/makemission/folio/navigation/FolioNav.kt:1-145` — added `FolioRoute.Logs`, `Settings` composable now passes `onLogsClick`, added `composable(Logs)` → `LogsScreen`.
+- `app/src/main/java/com/makemission/folio/ui/settings/SettingsScreen.kt:1-650` — added `onLogsClick` param (default `{}`), new `Support / Developer` `SettingsSection` (explainer + `Button View logs` + storage note) between Appearance and Privacy, updated `SettingsHeader` subtitle to include Support.
+- `app/src/main/java/com/makemission/folio/data/epub/EpubParser.kt:1-340` — added `FolioLogger` import + `INFO/WARN` logs for parse/cover/assets.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryViewModel.kt:1-380` — added `FolioLogger` import + `INFO/WARN/ERROR` for import/scan/search.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingViewModel.kt:1-360` — added `FolioLogger` import + `INFO/WARN` for init/progress/X-Ray/reanchor/bookmarks/highlights/vocab/search.
+- `README.md:1-205` — intro adds Support·Logs; tech stack adds `FolioLogger`/`FolioApp` 256 KB FileProvider; project structure adds `FolioApp` + `FolioNav` logs route + `data/logging/FolioLogger` + `ui/settings/LogsScreen` + `xml/file_paths`; added **Debug logging** section (rolling, crash, privacy, export, Settings, manifest, inspiration); Settings bullet now 7 sections (adds Support / Developer).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=$HOME/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (40 tasks, `compileDebugKotlin` passes after fixing `try` expression `return`).
+- Verified navigation: Settings → Support / Developer → View logs → `FolioRoute.Logs` via `FolioNav`; Back → `popBackStack` to Settings; no rewrite, deep-green `background`, `surface` cards `16dp`, monospace list.
+- Verified export: `LogsScreen` `Export logs` builds `FileProvider.getUriForFile(context, "${packageName}.fileprovider", FolioLogger.getLogFile(context))` with `FLAG_GRANT_READ_URI_PERMISSION` + `ACTION_SEND` `createChooser("Share Folio log")` — share sheet shows (tested with log file creation); `Clear` wipes file then refresh shows `No log entries yet`.
+- Verified rolling: `FolioLogger` writes via single-thread executor, `MAX_FILE_BYTES 262144`, trims to half lines when over; `sanitize` caps 2000 chars; manual overflow test keeps recent.
+- Verified privacy: no `paragraph`/`highlight`/`previewText` full content logged — only ids, counts, truncated titles (60 chars), `file.name take 80`, `key take 30`, `q take 60`; `sanitize` additionally truncates.
+- Verified crash handler: `FolioApp.onCreate` `FolioLogger.init` installs `UncaughtExceptionHandler` that `logSync ERROR Crash` then chains to default; not triggered in normal run but init logs `App onCreate`.
+- No duplication: `ui/settings/LogsScreen.kt` is new; `SettingsScreen` extended with default param, existing calls compile; `FolioRoute` extended, no overwrite; `book-story-master` crash/layout inspiration only.
+
+---
+
 ## Session 30 — 2026-09-10 — Smart Features explainer (editorial guide, plain English, on-brand, 12 on-device features)
 
 Branch: `main`.

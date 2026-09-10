@@ -68,6 +68,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onInsightsClick: () -> Unit = {},
     onSmartFeaturesClick: () -> Unit = {},
+    onLogsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -307,6 +308,44 @@ fun SettingsScreen(
 
             item {
                 SettingsSection(
+                    title = "Support / Developer",
+                    subtitle = "Debug logs · on-device only",
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "If something goes wrong — import fails, a file won’t parse, or the app crashes — Folio keeps a small local log to help fix it. Nothing is sent automatically.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "Logs capture technical events (errors, failed operations) — not your book text or highlights. You can view and export them for a bug report.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Button(
+                            onClick = onLogsClick,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                        ) {
+                            Text("View logs", style = MaterialTheme.typography.labelLarge)
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "Stored at filesDir/logs/folio.log · 256 KB rolling · share via system sheet",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        )
+                    }
+                }
+            }
+
+            item {
+                SettingsSection(
                     title = "Privacy / Data",
                     subtitle = "On-device only",
                 ) {
@@ -348,7 +387,7 @@ private fun SettingsHeader(
             color = MaterialTheme.colorScheme.onBackground,
         )
         Text(
-            text = "Reading • Library • Insights • Smart Features • Appearance • Privacy",
+            text = "Reading • Library • Insights • Smart Features • Appearance • Support • Privacy",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -1,6 +1,7 @@
 package com.makemission.folio.data.epub
 
 import android.content.Context
+import com.makemission.folio.data.logging.FolioLogger
 import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
 import java.io.File
@@ -89,9 +90,14 @@ object EpubParser {
                 parseChapterBytes(entry.key, entry.value, preferredTitle = chapterTitle)
             }
 
-            if (chapters.isEmpty()) return null
+            if (chapters.isEmpty()) {
+                FolioLogger.w("EpubParser", "Parse produced no chapters for stream")
+                return null
+            }
+            FolioLogger.i("EpubParser", "Parsed book title='${title.take(60)}' chapters=${chapters.size}")
             EpubBook(title = title, author = author, chapters = chapters)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            FolioLogger.w("EpubParser", "Parse failed: ${e.message}", e)
             null
         }
     }
@@ -188,7 +194,8 @@ object EpubParser {
     /** Parse from a [File] on private storage. */
     fun parse(file: File): EpubBook? = try {
         file.inputStream().use { parse(it) }
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        FolioLogger.w("EpubParser", "Parse file failed: ${file.name.take(80)} ${e.message}", e)
         null
     }
 
@@ -247,8 +254,10 @@ object EpubParser {
             }
             val outFile = File(coversDir, "$bookId.$ext")
             outFile.writeBytes(bytes)
+            FolioLogger.i("EpubParser", "Cover extracted for $bookId (${bytes.size} bytes)")
             outFile.absolutePath
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            FolioLogger.w("EpubParser", "Cover extract failed for $bookId: ${e.message}", e)
             null
         }
     }
@@ -256,7 +265,8 @@ object EpubParser {
     fun extractCoverToFile(file: File, context: Context, bookId: String): String? {
         return try {
             file.inputStream().use { extractCoverToFile(it, context, bookId) }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            FolioLogger.w("EpubParser", "Cover extract (file) failed for $bookId: ${e.message}", e)
             null
         }
     }
@@ -324,7 +334,8 @@ object EpubParser {
     /** Try assets/sample.epub, else return null so caller uses fallback. */
     fun loadFromAssetsOrNull(context: Context): EpubBook? = try {
         context.assets.open("sample.epub").use { stream -> parse(stream) }
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        FolioLogger.w("EpubParser", "loadFromAssetsOrNull failed: ${e.message}", e)
         null
     }
 }

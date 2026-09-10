@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.makemission.folio.data.db.FolioDatabase
 import com.makemission.folio.data.db.entity.BookEntity
 import com.makemission.folio.data.epub.EpubParser
+import com.makemission.folio.data.logging.FolioLogger
 import com.makemission.folio.data.model.Book
 import com.makemission.folio.data.model.FolioCoverPalette
 import com.makemission.folio.data.model.curatedSampleBooks
@@ -87,7 +88,8 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                         try {
                             val results = SearchRepository.searchLibrary(q, getApplication<Application>().applicationContext)
                             _searchResults.value = results
-                        } catch (_: Exception) {
+                        } catch (e: Exception) {
+                            FolioLogger.w("Search", "Library search failed q='${q.take(60)}' ${e.message}", e)
                             _searchResults.value = emptyList()
                         } finally {
                             _isSearching.value = false
@@ -133,12 +135,17 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     fun importEpub(uri: Uri, context: Context) {
         viewModelScope.launch {
             _isImporting.value = true
+            FolioLogger.i("Import", "Import started uri=${uri.toString().take(80)}")
             try {
                 val result = withContext(Dispatchers.IO) { importInternal(uri, context) }
                 if (result == null) {
+                    FolioLogger.w("Import", "Import parse failed — not an EPUB or corrupted: uri=${uri.toString().take(80)}")
                     _importError.emit("Could not parse EPUB — file may be corrupted or not an EPUB.")
+                } else {
+                    FolioLogger.i("Import", "Import success id=${result.id} title='${result.title.take(60)}'")
                 }
             } catch (e: Exception) {
+                FolioLogger.e("Import", "Import exception: ${e.message}", e)
                 _importError.emit(e.message ?: "Failed to import EPUB.")
             } finally {
                 _isImporting.value = false
@@ -253,7 +260,9 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     fun scanDevice(context: Context) {
         if (_isScanning.value) return
         viewModelScope.launch {
+            FolioLogger.i("Scan", "scanDevice started")
             if (!EpubScanner.hasStoragePermission(context)) {
+                FolioLogger.w("Scan", "scanDevice permission denied")
                 _scanResult.emit("Storage permission not granted — auto-scan unavailable. Use + to import manually.")
                 return@launch
             }
@@ -339,11 +348,13 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                     if (imported + skipped >= 80) break
                 }
                 _scanProgress.value = null
+                FolioLogger.i("Scan", "Scan done found=${found.size} imported=$imported skipped=$skipped")
                 when {
                     imported > 0 -> _scanResult.emit("Scan complete: $imported new book(s) added${if (skipped > 0) ", $skipped already in library" else ""}.")
                     else -> _scanResult.emit("Scan complete: no new books (${found.size} found, all already imported).")
                 }
             } catch (e: Exception) {
+                FolioLogger.e("Scan", "Scan failed: ${e.message}", e)
                 _scanProgress.value = null
                 _scanResult.emit(e.message ?: "Scan failed.")
             } finally {

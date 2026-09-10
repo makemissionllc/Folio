@@ -40,6 +40,7 @@ sealed class FolioRoute(val route: String) {
     data object Settings : FolioRoute("settings")
     data object Insights : FolioRoute("insights")
     data object SmartFeatures : FolioRoute("smart_features")
+    data object Logs : FolioRoute("logs")
     data object Onboarding : FolioRoute("onboarding")
 }
 
@@ -98,6 +99,7 @@ fun FolioNavHost() {
                 onBack = { navController.popBackStack() },
                 onInsightsClick = { navController.navigate(FolioRoute.Insights.route) },
                 onSmartFeaturesClick = { navController.navigate(FolioRoute.SmartFeatures.route) },
+                onLogsClick = { navController.navigate(FolioRoute.Logs.route) },
             )
         }
         composable(FolioRoute.Insights.route) {
@@ -107,6 +109,11 @@ fun FolioNavHost() {
         }
         composable(FolioRoute.SmartFeatures.route) {
             com.makemission.folio.ui.settings.SmartFeaturesScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(FolioRoute.Logs.route) {
+            com.makemission.folio.ui.settings.LogsScreen(
                 onBack = { navController.popBackStack() },
             )
         }

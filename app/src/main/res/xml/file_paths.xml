@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- For FolioLogger export — share `filesDir/logs/folio.log` via FileProvider -->
+    <files-path name="logs" path="logs/" />
+    <!-- General fallback (e.g., future exports) -->
+    <files-path name="files" path="." />
+    <cache-path name="cache" path="." />
+</paths>
