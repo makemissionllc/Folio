@@ -104,8 +104,10 @@ import com.makemission.folio.ui.theme.TimeTintEngine
 import com.makemission.folio.ui.theme.hasAmbientLightSensor
 import com.makemission.folio.ui.theme.rememberAmbientLightLux
 import com.makemission.folio.ui.theme.rememberTimeWarmth
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private data class LassoCapture(
     val points: List<Offset>,
@@ -398,16 +400,29 @@ private fun ReadingScreenContent(
     }
 
     // Precise progress save — debounce to avoid spamming Room, but ensures paragraph-level restoration
+    // Fixed: Use NonCancellable so save completes even if user navigates away quickly (was JobCancellationException)
     LaunchedEffect(uiState.bookId) {
         snapshotFlow { currentBookmarkPos }
             .distinctUntilChanged()
             .collect { (ch, para) ->
                 if (uiState.isLoading || uiState.chapters.isEmpty()) return@collect
                 if (ch !in uiState.chapters.indices) return@collect
-                kotlinx.coroutines.delay(700)
-                val (curCh, curPara) = currentBookmarkPos
-                if (curCh == ch && curPara == para) {
-                    onSaveProgress(ch, para)
+                try {
+                    kotlinx.coroutines.delay(700)
+                    val (curCh, curPara) = currentBookmarkPos
+                    if (curCh == ch && curPara == para) {
+                        withContext(NonCancellable) {
+                            onSaveProgress(ch, para)
+                        }
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // If cancelled during debounce (e.g., navigating away), still save the last position
+                    withContext(NonCancellable) {
+                        if (ch in uiState.chapters.indices) {
+                            onSaveProgress(ch, para)
+                        }
+                    }
+                    throw e
                 }
             }
     }

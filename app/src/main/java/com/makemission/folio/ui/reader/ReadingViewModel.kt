@@ -21,7 +21,10 @@ import com.makemission.folio.data.xray.XRayTerm
 import com.makemission.folio.data.search.SearchRepository
 import com.makemission.folio.ui.reader.components.encodeFloats
 import com.makemission.folio.ui.reader.components.encodePoints
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +35,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class ReadingUiState(
     val bookId: String = "",
@@ -103,34 +107,36 @@ class ReadingViewModel(
                 null
             }
             val fileHash = stored?.fileHash
-            // Try smart disk cache first (parsed chapters) — avoids heavy re-parse if hash unchanged
+            // Priority order: stored file FIRST for real books, assets only for curated samples (no filePath)
+            // 1. Parsed cache (if hash available) — avoids heavy re-parse if hash unchanged
             var epub: EpubParser.EpubBook? = null
-            var fromCache = false
-            if (stored?.filePath != null && fileHash != null) {
+            if (epub == null && stored?.filePath != null && fileHash != null) {
                 epub = ParsedBookCache.load(app, bookId, fileHash)
                 if (epub != null) {
-                    fromCache = true
                     FolioLogger.i("Reading", "Parsed cache hit for $bookId")
                 }
             }
-            if (epub == null) {
-                epub = when {
-                    stored?.filePath != null -> {
-                        val f = java.io.File(stored.filePath)
-                        if (f.exists() && f.canRead()) {
-                            // Parse and populate cache if needed (still on IO, but cached next time)
-                            val parsed = EpubParser.parse(f)
-                            if (parsed != null && fileHash != null) {
-                                try { ParsedBookCache.save(app, bookId, fileHash, parsed) } catch (_: Exception) {}
-                            }
-                            parsed
-                        } else {
-                            FolioLogger.w("Reading", "Stored file missing/unreadable for $bookId: ${stored.filePath?.take(80)}")
-                            null
-                        }
+            // 2. Stored file (real books) — MUST be tried before assets
+            if (epub == null && stored?.filePath != null) {
+                val f = java.io.File(stored.filePath)
+                if (f.exists() && f.canRead()) {
+                    FolioLogger.i("Reading", "Parsing stored file for $bookId: ${stored.filePath?.take(80)}")
+                    val parsed = EpubParser.parse(f)
+                    if (parsed != null && fileHash != null) {
+                        try { ParsedBookCache.save(app, bookId, fileHash, parsed) } catch (_: Exception) {}
                     }
-                    else -> null
-                } ?: EpubParser.loadFromAssetsOrNull(app)
+                    epub = parsed
+                    if (parsed == null) {
+                        FolioLogger.w("Reading", "Parse failed for stored file $bookId, will not fall back to sample.epub (real book)")
+                    }
+                } else {
+                    FolioLogger.w("Reading", "Stored file missing/unreadable for $bookId: ${stored.filePath?.take(80)}")
+                }
+            }
+            // 3. Only for curated sample books (no stored filePath) try assets/sample.epub
+            if (epub == null && stored?.filePath == null) {
+                FolioLogger.i("Reading", "No stored file for $bookId — trying assets/sample.epub (curated sample)")
+                epub = EpubParser.loadFromAssetsOrNull(app)
             }
             if (epub == null) FolioLogger.w("Reading", "EPUB parse null for $bookId, using fallback")
             val chapters = epub?.chapters ?: EpubParser.sampleFallbackChapters(bookTitle)
@@ -330,14 +336,21 @@ class ReadingViewModel(
     fun saveProgress(chapterIndex: Int, paragraphIndex: Int) {
         viewModelScope.launch {
             try {
-                dao.upsert(
-                    ReadingProgress(
-                        bookId = bookId,
-                        chapterIndex = chapterIndex,
-                        paragraphIndex = paragraphIndex,
-                        lastReadMillis = System.currentTimeMillis(),
-                    ),
-                )
+                // Use NonCancellable so the save completes even if the ViewModel is being cleared
+                // (e.g., user navigates away quickly) — prevents JobCancellationException
+                withContext(NonCancellable + Dispatchers.IO) {
+                    dao.upsert(
+                        ReadingProgress(
+                            bookId = bookId,
+                            chapterIndex = chapterIndex,
+                            paragraphIndex = paragraphIndex,
+                            lastReadMillis = System.currentTimeMillis(),
+                        ),
+                    )
+                }
+            } catch (e: CancellationException) {
+                // ViewModel is being cleared — re-throw to allow cancellation, but DAO already completed due to NonCancellable
+                throw e
             } catch (e: Exception) {
                 FolioLogger.w("Progress", "saveProgress failed $bookId $chapterIndex/$paragraphIndex: ${e.message}", e)
             }

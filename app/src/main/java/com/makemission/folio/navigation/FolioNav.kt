@@ -132,7 +132,35 @@ fun FolioNavHost() {
                 },
             )
         }
-        composable(FolioRoute.Settings.route) {
+        composable(
+            route = FolioRoute.Settings.route,
+            // Swipe right on Library → Settings should slide in from the RIGHT (consistent with gesture)
+            // Previously this used the default popEnter (from LEFT), which felt backwards for a right-swipe
+            enterTransition = {
+                slideInHorizontally(
+                    animationSpec = tween(340, easing = FastOutSlowInEasing),
+                    initialOffsetX = { it } // from right (positive X)
+                ) + fadeIn(animationSpec = tween(260, easing = LinearOutSlowInEasing))
+            },
+            exitTransition = {
+                slideOutHorizontally(
+                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                    targetOffsetX = { -it / 5 }
+                ) + fadeOut(animationSpec = tween(200, easing = LinearOutSlowInEasing))
+            },
+            popEnterTransition = {
+                slideInHorizontally(
+                    animationSpec = tween(340, easing = FastOutSlowInEasing),
+                    initialOffsetX = { -it / 5 }
+                ) + fadeIn(animationSpec = tween(260, easing = LinearOutSlowInEasing))
+            },
+            popExitTransition = {
+                slideOutHorizontally(
+                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                    targetOffsetX = { it } // to right when popping back to Library
+                ) + fadeOut(animationSpec = tween(200, easing = LinearOutSlowInEasing))
+            },
+        ) {
             com.makemission.folio.ui.settings.SettingsScreen(
                 onBack = { navController.popBackStack() },
                 onInsightsClick = { navController.navigate(FolioRoute.Insights.route) { launchSingleTop = true } },
