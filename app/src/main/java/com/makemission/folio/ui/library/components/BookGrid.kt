@@ -1,5 +1,7 @@
 package com.makemission.folio.ui.library.components
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -29,6 +31,11 @@ fun BookGrid(
                 book = book,
                 onClick = { onBookClick(book) },
                 onLongClick = { onLongClick(book) },
+                modifier = Modifier.animateItem(
+                    fadeInSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+                    fadeOutSpec = tween(durationMillis = 180),
+                    placementSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
+                ),
             )
         }
     }

@@ -6,11 +6,16 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.res.Configuration
 import android.widget.Toast
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,12 +33,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -247,14 +256,27 @@ private fun ReadingScreenContent(
     val swipeTabletRightStates = remember(uiState.chapters.size) {
         List((uiState.chapters.size + 1) / 2) { androidx.compose.foundation.lazy.LazyListState() }
     }
-    // Restore position when chapters load or mode switches
-    LaunchedEffect(uiState.chapters, uiState.restoredChapterIndex) {
+    // Restore position precisely when chapters load — chapter + paragraph, for both modes
+    LaunchedEffect(uiState.chapters, uiState.restoredChapterIndex, uiState.restoredParagraphIndex) {
         if (uiState.chapters.isNotEmpty() && !uiState.isLoading) {
             val target = uiState.restoredChapterIndex.coerceIn(0, uiState.chapters.size - 1)
+            val para = uiState.restoredParagraphIndex.coerceIn(0, (uiState.chapters.getOrNull(target)?.paragraphs?.size ?: 1) - 1)
             try {
                 swipePhonePagerState.scrollToPage(target)
+                val paraFlat = 1 + para
+                swipePhoneChapterStates.getOrNull(target)?.let { st ->
+                    kotlinx.coroutines.delay(60)
+                    st.scrollToItem(paraFlat.coerceIn(0, (st.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+                }
                 val spread = target / 2
                 swipeTabletPagerState.scrollToPage(spread)
+                kotlinx.coroutines.delay(60)
+                val paraFlat2 = 1 + para
+                if (target % 2 == 0) {
+                    swipeTabletLeftStates.getOrNull(spread)?.scrollToItem(paraFlat2.coerceIn(0, (swipeTabletLeftStates.getOrNull(spread)?.layoutInfo?.totalItemsCount ?: 10) - 1))
+                } else {
+                    swipeTabletRightStates.getOrNull(spread)?.scrollToItem(paraFlat2.coerceIn(0, (swipeTabletRightStates.getOrNull(spread)?.layoutInfo?.totalItemsCount ?: 10) - 1))
+                }
             } catch (_: Exception) {}
         }
     }
@@ -373,6 +395,21 @@ private fun ReadingScreenContent(
             val (ch, para) = currentBookmarkPos
             bookmarks.any { it.chapterIndex == ch && it.paragraphIndex == para }
         }
+    }
+
+    // Precise progress save — debounce to avoid spamming Room, but ensures paragraph-level restoration
+    LaunchedEffect(uiState.bookId) {
+        snapshotFlow { currentBookmarkPos }
+            .distinctUntilChanged()
+            .collect { (ch, para) ->
+                if (uiState.isLoading || uiState.chapters.isEmpty()) return@collect
+                if (ch !in uiState.chapters.indices) return@collect
+                kotlinx.coroutines.delay(700)
+                val (curCh, curPara) = currentBookmarkPos
+                if (curCh == ch && curPara == para) {
+                    onSaveProgress(ch, para)
+                }
+            }
     }
 
     // Progressive X-Ray: when user opens X-Ray, prioritize the chapter they're reading
@@ -557,13 +594,19 @@ private fun ReadingScreenContent(
                         )
                     },
                     navigationIcon = {
-                        TextButton(onClick = onBack) {
+                        TextButton(
+                            onClick = onBack,
+                            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+                        ) {
                             Text("← Back", style = MaterialTheme.typography.labelLarge)
                         }
                     },
                     actions = {
-                        // Single menu icon — replaces cluttered individual buttons (Bionic, X-Ray, Bookmarks, Search, Contrast)
-                        TextButton(onClick = { showMenu = true }) {
+                        // Single menu icon — 48dp touch target, replaces cluttered individual buttons
+                        TextButton(
+                            onClick = { showMenu = true },
+                            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+                        ) {
                             Text(
                                 "☰",
                                 style = MaterialTheme.typography.titleMedium,
@@ -730,22 +773,74 @@ private fun ReadingScreenContent(
                 .background(readingBg),
         ) {
             if (uiState.isLoading) {
+                // Pleasant editorial loading — not just a spinner
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        val infinite = androidx.compose.animation.core.rememberInfiniteTransition(label = "loading_pulse")
+                        val pulse by infinite.animateFloat(
+                            initialValue = 0.9f, targetValue = 1.15f,
+                            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                                animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+                                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+                            ), label = "pulse"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .graphicsLayer { scaleX = pulse; scaleY = pulse }
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                modifier = Modifier.size(12.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)
+                            )
+                        }
+                        Text(
+                            text = "Opening your book…",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "Pagination and highlights are being prepared",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        )
+                    }
                 }
             } else if (uiState.chapters.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = "No content to display.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(horizontal = 32.dp)) {
+                        Box(
+                            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            androidx.compose.foundation.Canvas(modifier = Modifier.size(44.dp)) {
+                                val amber = androidx.compose.ui.graphics.Color(0xFFF7B538)
+                                val green = androidx.compose.ui.graphics.Color(0xFF004F39)
+                                drawCircle(color = amber.copy(alpha = 0.9f), radius = 11f, center = center.copy(y = center.y - 6f))
+                                drawRoundRect(color = green.copy(alpha = 0.85f), topLeft = center.copy(x = center.x - 16f, y = center.y + 6f), size = androidx.compose.ui.geometry.Size(32f, 4f))
+                            }
+                        }
+                        Text(
+                            text = "No content to display.",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center,
+                        )
+                        Text(
+                            text = "This book appears to be empty — try another title or re-import the file.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             } else {
                 // Selection "Explain" — extends double-tap flow, same popup/backing dataset, fully offline
@@ -760,12 +855,21 @@ private fun ReadingScreenContent(
                         }
                     }
                 ) {
-                    when (navigationMode) {
-                        com.makemission.folio.ui.reader.ReadingNavigationMode.CONTINUOUS -> {
-                            if (isTabletLandscape) {
-                                TwoColumnReadingContent(
+                    androidx.compose.animation.AnimatedContent(
+                        targetState = navigationMode,
+                        transitionSpec = {
+                            fadeIn(animationSpec = tween(durationMillis = 220, easing = LinearOutSlowInEasing)) togetherWith
+                                fadeOut(animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing))
+                        },
+                        label = "reading_mode"
+                    ) { mode ->
+                        when (mode) {
+                            com.makemission.folio.ui.reader.ReadingNavigationMode.CONTINUOUS -> {
+                                if (isTabletLandscape) {
+                                    TwoColumnReadingContent(
                                     chapters = uiState.chapters,
                                     restoredChapterIndex = uiState.restoredChapterIndex,
+                                    restoredParagraphIndex = uiState.restoredParagraphIndex,
                                     chromeVisible = chromeVisible,
                                     bionicEnabled = bionicEnabled,
                                     highlights = highlights,
@@ -790,6 +894,7 @@ private fun ReadingScreenContent(
                                 SingleColumnReadingContent(
                                     chapters = uiState.chapters,
                                     restoredChapterIndex = uiState.restoredChapterIndex,
+                                    restoredParagraphIndex = uiState.restoredParagraphIndex,
                                     chromeVisible = chromeVisible,
                                     bionicEnabled = bionicEnabled,
                                     highlights = highlights,
@@ -859,6 +964,7 @@ private fun ReadingScreenContent(
                                 )
                             }
                         }
+                    }
                     }
                 }
             }
@@ -978,6 +1084,7 @@ private fun DiagramPlaceholder(modifier: Modifier = Modifier) {
 private fun SingleColumnReadingContent(
     chapters: List<EpubParser.EpubChapter>,
     restoredChapterIndex: Int,
+    restoredParagraphIndex: Int = 0,
     chromeVisible: Boolean,
     bionicEnabled: Boolean,
     highlights: List<Highlight>,
@@ -1092,18 +1199,19 @@ private fun SingleColumnReadingContent(
         onDispose { ReaderPageTurnHandler.onVolumeKey = null }
     }
 
-    LaunchedEffect(chapters) {
+    LaunchedEffect(chapters, restoredChapterIndex, restoredParagraphIndex) {
         if (restoredChapterIndex in chapters.indices) {
-            val flatIndex = chapters.take(restoredChapterIndex).sumOf { 1 + it.paragraphs.size }
-            if (flatIndex > 0) listState.scrollToItem(flatIndex.coerceAtMost(flatIndex))
+            val flat = flatIndexForBookmark(restoredChapterIndex, restoredParagraphIndex, chapters, isTablet = false, mid = 0)
+            if (flat >= 0) {
+                listState.scrollToItem(flat.coerceIn(0, (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+            }
         }
     }
 
     DisposableEffect(listState) {
         onDispose {
-            val firstVisible = listState.firstVisibleItemIndex
-            val (ch, _) = flatIndexToChapterParagraph(firstVisible, chapters)
-            onSaveProgress(ch, 0)
+            val (ch, para) = bookmarkPositionForFlat(listState.firstVisibleItemIndex, chapters, isTablet = false)
+            onSaveProgress(ch, para)
         }
     }
 
@@ -1308,6 +1416,7 @@ private fun SingleColumnReadingContent(
 private fun TwoColumnReadingContent(
     chapters: List<EpubParser.EpubChapter>,
     restoredChapterIndex: Int,
+    restoredParagraphIndex: Int = 0,
     chromeVisible: Boolean,
     bionicEnabled: Boolean,
     highlights: List<Highlight>,
@@ -1453,18 +1562,53 @@ private fun TwoColumnReadingContent(
         onDispose { ReaderPageTurnHandler.onVolumeKey = null }
     }
 
-    LaunchedEffect(chapters) {
-        if (restoredChapterIndex in chapters.indices && restoredChapterIndex < mid) {
-            val flat = left.take(restoredChapterIndex).sumOf { 1 + it.paragraphs.size }
-            if (flat > 0) leftState.scrollToItem(flat)
+    LaunchedEffect(chapters, restoredChapterIndex, restoredParagraphIndex) {
+        if (restoredChapterIndex in chapters.indices) {
+            if (restoredChapterIndex < mid) {
+                val flat = flatIndexForBookmarkInLeft(restoredChapterIndex, restoredParagraphIndex, left)
+                if (flat >= 0) leftState.scrollToItem(flat.coerceIn(0, (leftState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+            } else {
+                val flat = flatIndexForBookmarkInRight(restoredChapterIndex, restoredParagraphIndex, right, mid)
+                if (flat >= 0) rightState.scrollToItem(flat.coerceIn(0, (rightState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+            }
         }
     }
 
-    DisposableEffect(leftState) {
+    DisposableEffect(leftState, rightState) {
         onDispose {
-            val firstVisible = leftState.firstVisibleItemIndex
-            val (ch, _) = flatIndexToChapterParagraph(firstVisible, left)
-            onSaveProgress(ch, 0)
+            // Save the furthest progress — prefer right if it has been scrolled, otherwise left
+            val rightVisible = rightState.firstVisibleItemIndex
+            val leftVisible = leftState.firstVisibleItemIndex
+            if (rightVisible > 0 || rightState.canScrollBackward) {
+                var rem = rightVisible
+                var para = 0
+                var chLocal = 0
+                for (idx in right.indices) {
+                    val size = 1 + right[idx].paragraphs.size + 1
+                    if (rem < size) {
+                        chLocal = idx
+                        para = if (rem == 0) 0 else (rem - 1).coerceIn(0, (right[idx].paragraphs.size - 1).coerceAtLeast(0))
+                        break
+                    }
+                    rem -= size
+                }
+                val ch = mid + chLocal
+                onSaveProgress(ch.coerceIn(0, chapters.size - 1), para)
+            } else {
+                var rem = leftVisible
+                var chIdx = 0
+                var pIdx = 0
+                for (idx in left.indices) {
+                    val size = 1 + left[idx].paragraphs.size + (if (idx == 0) 1 else 0) + 1
+                    if (rem < size) {
+                        chIdx = idx
+                        pIdx = if (rem == 0) 0 else (rem - 1).coerceIn(0, (left[idx].paragraphs.size - 1).coerceAtLeast(0))
+                        break
+                    }
+                    rem -= size
+                }
+                onSaveProgress(chIdx, pIdx)
+            }
         }
     }
 

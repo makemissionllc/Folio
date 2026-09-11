@@ -1,5 +1,13 @@
 package com.makemission.folio.navigation
 
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
@@ -72,6 +80,30 @@ fun FolioNavHost() {
     NavHost(
         navController = navController,
         startDestination = FolioRoute.Library.route,
+        enterTransition = {
+            slideInHorizontally(
+                animationSpec = tween(340, easing = FastOutSlowInEasing),
+                initialOffsetX = { it / 5 }
+            ) + fadeIn(animationSpec = tween(260, easing = LinearOutSlowInEasing))
+        },
+        exitTransition = {
+            slideOutHorizontally(
+                animationSpec = tween(300, easing = FastOutSlowInEasing),
+                targetOffsetX = { -it / 5 }
+            ) + fadeOut(animationSpec = tween(200, easing = LinearOutSlowInEasing))
+        },
+        popEnterTransition = {
+            slideInHorizontally(
+                animationSpec = tween(340, easing = FastOutSlowInEasing),
+                initialOffsetX = { -it / 5 }
+            ) + fadeIn(animationSpec = tween(260, easing = LinearOutSlowInEasing))
+        },
+        popExitTransition = {
+            slideOutHorizontally(
+                animationSpec = tween(300, easing = FastOutSlowInEasing),
+                targetOffsetX = { it / 5 }
+            ) + fadeOut(animationSpec = tween(200, easing = LinearOutSlowInEasing))
+        },
     ) {
         composable(FolioRoute.Library.route) {
             LibraryScreen(

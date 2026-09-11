@@ -22,9 +22,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -376,13 +384,19 @@ private fun LibraryHeader(
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.weight(1f),
         )
-        TextButton(onClick = onSearchClick) {
+        TextButton(
+            onClick = onSearchClick,
+            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+        ) {
             Text(
                 if (isSearchRevealed) "✕" else "⌕",
                 style = MaterialTheme.typography.titleMedium,
             )
         }
-        TextButton(onClick = onSettingsClick) {
+        TextButton(
+            onClick = onSettingsClick,
+            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+        ) {
             Text("⚙", style = MaterialTheme.typography.titleMedium)
         }
     }
@@ -565,14 +579,26 @@ private fun LibraryQuickRow(
             modifier = Modifier
                 .clip(RoundedCornerShape(20.dp))
                 .clickable(onClick = onVocabularyClick)
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .sizeIn(minHeight = 48.dp)
+                .padding(horizontal = 12.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (dueCount > 0) {
+                val pulseTransition = rememberInfiniteTransition(label = "vocab_dot")
+                val dotPulse by pulseTransition.animateFloat(
+                    initialValue = 1f,
+                    targetValue = 1.35f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "dot_scale"
+                )
                 Box(
                     modifier = Modifier
                         .size(6.dp)
+                        .graphicsLayer { scaleX = dotPulse; scaleY = dotPulse }
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
                 )
@@ -609,7 +635,8 @@ private fun LibraryQuickRow(
             modifier = Modifier
                 .clip(RoundedCornerShape(20.dp))
                 .clickable(onClick = onInsightsClick)
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .sizeIn(minHeight = 48.dp)
+                .padding(horizontal = 12.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {

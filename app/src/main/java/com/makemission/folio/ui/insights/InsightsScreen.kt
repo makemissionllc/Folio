@@ -7,12 +7,20 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -63,7 +71,22 @@ fun InsightsScreen(
                     .padding(padding),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    val infinite = rememberInfiniteTransition(label = "insights_loading")
+                    val pulse by infinite.animateFloat(
+                        initialValue = 0.9f, targetValue = 1.15f,
+                        animationSpec = infiniteRepeatable(animation = tween(900, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse),
+                        label = "pulse"
+                    )
+                    Box(
+                        modifier = Modifier.size(40.dp).graphicsLayer { scaleX = pulse; scaleY = pulse }.clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(modifier = Modifier.size(12.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.primary))
+                    }
+                    Text(text = "Gathering your journal…", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+                    Text(text = "Highlights, bookmarks and rhythm — on-device", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                }
             }
             return@Scaffold
         }
@@ -294,7 +317,10 @@ private fun InsightsHeader(
             .statusBarsPadding()
             .padding(horizontal = 20.dp, vertical = 14.dp),
     ) {
-        TextButton(onClick = onBack, modifier = Modifier.padding(bottom = 4.dp)) {
+        TextButton(
+            onClick = onBack,
+            modifier = Modifier.padding(bottom = 4.dp).sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+        ) {
             Text("← Back", style = MaterialTheme.typography.labelLarge)
         }
         Text(

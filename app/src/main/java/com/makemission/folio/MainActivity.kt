@@ -6,6 +6,9 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -41,8 +44,15 @@ class MainActivity : ComponentActivity() {
                 ThemeMode.DARK -> true
                 ThemeMode.AUTO -> systemDark
             }
-            FolioTheme(darkTheme = isDark, palette = palette) {
-                FolioNavHost()
+            // Premium crossfade for palette/theme changes — no jarring flash, subtle 360ms
+            Crossfade(
+                targetState = isDark to palette,
+                animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
+                label = "theme_crossfade",
+            ) { (dark, pal) ->
+                FolioTheme(darkTheme = dark, palette = pal) {
+                    FolioNavHost()
+                }
             }
         }
     }
