@@ -119,11 +119,11 @@ fun SettingsScreen(
             item {
                 SettingsSection(
                     title = "Reading",
-                    subtitle = "Progress & navigation",
+                    subtitle = "",
                 ) {
                     SettingsToggleRow(
                         title = "Always show progress bar",
-                        subtitle = "When on, the reading progress bar stays visible and tap-to-hide is ignored",
+                        subtitle = "",
                         checked = alwaysShow,
                         onCheckedChange = { checked ->
                             scope.launch { repo.setAlwaysShowProgressBar(checked) }
@@ -132,7 +132,7 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     SettingsToggleRow(
                         title = "Haptic feedback",
-                        subtitle = "Subtle vibration on chapter boundaries via volume keys or scroll — not on every page turn",
+                        subtitle = "On chapter turn",
                         checked = hapticsEnabled,
                         onCheckedChange = { checked ->
                             scope.launch { repo.setHapticsEnabled(checked) }
@@ -144,11 +144,11 @@ fun SettingsScreen(
             item {
                 SettingsSection(
                     title = "Library",
-                    subtitle = "Device storage & auto-scan",
+                    subtitle = "",
                 ) {
                     SettingsToggleRow(
                         title = "Auto-scan on launch",
-                        subtitle = if (hasPermission) "Search Downloads, Documents & external storage for new EPUBs on app launch" else "Storage permission not granted — auto-scan unavailable",
+                        subtitle = if (hasPermission) "Downloads & Documents" else "Needs permission",
                         checked = autoScanEnabled && hasPermission,
                         onCheckedChange = { checked ->
                             scope.launch { repo.setAutoScanEnabled(checked) }
@@ -156,10 +156,10 @@ fun SettingsScreen(
                     )
                     if (!hasPermission) {
                         Text(
-                            text = "Storage permission denied during onboarding — grant in system settings to enable scanning. Manual import via + still works.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 6.dp),
+                            text = "Grant in system settings to enable.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(top = 4.dp),
                         )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
@@ -176,10 +176,9 @@ fun SettingsScreen(
                             )
                             Text(
                                 text = if (isScanning) (scanProgress ?: "Scanning…")
-                                else if (hasPermission) "Search for .epub files not yet in your library"
-                                else "Unavailable — permission not granted",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                else "Find new EPUBs",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             )
                         }
                         if (isScanning) {
@@ -204,37 +203,23 @@ fun SettingsScreen(
                             }
                         }
                     }
-                    Text(
-                        text = "Only EPUB for now — PDF parsing doesn't exist yet (plug-in point in EpubScanner + EpubParser). Files are copied to private storage, so originals can be moved/deleted.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
                 }
             }
 
             item {
                 SettingsSection(
                     title = "Insights",
-                    subtitle = "A quiet ledger of your reading",
+                    subtitle = "",
                 ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "Books, highlights, bookmarks, words and rhythm — all from what you’ve already saved, on-device.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        Button(
-                            onClick = onInsightsClick,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                            ),
-                            shape = RoundedCornerShape(20.dp),
-                        ) {
-                            Text("Open Insights", style = MaterialTheme.typography.labelLarge)
-                        }
+                    Button(
+                        onClick = onInsightsClick,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                    ) {
+                        Text("Open", style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
@@ -242,25 +227,17 @@ fun SettingsScreen(
             item {
                 SettingsSection(
                     title = "Smart Features",
-                    subtitle = "What Folio does quietly, in plain language",
+                    subtitle = "",
                 ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "Twelve thoughtful helpers — from guided reading to evening warmth — all on-device, all private. An editorial guide, not a changelog.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Button(
-                            onClick = onSmartFeaturesClick,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                            ),
-                            shape = RoundedCornerShape(20.dp),
-                        ) {
-                            Text("Meet the twelve", style = MaterialTheme.typography.labelLarge)
-                        }
+                    Button(
+                        onClick = onSmartFeaturesClick,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                    ) {
+                        Text("Explore", style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
@@ -268,16 +245,10 @@ fun SettingsScreen(
             item {
                 SettingsSection(
                     title = "Appearance",
-                    subtitle = "Theme & contrast",
+                    subtitle = "",
                 ) {
                     val selectedPalette by repo.darkPalette.collectAsState(initial = com.makemission.folio.ui.theme.FolioPalette.DEFAULT)
                     val timeTintEnabled by repo.timeTintEnabled.collectAsState(initial = false)
-                    Text(
-                        text = "Dark palette — editorial alternatives alongside the default deep green",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
                     com.makemission.folio.ui.theme.FolioPalette.entries.forEach { palette ->
                         PaletteOptionRow(
                             palette = palette,
@@ -286,22 +257,17 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                     }
-                    Text(
-                        text = "Applies across Library, Reading, Settings & Insights. Adaptive contrast (Colorimetric 7:1) adjusts whichever palette is selected — it lerps the chosen dark background, not overriding to green.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     SettingsToggleRow(
                         title = "Evening warmth",
-                        subtitle = "Time-aware tint — gradually warmer/redder tones in the evening (on-device, system clock, no location). Layers with palette + adaptive contrast.",
+                        subtitle = "Warmer tones after sunset",
                         checked = timeTintEnabled,
                         onCheckedChange = { checked -> scope.launch { repo.setTimeTintEnabled(checked) } }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     SettingsInfoRow(
                         title = "Adaptive contrast",
-                        subtitle = "Controlled in the reader (Top Bar → Contrast Auto) and via ambient light sensor — now palette-aware and time-tint-coordinated",
+                        subtitle = "Reader → Contrast Auto",
                     )
                 }
             }
@@ -309,19 +275,13 @@ fun SettingsScreen(
             item {
                 SettingsSection(
                     title = "Support / Developer",
-                    subtitle = "Debug logs · on-device only",
+                    subtitle = "",
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            text = "If something goes wrong — import fails, a file won’t parse, or the app crashes — Folio keeps a small local log to help fix it. Nothing is sent automatically.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = "Logs capture technical events (errors, failed operations) — not your book text or highlights. You can view and export them for a bug report.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                            text = "Local log for troubleshooting. Nothing sent automatically.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         )
                         Spacer(Modifier.height(10.dp))
                         Button(
@@ -334,12 +294,6 @@ fun SettingsScreen(
                         ) {
                             Text("View logs", style = MaterialTheme.typography.labelLarge)
                         }
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = "Stored at filesDir/logs/folio.log · 256 KB rolling · share via system sheet",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        )
                     }
                 }
             }
@@ -347,16 +301,16 @@ fun SettingsScreen(
             item {
                 SettingsSection(
                     title = "Privacy / Data",
-                    subtitle = "On-device only",
+                    subtitle = "",
                 ) {
                     SettingsInfoRow(
                         title = "Local-only reading",
-                        subtitle = "Books, progress, highlights and vocabulary are stored locally via Room. No cloud sync.",
+                        subtitle = "No cloud sync",
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     SettingsInfoRow(
                         title = "Caches",
-                        subtitle = "X-Ray index and cropped images are cached on-device and cleared with app data",
+                        subtitle = "Cleared with app data",
                     )
                 }
             }
@@ -385,11 +339,6 @@ private fun SettingsHeader(
             text = "Settings",
             style = MaterialTheme.typography.headlineLarge,
             color = MaterialTheme.colorScheme.onBackground,
-        )
-        Text(
-            text = "Reading • Library • Insights • Smart Features • Appearance • Support • Privacy",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -433,11 +382,6 @@ private fun SettingsHero(modifier: Modifier = Modifier) {
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                Text(
-                    text = "Organized to grow — reading, appearance, and data stay separate",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }
@@ -457,11 +401,13 @@ private fun SettingsSection(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         Card(
             modifier = Modifier
@@ -504,12 +450,14 @@ private fun SettingsToggleRow(
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (subtitle.isNotBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = if (subtitle.length < 30) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+            }
         }
         Switch(
             checked = checked,
@@ -540,12 +488,14 @@ private fun SettingsInfoRow(
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (subtitle.isNotBlank()) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+        }
     }
 }
 

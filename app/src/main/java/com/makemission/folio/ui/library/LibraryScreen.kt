@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -221,8 +222,11 @@ fun LibraryScreen(
                 )
             }
             if (searchQuery.isBlank()) {
-                VocabularyTeaser(dueCount = dueCount, onClick = onVocabularyClick)
-                InsightsTeaser(onClick = onInsightsClick)
+                LibraryQuickRow(
+                    dueCount = dueCount,
+                    onVocabularyClick = onVocabularyClick,
+                    onInsightsClick = onInsightsClick,
+                )
             }
             // Subtle non-blocking scan progress (spec: don't block UI)
             if (isScanning) {
@@ -333,8 +337,7 @@ fun LibraryScreen(
                 .fillMaxSize()
                 .padding(top = paddingValues.calculateTopPadding()),
         ) {
-            VocabularyTeaser(dueCount = 0, onClick = onVocabularyClick)
-            InsightsTeaser(onClick = onInsightsClick)
+            LibraryQuickRow(dueCount = 0, onVocabularyClick = onVocabularyClick, onInsightsClick = onInsightsClick)
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 if (books.isEmpty()) {
                     EmptyLibraryState(modifier = Modifier.fillMaxSize())
@@ -367,27 +370,20 @@ private fun LibraryHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "Library",
-                style = MaterialTheme.typography.headlineLarge,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-            Text(
-                text = if (bookCount == 0) "Your curated collection"
-                else "$bookCount titles · editorial grid",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(
+            text = "Library",
+            style = MaterialTheme.typography.headlineLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.weight(1f),
+        )
         TextButton(onClick = onSearchClick) {
             Text(
-                if (isSearchRevealed) "✕" else "⌕ Search",
-                style = MaterialTheme.typography.labelMedium,
+                if (isSearchRevealed) "✕" else "⌕",
+                style = MaterialTheme.typography.titleMedium,
             )
         }
         TextButton(onClick = onSettingsClick) {
-            Text("⚙ Settings", style = MaterialTheme.typography.labelMedium)
+            Text("⚙", style = MaterialTheme.typography.titleMedium)
         }
     }
 }
@@ -552,98 +548,81 @@ private fun SearchResultsList(
 }
 
 @Composable
-private fun VocabularyTeaser(
+private fun LibraryQuickRow(
     dueCount: Int,
-    onClick: () -> Unit,
+    onVocabularyClick: () -> Unit,
+    onInsightsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
+    Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-        ),
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
+                .clip(RoundedCornerShape(20.dp))
+                .clickable(onClick = onVocabularyClick)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Column {
-                Text(
-                    "Vocabulary",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    if (dueCount > 0) "$dueCount due for review" else "No words due — keep reading",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
             if (dueCount > 0) {
                 Box(
                     modifier = Modifier
-                        .background(
-                            MaterialTheme.colorScheme.primary,
-                            RoundedCornerShape(12.dp),
-                        )
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                )
+            }
+            Text(
+                text = if (dueCount > 0) "$dueCount due" else "Vocabulary",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (dueCount > 0) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+            if (dueCount > 0) {
+                Box(
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         "$dueCount",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
                 }
-            } else {
-                TextButton(onClick = onClick) { Text("Open") }
             }
         }
-    }
-}
-
-@Composable
-private fun InsightsTeaser(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-        ),
-    ) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
+                .clip(RoundedCornerShape(20.dp))
+                .clickable(onClick = onInsightsClick)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                Text(
-                    "Insights",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    "A quiet ledger of your reading",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            TextButton(onClick = onClick) { Text("Open") }
+            Text(
+                "Insights",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+            Text(
+                "›",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            )
         }
     }
 }
