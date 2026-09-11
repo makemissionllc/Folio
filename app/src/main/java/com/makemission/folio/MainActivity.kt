@@ -6,6 +6,7 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.ViewModelProvider
@@ -15,6 +16,7 @@ import com.makemission.folio.ui.library.LibraryViewModel
 import com.makemission.folio.ui.reader.ReaderPageTurnHandler
 import com.makemission.folio.ui.theme.FolioPalette
 import com.makemission.folio.ui.theme.FolioTheme
+import com.makemission.folio.ui.theme.ThemeMode
 
 /**
  * Single-activity Compose entry point — navigation host lives here.
@@ -30,8 +32,16 @@ class MainActivity : ComponentActivity() {
         handleEpubViewIntent(intent)
         enableEdgeToEdge()
         setContent {
-            val palette by SettingsRepository.get(this).darkPalette.collectAsState(initial = FolioPalette.DEFAULT)
-            FolioTheme(palette = palette) {
+            val repo = SettingsRepository.get(this)
+            val palette by repo.darkPalette.collectAsState(initial = FolioPalette.SLATE)
+            val themeMode by repo.themeMode.collectAsState(initial = ThemeMode.AUTO)
+            val systemDark = isSystemInDarkTheme()
+            val isDark = when (themeMode) {
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+                ThemeMode.AUTO -> systemDark
+            }
+            FolioTheme(darkTheme = isDark, palette = palette) {
                 FolioNavHost()
             }
         }

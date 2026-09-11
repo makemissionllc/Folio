@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.makemission.folio.ui.theme.FolioPalette
+import com.makemission.folio.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -25,6 +26,7 @@ class SettingsRepository(private val context: Context) {
         private val KEY_HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
         private val KEY_DARK_PALETTE = stringPreferencesKey("dark_palette")
         private val KEY_TIME_TINT_ENABLED = booleanPreferencesKey("time_tint_enabled")
+        private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
 
         @Volatile
         private var INSTANCE: SettingsRepository? = null
@@ -81,7 +83,7 @@ class SettingsRepository(private val context: Context) {
 
     val darkPalette: Flow<FolioPalette> =
         context.folioSettingsDataStore.data.map { prefs ->
-            FolioPalette.fromKey(prefs[KEY_DARK_PALETTE] ?: FolioPalette.DEFAULT.name)
+            FolioPalette.fromKey(prefs[KEY_DARK_PALETTE] ?: FolioPalette.SLATE.name)
         }
 
     suspend fun setDarkPalette(palette: FolioPalette) {
@@ -98,6 +100,17 @@ class SettingsRepository(private val context: Context) {
     suspend fun setTimeTintEnabled(value: Boolean) {
         context.folioSettingsDataStore.edit { prefs ->
             prefs[KEY_TIME_TINT_ENABLED] = value
+        }
+    }
+
+    val themeMode: Flow<ThemeMode> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            ThemeMode.fromKey(prefs[KEY_THEME_MODE] ?: ThemeMode.AUTO.name)
+        }
+
+    suspend fun setThemeMode(mode: ThemeMode) {
+        context.folioSettingsDataStore.edit { prefs ->
+            prefs[KEY_THEME_MODE] = mode.name
         }
     }
 }

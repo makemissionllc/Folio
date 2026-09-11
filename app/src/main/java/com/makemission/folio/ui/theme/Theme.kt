@@ -29,13 +29,14 @@ import androidx.core.view.WindowCompat
  *
  * @param darkTheme defaults to the system setting; the dark scheme is the
  * Folio library default per the spec.
- * @param palette which dark palette to use when [darkTheme] is true; DEFAULT
- * is the classic deep green and remains the default.
+ * @param palette which dark palette to use when [darkTheme] is true; SLATE
+ * (Cool Slate) is now the auto default in dark mode, DEFAULT (Folio Green)
+ * remains available as a manual pick.
  */
 @Composable
 fun FolioTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    palette: FolioPalette = FolioPalette.DEFAULT,
+    palette: FolioPalette = FolioPalette.SLATE,
     content: @Composable () -> Unit,
 ) {
     val colorScheme = if (darkTheme) folioDarkSchemeFor(palette) else FolioLightColorScheme

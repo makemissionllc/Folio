@@ -52,6 +52,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.makemission.folio.data.scan.EpubScanner
 import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.ui.library.LibraryViewModel
+import com.makemission.folio.ui.theme.ThemeMode
 import kotlinx.coroutines.launch
 
 /**
@@ -247,8 +248,20 @@ fun SettingsScreen(
                     title = "Appearance",
                     subtitle = "",
                 ) {
-                    val selectedPalette by repo.darkPalette.collectAsState(initial = com.makemission.folio.ui.theme.FolioPalette.DEFAULT)
+                    val themeMode by repo.themeMode.collectAsState(initial = ThemeMode.AUTO)
+                    val selectedPalette by repo.darkPalette.collectAsState(initial = com.makemission.folio.ui.theme.FolioPalette.SLATE)
                     val timeTintEnabled by repo.timeTintEnabled.collectAsState(initial = false)
+                    ThemeModeSegmentedControl(
+                        selected = themeMode,
+                        onSelect = { mode -> scope.launch { repo.setThemeMode(mode) } }
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Dark palette",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
                     com.makemission.folio.ui.theme.FolioPalette.entries.forEach { palette ->
                         PaletteOptionRow(
                             palette = palette,
@@ -257,7 +270,12 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Cool Slate is the default in dark mode. Your pick persists across Light / Dark / Auto.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
                     SettingsToggleRow(
                         title = "Evening warmth",
                         subtitle = "Warmer tones after sunset",
@@ -591,5 +609,78 @@ private fun PaletteOptionRow(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ThemeModeSegmentedControl(
+    selected: ThemeMode,
+    onSelect: (ThemeMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Theme",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            ThemeMode.entries.forEach { mode ->
+                val isSelected = mode == selected
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (isSelected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surface.copy(alpha = 0f)
+                        )
+                        .border(
+                            width = if (isSelected) 0.dp else 1.dp,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(8.dp),
+                        )
+                        .clickable { onSelect(mode) }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = when (mode) {
+                                ThemeMode.LIGHT -> "☀"
+                                ThemeMode.DARK -> "☾"
+                                ThemeMode.AUTO -> "◐"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = mode.displayName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+        }
+        Text(
+            text = when (selected) {
+                ThemeMode.LIGHT -> "Always light — paper even if system is dark."
+                ThemeMode.DARK -> "Always dark — Cool Slate by default."
+                ThemeMode.AUTO -> "Matches your device setting."
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+        )
     }
 }

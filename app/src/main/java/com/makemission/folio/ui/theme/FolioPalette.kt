@@ -34,7 +34,7 @@ enum class FolioPalette(
 
     companion object {
         fun fromKey(key: String): FolioPalette =
-            entries.find { it.name == key } ?: DEFAULT
+            entries.find { it.name == key } ?: SLATE
     }
 }
 

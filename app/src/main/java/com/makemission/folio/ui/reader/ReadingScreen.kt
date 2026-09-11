@@ -233,7 +233,13 @@ private fun ReadingScreenContent(
     // (palette via baseBg, adaptive contrast via lux, time tint via warmth) layer
     // sensibly via sequential lerps + final WCAG ensure, not fighting/muddy.
     var adaptiveEnabled by rememberSaveable { mutableStateOf(false) }
-    val isDark = isSystemInDarkTheme()
+    val themeMode by settingsRepo.themeMode.collectAsState(initial = com.makemission.folio.ui.theme.ThemeMode.AUTO)
+    val systemDark = isSystemInDarkTheme()
+    val isDark = when (themeMode) {
+        com.makemission.folio.ui.theme.ThemeMode.LIGHT -> false
+        com.makemission.folio.ui.theme.ThemeMode.DARK -> true
+        com.makemission.folio.ui.theme.ThemeMode.AUTO -> systemDark
+    }
     val baseBg = MaterialTheme.colorScheme.background
     val baseText = MaterialTheme.colorScheme.onBackground
     val hasSensor = remember(context) { hasAmbientLightSensor(context) }
