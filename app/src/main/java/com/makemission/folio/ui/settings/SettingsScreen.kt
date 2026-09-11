@@ -52,6 +52,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.makemission.folio.data.scan.EpubScanner
 import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.ui.library.LibraryViewModel
+import com.makemission.folio.ui.reader.ReadingNavigationMode
 import com.makemission.folio.ui.theme.ThemeMode
 import kotlinx.coroutines.launch
 
@@ -138,6 +139,12 @@ fun SettingsScreen(
                         onCheckedChange = { checked ->
                             scope.launch { repo.setHapticsEnabled(checked) }
                         },
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    val navigationMode by repo.readingNavigationMode.collectAsState(initial = ReadingNavigationMode.CONTINUOUS)
+                    ReadingNavigationModeSegmentedControl(
+                        selected = navigationMode,
+                        onSelect = { mode -> scope.launch { repo.setReadingNavigationMode(mode) } }
                     )
                 }
             }
@@ -678,6 +685,78 @@ private fun ThemeModeSegmentedControl(
                 ThemeMode.LIGHT -> "Always light — paper even if system is dark."
                 ThemeMode.DARK -> "Always dark — Cool Slate by default."
                 ThemeMode.AUTO -> "Matches your device setting."
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+        )
+    }
+}
+
+@Composable
+private fun ReadingNavigationModeSegmentedControl(
+    selected: ReadingNavigationMode,
+    onSelect: (ReadingNavigationMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Navigation",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            ReadingNavigationMode.entries.forEach { mode ->
+                val isSelected = mode == selected
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (isSelected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surface.copy(alpha = 0f)
+                        )
+                        .border(
+                            width = if (isSelected) 0.dp else 1.dp,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(8.dp),
+                        )
+                        .clickable { onSelect(mode) }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = when (mode) {
+                                ReadingNavigationMode.CONTINUOUS -> "↕"
+                                ReadingNavigationMode.CHAPTER_SWIPE -> "⇄"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = mode.displayName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+        Text(
+            text = when (selected) {
+                ReadingNavigationMode.CONTINUOUS -> "Vertical through whole book."
+                ReadingNavigationMode.CHAPTER_SWIPE -> "Vertical within chapter, swipe left/right between chapters."
             },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),

@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.makemission.folio.ui.reader.ReadingNavigationMode
 import com.makemission.folio.ui.theme.FolioPalette
 import com.makemission.folio.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.Flow
@@ -27,6 +28,7 @@ class SettingsRepository(private val context: Context) {
         private val KEY_DARK_PALETTE = stringPreferencesKey("dark_palette")
         private val KEY_TIME_TINT_ENABLED = booleanPreferencesKey("time_tint_enabled")
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+        private val KEY_READING_NAV_MODE = stringPreferencesKey("reading_nav_mode")
 
         @Volatile
         private var INSTANCE: SettingsRepository? = null
@@ -111,6 +113,17 @@ class SettingsRepository(private val context: Context) {
     suspend fun setThemeMode(mode: ThemeMode) {
         context.folioSettingsDataStore.edit { prefs ->
             prefs[KEY_THEME_MODE] = mode.name
+        }
+    }
+
+    val readingNavigationMode: Flow<ReadingNavigationMode> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            ReadingNavigationMode.fromKey(prefs[KEY_READING_NAV_MODE] ?: ReadingNavigationMode.CONTINUOUS.name)
+        }
+
+    suspend fun setReadingNavigationMode(mode: ReadingNavigationMode) {
+        context.folioSettingsDataStore.edit { prefs ->
+            prefs[KEY_READING_NAV_MODE] = mode.name
         }
     }
 }

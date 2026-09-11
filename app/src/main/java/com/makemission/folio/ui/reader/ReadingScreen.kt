@@ -61,6 +61,8 @@ import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -229,6 +231,33 @@ private fun ReadingScreenContent(
     val settingsRepo = remember(context) { com.makemission.folio.data.settings.SettingsRepository.get(context) }
     val alwaysShowProgressBar by settingsRepo.alwaysShowProgressBar.collectAsState(initial = false)
     val hapticsEnabled by settingsRepo.hapticsEnabled.collectAsState(initial = true)
+    val navigationMode by settingsRepo.readingNavigationMode.collectAsState(initial = com.makemission.folio.ui.reader.ReadingNavigationMode.CONTINUOUS)
+
+    // --- Chapter swipe pager states (only used when navigationMode == CHAPTER_SWIPE) ---
+    // Phone: one page per chapter, vertical LazyColumn within each chapter
+    val swipePhonePagerState = rememberPagerState(initialPage = 0) { uiState.chapters.size }
+    val swipePhoneChapterStates = remember(uiState.chapters.size) {
+        List(uiState.chapters.size) { androidx.compose.foundation.lazy.LazyListState() }
+    }
+    // Tablet: one page per spread (pair of chapters), two columns per spread
+    val swipeTabletPagerState = rememberPagerState(initialPage = 0) { (uiState.chapters.size + 1) / 2 }
+    val swipeTabletLeftStates = remember(uiState.chapters.size) {
+        List((uiState.chapters.size + 1) / 2) { androidx.compose.foundation.lazy.LazyListState() }
+    }
+    val swipeTabletRightStates = remember(uiState.chapters.size) {
+        List((uiState.chapters.size + 1) / 2) { androidx.compose.foundation.lazy.LazyListState() }
+    }
+    // Restore position when chapters load or mode switches
+    LaunchedEffect(uiState.chapters, uiState.restoredChapterIndex) {
+        if (uiState.chapters.isNotEmpty() && !uiState.isLoading) {
+            val target = uiState.restoredChapterIndex.coerceIn(0, uiState.chapters.size - 1)
+            try {
+                swipePhonePagerState.scrollToPage(target)
+                val spread = target / 2
+                swipeTabletPagerState.scrollToPage(spread)
+            } catch (_: Exception) {}
+        }
+    }
 
     // Colorimetric Contrast Optimization (§5) — builds on FolioTheme, not rewriting it
     // Time-aware ambient tinting layers on top — see TimeTintEngine; all three
@@ -288,13 +317,54 @@ private fun ReadingScreenContent(
     val tabletRightState = rememberLazyListState()
 
     // Current reading position for bookmark toggle (first visible paragraph)
+    // Coordinates with navigationMode: continuous uses flat index, swipe uses pager + per-chapter vertical state
     val currentBookmarkPos by remember {
         derivedStateOf {
-            if (uiState.chapters.isEmpty()) 0 to 0
-            else if (isTabletLandscape) {
-                bookmarkPositionForFlat(tabletLeftState.firstVisibleItemIndex, uiState.chapters, isTablet = true)
+            if (uiState.chapters.isEmpty()) return@derivedStateOf 0 to 0
+            if (navigationMode == com.makemission.folio.ui.reader.ReadingNavigationMode.CHAPTER_SWIPE) {
+                if (isTabletLandscape) {
+                    val spread = swipeTabletPagerState.currentPage.coerceIn(0, (uiState.chapters.size + 1) / 2 - 1)
+                    val leftIdx = spread * 2
+                    val rightIdx = leftIdx + 1
+                    // Prefer left chapter's visible position; fallback to right
+                    val leftState = swipeTabletLeftStates.getOrNull(spread)
+                    val rightState = swipeTabletRightStates.getOrNull(spread)
+                    val leftFlat = leftState?.firstVisibleItemIndex ?: 0
+                    val leftPara = when {
+                        leftFlat == 0 -> 0
+                        leftFlat in 1..(uiState.chapters.getOrNull(leftIdx)?.paragraphs?.size ?: 0) -> leftFlat - 1
+                        else -> 0
+                    }
+                    if (leftIdx in uiState.chapters.indices) {
+                        // If left is at title/gap, still return leftIdx:0 for toggle
+                        return@derivedStateOf leftIdx to leftPara
+                    }
+                    // Fallback to right
+                    val rightFlat = rightState?.firstVisibleItemIndex ?: 0
+                    val rightPara = when {
+                        rightFlat == 0 -> 0
+                        rightFlat in 1..(uiState.chapters.getOrNull(rightIdx)?.paragraphs?.size ?: 0) -> rightFlat - 1
+                        else -> 0
+                    }
+                    return@derivedStateOf (rightIdx.takeIf { it in uiState.chapters.indices } ?: leftIdx) to rightPara
+                } else {
+                    val ch = swipePhonePagerState.currentPage.coerceIn(0, uiState.chapters.size - 1)
+                    val state = swipePhoneChapterStates.getOrNull(ch)
+                    val flat = state?.firstVisibleItemIndex ?: 0
+                    val paraCount = uiState.chapters.getOrNull(ch)?.paragraphs?.size ?: 0
+                    val para = when {
+                        flat == 0 -> 0
+                        flat in 1..paraCount -> flat - 1
+                        else -> 0
+                    }
+                    return@derivedStateOf ch to para
+                }
             } else {
-                bookmarkPositionForFlat(singleListState.firstVisibleItemIndex, uiState.chapters, isTablet = false)
+                if (isTabletLandscape) {
+                    bookmarkPositionForFlat(tabletLeftState.firstVisibleItemIndex, uiState.chapters, isTablet = true)
+                } else {
+                    bookmarkPositionForFlat(singleListState.firstVisibleItemIndex, uiState.chapters, isTablet = false)
+                }
             }
         }
     }
@@ -313,35 +383,97 @@ private fun ReadingScreenContent(
         }
     }
 
-    // Library search jump handler — reuses bookmark flat-index logic (don't duplicate)
-    LaunchedEffect(pendingSearchJump, isTabletLandscape, uiState.chapters) {
+    // Library search/bookmark jump — coordinates with navigationMode
+    LaunchedEffect(pendingSearchJump, isTabletLandscape, uiState.chapters, navigationMode) {
         val target = pendingSearchJump ?: return@LaunchedEffect
         if (uiState.chapters.isEmpty()) return@LaunchedEffect
         try {
-            if (isTabletLandscape) {
-                val mid = (uiState.chapters.size + 1) / 2
-                if (target.chapterIndex < mid) {
-                    val leftFlat = flatIndexForBookmarkInLeft(target.chapterIndex, target.paragraphIndex, uiState.chapters.take(mid))
-                    val flat = if (leftFlat >= 0) leftFlat else flatIndexForBookmark(target.chapterIndex, target.paragraphIndex, uiState.chapters, true, mid)
-                    if (flat >= 0) {
-                        tabletLeftState.animateScrollToItem(flat.coerceIn(0, (tabletLeftState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
-                        if (tabletLeftState.firstVisibleItemIndex != flat) tabletLeftState.scrollToItem(flat.coerceIn(0, (tabletLeftState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+            if (navigationMode == com.makemission.folio.ui.reader.ReadingNavigationMode.CHAPTER_SWIPE) {
+                // Swipe mode: jump to chapter page, then scroll within that chapter
+                if (isTabletLandscape) {
+                    val spread = (target.chapterIndex / 2).coerceIn(0, ((uiState.chapters.size + 1) / 2 - 1).coerceAtLeast(0))
+                    swipeTabletPagerState.animateScrollToPage(spread)
+                    // Determine left/right within spread
+                    val leftIdx = spread * 2
+                    val isLeft = target.chapterIndex == leftIdx
+                    val paraFlat = 1 + target.paragraphIndex.coerceIn(0, (uiState.chapters.getOrNull(target.chapterIndex)?.paragraphs?.size ?: 1) - 1)
+                    if (isLeft) {
+                        val state = swipeTabletLeftStates.getOrNull(spread) ?: return@LaunchedEffect
+                        state.animateScrollToItem(paraFlat.coerceIn(0, (state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+                    } else {
+                        val state = swipeTabletRightStates.getOrNull(spread) ?: return@LaunchedEffect
+                        state.animateScrollToItem(paraFlat.coerceIn(0, (state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
                     }
                 } else {
-                    val rightFlat = flatIndexForBookmarkInRight(target.chapterIndex, target.paragraphIndex, uiState.chapters.drop(mid), mid)
-                    val flat = rightFlat.coerceIn(0, (tabletRightState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
-                    tabletRightState.animateScrollToItem(flat)
-                    if (tabletRightState.firstVisibleItemIndex != flat) tabletRightState.scrollToItem(flat)
+                    val ch = target.chapterIndex.coerceIn(0, uiState.chapters.size - 1)
+                    swipePhonePagerState.animateScrollToPage(ch)
+                    // Scroll within that chapter's LazyColumn to paragraph (title offset +1)
+                    val paraFlat = 1 + target.paragraphIndex.coerceIn(0, (uiState.chapters.getOrNull(ch)?.paragraphs?.size ?: 1) - 1)
+                    val state = swipePhoneChapterStates.getOrNull(ch) ?: return@LaunchedEffect
+                    // Small delay to let pager settle
+                    kotlinx.coroutines.delay(100)
+                    state.animateScrollToItem(paraFlat.coerceIn(0, (state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
                 }
             } else {
-                val flat = flatIndexForBookmark(target.chapterIndex, target.paragraphIndex, uiState.chapters, false, 0)
-                if (flat >= 0) {
-                    singleListState.animateScrollToItem(flat.coerceIn(0, (singleListState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
-                    if (singleListState.firstVisibleItemIndex != flat) singleListState.scrollToItem(flat.coerceIn(0, (singleListState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+                // Continuous mode — reuse flat-index logic (original)
+                if (isTabletLandscape) {
+                    val mid = (uiState.chapters.size + 1) / 2
+                    if (target.chapterIndex < mid) {
+                        val leftFlat = flatIndexForBookmarkInLeft(target.chapterIndex, target.paragraphIndex, uiState.chapters.take(mid))
+                        val flat = if (leftFlat >= 0) leftFlat else flatIndexForBookmark(target.chapterIndex, target.paragraphIndex, uiState.chapters, true, mid)
+                        if (flat >= 0) {
+                            tabletLeftState.animateScrollToItem(flat.coerceIn(0, (tabletLeftState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+                            if (tabletLeftState.firstVisibleItemIndex != flat) tabletLeftState.scrollToItem(flat.coerceIn(0, (tabletLeftState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+                        }
+                    } else {
+                        val rightFlat = flatIndexForBookmarkInRight(target.chapterIndex, target.paragraphIndex, uiState.chapters.drop(mid), mid)
+                        val flat = rightFlat.coerceIn(0, (tabletRightState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                        tabletRightState.animateScrollToItem(flat)
+                        if (tabletRightState.firstVisibleItemIndex != flat) tabletRightState.scrollToItem(flat)
+                    }
+                } else {
+                    val flat = flatIndexForBookmark(target.chapterIndex, target.paragraphIndex, uiState.chapters, false, 0)
+                    if (flat >= 0) {
+                        singleListState.animateScrollToItem(flat.coerceIn(0, (singleListState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+                        if (singleListState.firstVisibleItemIndex != flat) singleListState.scrollToItem(flat.coerceIn(0, (singleListState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+                    }
                 }
             }
         } catch (_: Exception) {}
         pendingSearchJump = null
+    }
+
+    // Bookmark jump for swipe mode — continuous mode handled inside Single/TwoColumn
+    LaunchedEffect(pendingBookmarkJump, isTabletLandscape, uiState.chapters, navigationMode) {
+        val bm = pendingBookmarkJump ?: return@LaunchedEffect
+        if (navigationMode != com.makemission.folio.ui.reader.ReadingNavigationMode.CHAPTER_SWIPE) return@LaunchedEffect
+        if (uiState.chapters.isEmpty()) return@LaunchedEffect
+        try {
+            if (isTabletLandscape) {
+                val spread = (bm.chapterIndex / 2).coerceIn(0, ((uiState.chapters.size + 1) / 2 - 1).coerceAtLeast(0))
+                swipeTabletPagerState.animateScrollToPage(spread)
+                val leftIdx = spread * 2
+                val isLeft = bm.chapterIndex == leftIdx
+                val paraFlat = 1 + bm.paragraphIndex.coerceIn(0, (uiState.chapters.getOrNull(bm.chapterIndex)?.paragraphs?.size ?: 1) - 1)
+                if (isLeft) {
+                    val state = swipeTabletLeftStates.getOrNull(spread) ?: return@LaunchedEffect
+                    kotlinx.coroutines.delay(80)
+                    state.animateScrollToItem(paraFlat.coerceIn(0, (state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+                } else {
+                    val state = swipeTabletRightStates.getOrNull(spread) ?: return@LaunchedEffect
+                    kotlinx.coroutines.delay(80)
+                    state.animateScrollToItem(paraFlat.coerceIn(0, (state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+                }
+            } else {
+                val ch = bm.chapterIndex.coerceIn(0, uiState.chapters.size - 1)
+                swipePhonePagerState.animateScrollToPage(ch)
+                val paraFlat = 1 + bm.paragraphIndex.coerceIn(0, (uiState.chapters.getOrNull(ch)?.paragraphs?.size ?: 1) - 1)
+                val state = swipePhoneChapterStates.getOrNull(ch) ?: return@LaunchedEffect
+                kotlinx.coroutines.delay(80)
+                state.animateScrollToItem(paraFlat.coerceIn(0, (state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+            }
+        } catch (_: Exception) {}
+        pendingBookmarkJump = null
     }
 
     fun jumpInBookTo(ch: Int, para: Int) {
@@ -628,53 +760,105 @@ private fun ReadingScreenContent(
                         }
                     }
                 ) {
-                    if (isTabletLandscape) {
-                        TwoColumnReadingContent(
-                            chapters = uiState.chapters,
-                            restoredChapterIndex = uiState.restoredChapterIndex,
-                            chromeVisible = chromeVisible,
-                            bionicEnabled = bionicEnabled,
-                            highlights = highlights,
-                            onToggleChrome = { chromeVisible = !chromeVisible },
-                            onSaveProgress = onSaveProgress,
-                            onAddHighlight = onAddHighlight,
-                            onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
-                            onWordDoubleTap = onWordDoubleTap,
-                            readingText = readingText,
-                            readingBackground = readingBg,
-                            alwaysShowProgressBar = alwaysShowProgressBar,
-                            hapticsEnabled = hapticsEnabled,
-                            leftListState = tabletLeftState,
-                            rightListState = tabletRightState,
-                            pendingBookmarkJump = pendingBookmarkJump,
-                            onJumpConsumed = { pendingBookmarkJump = null },
-                            bookId = uiState.bookId,
-                            fileHash = uiState.fileHash,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    } else {
-                        SingleColumnReadingContent(
-                            chapters = uiState.chapters,
-                            restoredChapterIndex = uiState.restoredChapterIndex,
-                            chromeVisible = chromeVisible,
-                            bionicEnabled = bionicEnabled,
-                            highlights = highlights,
-                            onToggleChrome = { chromeVisible = !chromeVisible },
-                            onSaveProgress = onSaveProgress,
-                            onAddHighlight = onAddHighlight,
-                            onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
-                            onWordDoubleTap = onWordDoubleTap,
-                            readingText = readingText,
-                            readingBackground = readingBg,
-                            alwaysShowProgressBar = alwaysShowProgressBar,
-                            hapticsEnabled = hapticsEnabled,
-                            listState = singleListState,
-                            pendingBookmarkJump = pendingBookmarkJump,
-                            onJumpConsumed = { pendingBookmarkJump = null },
-                            bookId = uiState.bookId,
-                            fileHash = uiState.fileHash,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                    when (navigationMode) {
+                        com.makemission.folio.ui.reader.ReadingNavigationMode.CONTINUOUS -> {
+                            if (isTabletLandscape) {
+                                TwoColumnReadingContent(
+                                    chapters = uiState.chapters,
+                                    restoredChapterIndex = uiState.restoredChapterIndex,
+                                    chromeVisible = chromeVisible,
+                                    bionicEnabled = bionicEnabled,
+                                    highlights = highlights,
+                                    onToggleChrome = { chromeVisible = !chromeVisible },
+                                    onSaveProgress = onSaveProgress,
+                                    onAddHighlight = onAddHighlight,
+                                    onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
+                                    onWordDoubleTap = onWordDoubleTap,
+                                    readingText = readingText,
+                                    readingBackground = readingBg,
+                                    alwaysShowProgressBar = alwaysShowProgressBar,
+                                    hapticsEnabled = hapticsEnabled,
+                                    leftListState = tabletLeftState,
+                                    rightListState = tabletRightState,
+                                    pendingBookmarkJump = pendingBookmarkJump,
+                                    onJumpConsumed = { pendingBookmarkJump = null },
+                                    bookId = uiState.bookId,
+                                    fileHash = uiState.fileHash,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else {
+                                SingleColumnReadingContent(
+                                    chapters = uiState.chapters,
+                                    restoredChapterIndex = uiState.restoredChapterIndex,
+                                    chromeVisible = chromeVisible,
+                                    bionicEnabled = bionicEnabled,
+                                    highlights = highlights,
+                                    onToggleChrome = { chromeVisible = !chromeVisible },
+                                    onSaveProgress = onSaveProgress,
+                                    onAddHighlight = onAddHighlight,
+                                    onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
+                                    onWordDoubleTap = onWordDoubleTap,
+                                    readingText = readingText,
+                                    readingBackground = readingBg,
+                                    alwaysShowProgressBar = alwaysShowProgressBar,
+                                    hapticsEnabled = hapticsEnabled,
+                                    listState = singleListState,
+                                    pendingBookmarkJump = pendingBookmarkJump,
+                                    onJumpConsumed = { pendingBookmarkJump = null },
+                                    bookId = uiState.bookId,
+                                    fileHash = uiState.fileHash,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+                        }
+                        com.makemission.folio.ui.reader.ReadingNavigationMode.CHAPTER_SWIPE -> {
+                            if (isTabletLandscape) {
+                                TwoColumnChapterSwipeContent(
+                                    chapters = uiState.chapters,
+                                    pagerState = swipeTabletPagerState,
+                                    leftStates = swipeTabletLeftStates,
+                                    rightStates = swipeTabletRightStates,
+                                    bionicEnabled = bionicEnabled,
+                                    highlights = highlights,
+                                    readingText = readingText,
+                                    readingBackground = readingBg,
+                                    alwaysShowProgressBar = alwaysShowProgressBar,
+                                    hapticsEnabled = hapticsEnabled,
+                                    chromeVisible = chromeVisible,
+                                    onToggleChrome = { chromeVisible = !chromeVisible },
+                                    onSaveProgress = onSaveProgress,
+                                    onAddHighlight = onAddHighlight,
+                                    onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
+                                    onWordDoubleTap = onWordDoubleTap,
+                                    onPrioritizeXRay = onPrioritizeXRay,
+                                    bookId = uiState.bookId,
+                                    fileHash = uiState.fileHash,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else {
+                                ChapterSwipePhoneContent(
+                                    chapters = uiState.chapters,
+                                    pagerState = swipePhonePagerState,
+                                    chapterStates = swipePhoneChapterStates,
+                                    bionicEnabled = bionicEnabled,
+                                    highlights = highlights,
+                                    readingText = readingText,
+                                    readingBackground = readingBg,
+                                    alwaysShowProgressBar = alwaysShowProgressBar,
+                                    hapticsEnabled = hapticsEnabled,
+                                    chromeVisible = chromeVisible,
+                                    onToggleChrome = { chromeVisible = !chromeVisible },
+                                    onSaveProgress = onSaveProgress,
+                                    onAddHighlight = onAddHighlight,
+                                    onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
+                                    onWordDoubleTap = onWordDoubleTap,
+                                    onPrioritizeXRay = onPrioritizeXRay,
+                                    bookId = uiState.bookId,
+                                    fileHash = uiState.fileHash,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1583,6 +1767,423 @@ private fun TwoColumnReadingContent(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+        }
+    }
+}
+
+
+// ---- Chapter swipe mode: vertical within chapter, horizontal between chapters ----
+// Phone: HorizontalPager where each page is a single chapter's vertical LazyColumn.
+// Keeps existing vertical scroll (LazyColumn) exactly, adds horizontal swipe to change chapter.
+// Reset scroll to top of new chapter on swipe. Volume keys still page vertically within chapter.
+
+@Composable
+private fun ChapterSwipePhoneContent(
+    chapters: List<EpubParser.EpubChapter>,
+    pagerState: androidx.compose.foundation.pager.PagerState,
+    chapterStates: List<androidx.compose.foundation.lazy.LazyListState>,
+    bionicEnabled: Boolean,
+    highlights: List<Highlight>,
+    readingText: Color,
+    readingBackground: Color,
+    alwaysShowProgressBar: Boolean,
+    hapticsEnabled: Boolean,
+    chromeVisible: Boolean,
+    onToggleChrome: () -> Unit,
+    onSaveProgress: (Int, Int) -> Unit,
+    onAddHighlight: (List<Offset>, List<Float>, List<Float>, Int) -> Unit,
+    onLasso: (List<Offset>, Rect) -> Unit,
+    onWordDoubleTap: (String) -> Unit,
+    onPrioritizeXRay: (Int) -> Unit,
+    bookId: String? = null,
+    fileHash: String? = null,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    val currentPage = pagerState.currentPage.coerceIn(0, chapters.size - 1)
+
+    // Prioritize X-Ray for current chapter (progressive cache)
+    LaunchedEffect(currentPage) {
+        if (chapters.isNotEmpty()) onPrioritizeXRay(currentPage)
+    }
+    // Haptics on chapter swipe
+    var lastSwipeChapter by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }.distinctUntilChanged().collect { newPage ->
+            if (lastSwipeChapter != null && lastSwipeChapter != newPage && hapticsEnabled) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
+            lastSwipeChapter = newPage
+            // Save progress on chapter change
+            onSaveProgress(newPage, 0)
+        }
+    }
+    // Volume keys paging within current chapter's vertical list
+    DisposableEffect(pagerState, currentPage) {
+        ReaderPageTurnHandler.onVolumeKey = { isUp ->
+            scope.launch {
+                val state = chapterStates.getOrNull(currentPage) ?: return@launch
+                val pageSize = 6
+                val target = if (isUp) (state.firstVisibleItemIndex - pageSize).coerceAtLeast(0)
+                else (state.firstVisibleItemIndex + pageSize).coerceAtMost((state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                state.animateScrollToItem(target)
+            }
+        }
+        onDispose { ReaderPageTurnHandler.onVolumeKey = null }
+    }
+    DisposableEffect(pagerState) {
+        onDispose {
+            // Save current chapter on exit
+            val ch = pagerState.currentPage
+            val state = chapterStates.getOrNull(ch)
+            val flat = state?.firstVisibleItemIndex ?: 0
+            val para = when {
+                flat == 0 -> 0
+                flat in 1..(chapters.getOrNull(ch)?.paragraphs?.size ?: 0) -> flat - 1
+                else -> 0
+            }
+            onSaveProgress(ch, para)
+        }
+    }
+
+    // True-Page (whole-book, disk-cached) — pageFor uses global flat
+    val truePageInfo = rememberTruePageState(chapters = chapters, isTabletLandscape = false, bionicEnabled = bionicEnabled, bookId = bookId, fileHash = fileHash)
+    val knuthAdjustments = rememberKnuthAdjustments(chapters = chapters, isTabletLandscape = false, bionicEnabled = bionicEnabled)
+    // Progress + time remaining based on global flat (current chapter offset + within)
+    val currentFlatOffset = remember(chapters, currentPage) {
+        var off = 0
+        for (i in 0 until currentPage) {
+            val ch = chapters[i]
+            off += 1 + ch.paragraphs.size + (if (i == 0) 1 else 0) + 1
+        }
+        off
+    }
+    val currentListState = chapterStates.getOrNull(currentPage)
+    val withinFlat = currentListState?.firstVisibleItemIndex ?: 0
+    val globalFlat = currentFlatOffset + withinFlat
+    val totalFlats = remember(chapters) {
+        chapters.indices.sumOf { idx -> 1 + chapters[idx].paragraphs.size + (if (idx == 0) 1 else 0) + 1 }.coerceAtLeast(1)
+    }
+    val progress by remember { derivedStateOf { (globalFlat.toFloat() / (totalFlats - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f) } }
+    val currentPageNumber by remember { derivedStateOf { truePageInfo.pageFor(globalFlat) } }
+    val estimator = remember { VelocityEstimator() }
+    var timeRemaining by remember { mutableStateOf<String?>(null) }
+    var lastFlatSwipe by remember { mutableStateOf(globalFlat) }
+    var lastTimeSwipe by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(currentPage, currentListState) {
+        if (currentListState == null) return@LaunchedEffect
+        snapshotFlow { currentListState.firstVisibleItemIndex }.distinctUntilChanged().collect { newWithin ->
+            val newGlobal = currentFlatOffset + newWithin
+            val now = System.currentTimeMillis()
+            val deltaMs = (now - lastTimeSwipe).toDouble()
+            val charsMoved = ReadingFlatMapper.charsBetween(lastFlatSwipe, newGlobal, chapters).coerceAtLeast(1)
+            if (newGlobal != lastFlatSwipe && deltaMs in 500.0..300000.0) estimator.addSample(deltaMs, charsMoved)
+            val remaining = ReadingFlatMapper.remainingCharsInChapter(newGlobal, chapters)
+            timeRemaining = formatTimeRemaining(estimator.estimateMs(remaining))
+            lastFlatSwipe = newGlobal
+            lastTimeSwipe = now
+        }
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+            beyondViewportPageCount = 1,
+        ) { page ->
+            val chapter = chapters[page]
+            val listState = chapterStates[page]
+            Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 20.dp)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onToggleChrome),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 8.dp, bottom = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp),
+                ) {
+                    item(key = "swipe-title-$page") {
+                        Text(text = chapter.title, style = MaterialTheme.typography.headlineSmall, color = readingText, modifier = Modifier.padding(top = 28.dp, bottom = 12.dp))
+                    }
+                    itemsIndexed(chapter.paragraphs, key = { idx, _ -> "swipe-c${page}-p$idx" }) { paraIdx, paragraph ->
+                        var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+                        val annotated = if (bionicEnabled) remember(paragraph) { BionicReading.toBionicAnnotated(paragraph, BionicReading.boldSpan()) } else null
+                        val knuth = knuthAdjustments["c${page}-p${paraIdx}"]
+                        val baseStyle = MaterialTheme.typography.bodyLarge
+                        val style = if (knuth != null) {
+                            val ls = if (baseStyle.letterSpacing.isSp) (baseStyle.letterSpacing.value + knuth.letterSpacingDelta.value).sp else knuth.letterSpacingDelta
+                            baseStyle.copy(letterSpacing = ls, textAlign = if (knuth.useJustify) TextAlign.Justify else baseStyle.textAlign ?: TextAlign.Start)
+                        } else baseStyle
+                        Text(text = annotated ?: androidx.compose.ui.text.AnnotatedString(paragraph), style = style, color = readingText, onTextLayout = { layoutResult = it }, modifier = Modifier.padding(bottom = 14.dp).pointerInput(paragraph, bionicEnabled) {
+                            detectTapGestures(onDoubleTap = { offset ->
+                                layoutResult?.let { layout ->
+                                    val pos = layout.getOffsetForPosition(offset)
+                                    if (pos < 0 || pos >= paragraph.length) return@detectTapGestures
+                                    var start = pos; var end = pos
+                                    while (start > 0 && paragraph[start - 1].isLetter()) start--
+                                    while (end < paragraph.length && paragraph[end].isLetter()) end++
+                                    if (start < end) onWordDoubleTap(paragraph.substring(start, end))
+                                }
+                            })
+                        })
+                    }
+                    if (page == 0) {
+                        item(key = "swipe-diagram-$page") {
+                            ExpandableDiagram(modifier = Modifier.padding(vertical = 16.dp))
+                        }
+                    }
+                    item(key = "swipe-gap-$page") {
+                        Column {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+                }
+                // Highlight overlay for this chapter
+                HighlightOverlay(
+                    highlights = highlights.filter { it.chapterIndex == page },
+                    onStylusStrokeFinished = { pts, pressures, tilts -> onAddHighlight(pts, pressures, tilts, page) },
+                    onLassoFinished = { pts, bounds -> onLasso(pts, bounds) },
+                    modifier = Modifier.fillMaxSize(),
+                )
+                // Scroll fades
+                val canUp by remember { derivedStateOf { listState.canScrollBackward } }
+                val canDown by remember { derivedStateOf { listState.canScrollForward } }
+                com.makemission.folio.ui.reader.components.TopReadingFade(backgroundColor = readingBackground, visible = canUp, modifier = Modifier.align(Alignment.TopCenter))
+                com.makemission.folio.ui.reader.components.BottomReadingFade(backgroundColor = readingBackground, visible = canDown, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp))
+            }
+        }
+        // Bottom bar: Page X of Y + progress (global)
+        Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(readingBackground.copy(alpha = 0.92f)), horizontalAlignment = Alignment.CenterHorizontally) {
+            AnimatedVisibility(visible = chromeVisible, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "Page $currentPageNumber of ${truePageInfo.totalPages}", style = MaterialTheme.typography.labelSmall, color = readingText.copy(alpha = 0.85f))
+                    timeRemaining?.let { Text(text = it, style = MaterialTheme.typography.labelSmall, color = readingText.copy(alpha = 0.85f), textAlign = TextAlign.End) }
+                }
+            }
+            AnimatedVisibility(visible = chromeVisible || alwaysShowProgressBar, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+                ReadingProgressBar(progress = progress, onSeek = { fraction ->
+                    // Seek within whole book: map fraction to global flat then to chapter/page + within
+                    val targetGlobal = ((totalFlats - 1) * fraction).toInt().coerceIn(0, totalFlats - 1)
+                    var rem = targetGlobal; var targetCh = 0
+                    for (idx in chapters.indices) {
+                        val size = 1 + chapters[idx].paragraphs.size + (if (idx == 0) 1 else 0) + 1
+                        if (rem < size) { targetCh = idx; break }
+                        rem -= size
+                    }
+                    scope.launch {
+                        pagerState.animateScrollToPage(targetCh)
+                        val st = chapterStates.getOrNull(targetCh)
+                        st?.animateScrollToItem(rem.coerceIn(0, (st.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)))
+                    }
+                }, modifier = Modifier.fillMaxWidth())
+            }
+        }
+    }
+}
+
+@Composable
+private fun TwoColumnChapterSwipeContent(
+    chapters: List<EpubParser.EpubChapter>,
+    pagerState: androidx.compose.foundation.pager.PagerState,
+    leftStates: List<androidx.compose.foundation.lazy.LazyListState>,
+    rightStates: List<androidx.compose.foundation.lazy.LazyListState>,
+    bionicEnabled: Boolean,
+    highlights: List<Highlight>,
+    readingText: Color,
+    readingBackground: Color,
+    alwaysShowProgressBar: Boolean,
+    hapticsEnabled: Boolean,
+    chromeVisible: Boolean,
+    onToggleChrome: () -> Unit,
+    onSaveProgress: (Int, Int) -> Unit,
+    onAddHighlight: (List<Offset>, List<Float>, List<Float>, Int) -> Unit,
+    onLasso: (List<Offset>, Rect) -> Unit,
+    onWordDoubleTap: (String) -> Unit,
+    onPrioritizeXRay: (Int) -> Unit,
+    bookId: String? = null,
+    fileHash: String? = null,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    val page = pagerState.currentPage
+    val leftIdx = page * 2
+    val rightIdx = leftIdx + 1
+    LaunchedEffect(page) {
+        val ch = if (leftIdx in chapters.indices) leftIdx else rightIdx
+        if (ch in chapters.indices) onPrioritizeXRay(ch)
+    }
+    var lastSpread by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }.distinctUntilChanged().collect { newPage ->
+            if (lastSpread != null && lastSpread != newPage && hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            lastSpread = newPage
+            // Save spread's first chapter
+            val ch = (newPage * 2).coerceIn(0, chapters.size - 1)
+            onSaveProgress(ch, 0)
+        }
+    }
+    DisposableEffect(pagerState) {
+        onDispose {
+            val ch = (pagerState.currentPage * 2).coerceIn(0, chapters.size - 1)
+            onSaveProgress(ch, 0)
+        }
+    }
+    // Volume keys scroll left column of current spread
+    DisposableEffect(pagerState, page) {
+        ReaderPageTurnHandler.onVolumeKey = { isUp ->
+            scope.launch {
+                val state = leftStates.getOrNull(page) ?: rightStates.getOrNull(page) ?: return@launch
+                val pageSize = 5
+                val target = if (isUp) (state.firstVisibleItemIndex - pageSize).coerceAtLeast(0) else (state.firstVisibleItemIndex + pageSize).coerceAtMost((state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                state.animateScrollToItem(target)
+            }
+        }
+        onDispose { ReaderPageTurnHandler.onVolumeKey = null }
+    }
+
+    val truePageInfo = rememberTruePageState(chapters = chapters, isTabletLandscape = true, bionicEnabled = bionicEnabled, bookId = bookId, fileHash = fileHash)
+    val knuthAdjustments = rememberKnuthAdjustments(chapters = chapters, isTabletLandscape = true, bionicEnabled = bionicEnabled)
+    val currentFlatOffset = remember(chapters, page) {
+        var off = 0
+        for (i in 0 until leftIdx) {
+            val ch = chapters[i]
+            off += 1 + ch.paragraphs.size + (if (i == 0) 1 else 0) + 1
+        }
+        off
+    }
+    val leftState = leftStates.getOrNull(page)
+    val withinFlat = leftState?.firstVisibleItemIndex ?: 0
+    val globalFlat = currentFlatOffset + withinFlat
+    val totalFlats = remember(chapters) { chapters.indices.sumOf { idx -> 1 + chapters[idx].paragraphs.size + (if (idx == 0) 1 else 0) + 1 }.coerceAtLeast(1) }
+    val progress by remember { derivedStateOf { (globalFlat.toFloat() / (totalFlats - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f) } }
+    val currentPageNum by remember { derivedStateOf { truePageInfo.pageFor(globalFlat) } }
+    val estimator = remember { VelocityEstimator() }
+    var timeRemaining by remember { mutableStateOf<String?>(null) }
+    var lastFlatSwipe by remember { mutableStateOf(globalFlat) }
+    var lastTimeSwipe by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(leftState) {
+        if (leftState == null) return@LaunchedEffect
+        snapshotFlow { leftState.firstVisibleItemIndex }.distinctUntilChanged().collect { newWithin ->
+            val newGlobal = currentFlatOffset + newWithin
+            val now = System.currentTimeMillis()
+            val deltaMs = (now - lastTimeSwipe).toDouble()
+            val charsMoved = ReadingFlatMapper.charsBetween(lastFlatSwipe, newGlobal, chapters).coerceAtLeast(1)
+            if (newGlobal != lastFlatSwipe && deltaMs in 500.0..300000.0) estimator.addSample(deltaMs, charsMoved)
+            val remaining = ReadingFlatMapper.remainingCharsInChapter(newGlobal, chapters)
+            timeRemaining = formatTimeRemaining(estimator.estimateMs(remaining))
+            lastFlatSwipe = newGlobal
+            lastTimeSwipe = now
+        }
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize(), beyondViewportPageCount = 1) { p ->
+            val lIdx = p * 2
+            val rIdx = lIdx + 1
+            val leftChapter = chapters.getOrNull(lIdx)
+            val rightChapter = chapters.getOrNull(rIdx)
+            Row(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp).padding(bottom = 32.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onToggleChrome)) {
+                // Left column
+                if (leftChapter != null) {
+                    val lState = leftStates[p]
+                    LazyColumn(state = lState, modifier = Modifier.weight(1f).fillMaxHeight().padding(horizontal = 14.dp, vertical = 8.dp)) {
+                        item(key = "swipe-L-title-$lIdx") { Text(text = leftChapter.title, style = MaterialTheme.typography.titleMedium, color = readingText, modifier = Modifier.padding(top = 20.dp, bottom = 10.dp)) }
+                        itemsIndexed(leftChapter.paragraphs, key = { idx, _ -> "swipe-L-c${lIdx}-p$idx" }) { paraIdx, paragraph ->
+                            var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+                            val annotated = if (bionicEnabled) remember(paragraph) { BionicReading.toBionicAnnotated(paragraph, BionicReading.boldSpan()) } else null
+                            val knuth = knuthAdjustments["c${lIdx}-p${paraIdx}"]
+                            val base = MaterialTheme.typography.bodyMedium
+                            val style = if (knuth != null) {
+                                val ls = if (base.letterSpacing.isSp) (base.letterSpacing.value + knuth.letterSpacingDelta.value).sp else knuth.letterSpacingDelta
+                                base.copy(letterSpacing = ls, textAlign = if (knuth.useJustify) TextAlign.Justify else base.textAlign ?: TextAlign.Start)
+                            } else base
+                            Text(text = annotated ?: androidx.compose.ui.text.AnnotatedString(paragraph), style = style, color = readingText, onTextLayout = { layoutResult = it }, modifier = Modifier.padding(bottom = 12.dp).pointerInput(paragraph, bionicEnabled) {
+                                detectTapGestures(onDoubleTap = { offset ->
+                                    layoutResult?.let { layout ->
+                                        val pos = layout.getOffsetForPosition(offset)
+                                        if (pos < 0 || pos >= paragraph.length) return@detectTapGestures
+                                        var s = pos; var e = pos
+                                        while (s > 0 && paragraph[s - 1].isLetter()) s--
+                                        while (e < paragraph.length && paragraph[e].isLetter()) e++
+                                        if (s < e) onWordDoubleTap(paragraph.substring(s, e))
+                                    }
+                                })
+                            })
+                        }
+                        if (lIdx == 0) { item(key = "swipe-L-diagram-$lIdx") { ExpandableDiagram(modifier = Modifier.padding(vertical = 12.dp)) } }
+                        item(key = "swipe-L-gap-$lIdx") { Column { Spacer(modifier = Modifier.height(6.dp)); Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant)); Spacer(modifier = Modifier.height(6.dp)) } }
+                    }
+                } else {
+                    Box(modifier = Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) { Text("—", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) }
+                }
+                Box(modifier = Modifier.width(1.dp).fillMaxHeight().padding(vertical = 16.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)))
+                if (rightChapter != null) {
+                    val rState = rightStates[p]
+                    LazyColumn(state = rState, modifier = Modifier.weight(1f).fillMaxHeight().padding(horizontal = 14.dp, vertical = 8.dp)) {
+                        item(key = "swipe-R-title-$rIdx") { Text(text = rightChapter.title, style = MaterialTheme.typography.titleMedium, color = readingText, modifier = Modifier.padding(top = 20.dp, bottom = 10.dp)) }
+                        itemsIndexed(rightChapter.paragraphs, key = { idx, _ -> "swipe-R-c${rIdx}-p$idx" }) { paraIdx, paragraph ->
+                            var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+                            val annotated = if (bionicEnabled) remember(paragraph) { BionicReading.toBionicAnnotated(paragraph, BionicReading.boldSpan()) } else null
+                            val knuth = knuthAdjustments["c${rIdx}-p${paraIdx}"]
+                            val base = MaterialTheme.typography.bodyMedium
+                            val style = if (knuth != null) {
+                                val ls = if (base.letterSpacing.isSp) (base.letterSpacing.value + knuth.letterSpacingDelta.value).sp else knuth.letterSpacingDelta
+                                base.copy(letterSpacing = ls, textAlign = if (knuth.useJustify) TextAlign.Justify else base.textAlign ?: TextAlign.Start)
+                            } else base
+                            Text(text = annotated ?: androidx.compose.ui.text.AnnotatedString(paragraph), style = style, color = readingText, onTextLayout = { layoutResult = it }, modifier = Modifier.padding(bottom = 12.dp).pointerInput(paragraph, bionicEnabled) {
+                                detectTapGestures(onDoubleTap = { offset ->
+                                    layoutResult?.let { layout ->
+                                        val pos = layout.getOffsetForPosition(offset)
+                                        if (pos < 0 || pos >= paragraph.length) return@detectTapGestures
+                                        var s = pos; var e = pos
+                                        while (s > 0 && paragraph[s - 1].isLetter()) s--
+                                        while (e < paragraph.length && paragraph[e].isLetter()) e++
+                                        if (s < e) onWordDoubleTap(paragraph.substring(s, e))
+                                    }
+                                })
+                            })
+                        }
+                        item(key = "swipe-R-gap-$rIdx") { Column { Spacer(modifier = Modifier.height(6.dp)); Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant)); Spacer(modifier = Modifier.height(6.dp)) } }
+                    }
+                } else {
+                    Box(modifier = Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) { Text("—", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) }
+                }
+            }
+        }
+        // Highlight overlay for current spread (filter to leftIdx/rightIdx)
+        HighlightOverlay(highlights = highlights.filter { it.chapterIndex == leftIdx || it.chapterIndex == rightIdx }, onStylusStrokeFinished = { pts, pressures, tilts ->
+            val ch = leftIdx
+            onAddHighlight(pts, pressures, tilts, ch)
+        }, onLassoFinished = { pts, bounds -> onLasso(pts, bounds) }, modifier = Modifier.fillMaxSize())
+        val leftCanUp by remember { derivedStateOf { leftStates.getOrNull(page)?.canScrollBackward == true } }
+        val leftCanDown by remember { derivedStateOf { leftStates.getOrNull(page)?.canScrollForward == true } }
+        com.makemission.folio.ui.reader.components.TopReadingFade(backgroundColor = readingBackground, visible = leftCanUp, modifier = Modifier.align(Alignment.TopCenter))
+        com.makemission.folio.ui.reader.components.BottomReadingFade(backgroundColor = readingBackground, visible = leftCanDown, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp))
+        Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(readingBackground.copy(alpha = 0.92f)), horizontalAlignment = Alignment.CenterHorizontally) {
+            AnimatedVisibility(visible = chromeVisible, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "Page $currentPageNum of ${truePageInfo.totalPages}", style = MaterialTheme.typography.labelSmall, color = readingText.copy(alpha = 0.85f))
+                    timeRemaining?.let { Text(text = it, style = MaterialTheme.typography.labelSmall, color = readingText.copy(alpha = 0.85f), textAlign = TextAlign.End) }
+                }
+            }
+            AnimatedVisibility(visible = chromeVisible || alwaysShowProgressBar, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+                ReadingProgressBar(progress = progress, onSeek = { fraction ->
+                    val targetGlobal = ((totalFlats - 1) * fraction).toInt().coerceIn(0, totalFlats - 1)
+                    var rem = targetGlobal; var targetSpread = 0
+                    for (idx in chapters.indices step 2) {
+                        val leftSize = 1 + chapters[idx].paragraphs.size + (if (idx == 0) 1 else 0) + 1
+                        val rightSize = if (idx + 1 < chapters.size) 1 + chapters[idx + 1].paragraphs.size + 1 else 0
+                        val spreadSize = leftSize + rightSize
+                        if (rem < spreadSize) { targetSpread = idx / 2; break }
+                        rem -= spreadSize
+                    }
+                    scope.launch { pagerState.animateScrollToPage(targetSpread) }
+                }, modifier = Modifier.fillMaxWidth())
             }
         }
     }
