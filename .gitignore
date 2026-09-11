@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+Inspiration/base.7z
+Inspiration/base/
+app/*.zip

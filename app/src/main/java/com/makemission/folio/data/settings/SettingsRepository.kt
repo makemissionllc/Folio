@@ -1,10 +1,12 @@
 package com.makemission.folio.data.settings
 
 import android.content.Context
+import android.net.Uri
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import androidx.documentfile.provider.DocumentFile
 import com.makemission.folio.ui.reader.ReadingNavigationMode
 import com.makemission.folio.ui.theme.FolioPalette
 import com.makemission.folio.ui.theme.ThemeMode
@@ -29,6 +31,7 @@ class SettingsRepository(private val context: Context) {
         private val KEY_TIME_TINT_ENABLED = booleanPreferencesKey("time_tint_enabled")
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         private val KEY_READING_NAV_MODE = stringPreferencesKey("reading_nav_mode")
+        private val KEY_BOOKS_FOLDER_URI = stringPreferencesKey("books_folder_uri")
 
         @Volatile
         private var INSTANCE: SettingsRepository? = null
@@ -124,6 +127,38 @@ class SettingsRepository(private val context: Context) {
     suspend fun setReadingNavigationMode(mode: ReadingNavigationMode) {
         context.folioSettingsDataStore.edit { prefs ->
             prefs[KEY_READING_NAV_MODE] = mode.name
+        }
+    }
+
+    val booksFolderUri: Flow<String?> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            prefs[KEY_BOOKS_FOLDER_URI]
+        }
+
+    suspend fun setBooksFolderUri(uri: String?) {
+        context.folioSettingsDataStore.edit { prefs ->
+            if (uri != null) {
+                prefs[KEY_BOOKS_FOLDER_URI] = uri
+            } else {
+                prefs.remove(KEY_BOOKS_FOLDER_URI)
+            }
+        }
+    }
+
+    fun getFolderDisplayName(uriString: String?): String? {
+        if (uriString.isNullOrBlank()) return null
+        return try {
+            val uri = Uri.parse(uriString)
+            val doc = DocumentFile.fromTreeUri(context, uri)
+            if (doc != null && !doc.name.isNullOrBlank()) {
+                doc.name
+            } else {
+                val decoded = Uri.decode(uriString)
+                val segment = decoded.substringAfterLast(':').substringAfterLast('/')
+                segment.ifBlank { uriString }
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 }

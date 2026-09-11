@@ -1,5 +1,10 @@
 package com.makemission.folio.ui.settings
 
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -21,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -48,8 +54,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.activity.ComponentActivity
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.makemission.folio.data.logging.FolioLogger
 import com.makemission.folio.data.scan.EpubScanner
 import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.ui.library.LibraryViewModel
@@ -92,6 +99,37 @@ fun SettingsScreen(
     val isScanning by libraryViewModel.isScanning.collectAsState()
     val scanProgress by libraryViewModel.scanProgress.collectAsState()
     val hasPermission = EpubScanner.hasStoragePermission(context)
+    val booksFolderUriString by repo.booksFolderUri.collectAsState(initial = null)
+    val folderDisplayName = remember(booksFolderUriString) {
+        if (!booksFolderUriString.isNullOrBlank()) {
+            repo.getFolderDisplayName(booksFolderUriString)
+        } else {
+            val firstPersisted = try {
+                context.contentResolver.persistedUriPermissions.firstOrNull { it.isReadPermission }
+            } catch (_: Exception) { null }
+            firstPersisted?.let { repo.getFolderDisplayName(it.uri.toString()) }
+        }
+    }
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+                scope.launch {
+                    repo.setBooksFolderUri(uri.toString())
+                    val name = DocumentFile.fromTreeUri(context, uri)?.name ?: "Books"
+                    snackbarHostState.showSnackbar("Folder selected: $name")
+                }
+                FolioLogger.i("Settings", "Persisted SAF tree permission: $uri")
+            } catch (e: Exception) {
+                FolioLogger.w("Settings", "takePersistableUriPermission error: ${e.message}", e)
+                scope.launch { snackbarHostState.showSnackbar("Could not access folder: ${e.message}") }
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         libraryViewModel.scanResult.collect { msg ->
@@ -157,7 +195,11 @@ fun SettingsScreen(
                 ) {
                     SettingsToggleRow(
                         title = "Auto-scan on launch",
-                        subtitle = if (hasPermission) "Downloads & Documents" else "Needs permission",
+                        subtitle = when {
+                            folderDisplayName != null -> "Searches $folderDisplayName (SAF)"
+                            hasPermission -> "Downloads & Documents"
+                            else -> "Needs permission or folder grant"
+                        },
                         checked = autoScanEnabled && hasPermission,
                         onCheckedChange = { checked ->
                             scope.launch { repo.setAutoScanEnabled(checked) }
@@ -165,11 +207,71 @@ fun SettingsScreen(
                     )
                     if (!hasPermission) {
                         Text(
-                            text = "Grant in system settings to enable.",
+                            text = "Choose a books folder below or grant storage access in system settings.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             modifier = Modifier.padding(top = 4.dp),
                         )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text(
+                                text = "Choose books folder",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = folderDisplayName ?: "Pick folder via Storage Access Framework",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (folderDisplayName != null) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (folderDisplayName != null) {
+                                TextButton(
+                                    onClick = {
+                                        scope.launch {
+                                            booksFolderUriString?.let { uriStr ->
+                                                try {
+                                                    context.contentResolver.releasePersistableUriPermission(
+                                                        Uri.parse(uriStr),
+                                                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                                    )
+                                                } catch (_: Exception) {}
+                                            }
+                                            repo.setBooksFolderUri(null)
+                                            snackbarHostState.showSnackbar("Folder grant cleared.")
+                                        }
+                                    }
+                                ) {
+                                    Text(
+                                        text = "Clear",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                            }
+                            Button(
+                                onClick = { folderPickerLauncher.launch(null) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                                ),
+                                shape = RoundedCornerShape(20.dp),
+                            ) {
+                                Text(
+                                    text = if (folderDisplayName != null) "Change" else "Choose",
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Row(
@@ -185,6 +287,7 @@ fun SettingsScreen(
                             )
                             Text(
                                 text = if (isScanning) (scanProgress ?: "Scanning…")
+                                else if (folderDisplayName != null) "Search $folderDisplayName & device"
                                 else "Find new EPUBs",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),

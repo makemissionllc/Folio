@@ -7,6 +7,49 @@ Active coding branch: `main`.
 
 ---
 
+## Session 40 — 2026-09-11 — Nested EPUB scanning & SAF folder selection (Maxwell collection fix)
+
+Branch: `main`.
+
+### Fixed & Built — Deep folder scanning and Storage Access Framework book folder intake
+
+- **Nested book collection scanning failure (root cause fix)** — Previously, `EpubScanner.walkDir` enforced a hardcoded `MAX_DEPTH = 4`. Real-world collections organized in nested subdirectories (such as `/storage/emulated/0/Books/John C. Maxwell Collection (36 Books)/John Maxwell/[book folder]/[file].epub` at depth 5) were silently skipped with the log `depth 5 > MAX_DEPTH 4, skipping deeper`, preventing all 36 books from being discovered. Furthermore, MediaStore on Android does not index EPUB files (0 rows returned).
+  - **MAX_DEPTH increased to 8**: Deeply nested author and series directories are now thoroughly traversed by `EpubScanner`.
+  - **Visibility for skipped depths**: Rather than silently dropping directories when `depth > MAX_DEPTH`, `EpubScanner` tracks skipped folder counts in `ScanResult.deepFoldersSkipped`, and `LibraryViewModel` surfaces this directly to the user in the scan completion feedback (`"Scan complete: N new book(s) (M folders were too deep to search)"` or `"No new EPUB files found (M folders were too deep to search)"`).
+- **Configurable Books Folder via Storage Access Framework (`ACTION_OPEN_DOCUMENT_TREE`)** — Added ability for users to explicitly select their books folder in `Settings → Library`:
+  - **Persistent URI permissions**: Uses `ActivityResultContracts.OpenDocumentTree()` and persists read permission via `contentResolver.takePersistableUriPermission(treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)`.
+  - **DataStore persistence**: Saved in `SettingsRepository` under `KEY_BOOKS_FOLDER_URI` (`books_folder_uri`). Includes `getFolderDisplayName()` helper to resolve clean folder titles.
+  - **Settings UI**: Clean row in `SettingsScreen` showing current folder name (or "None selected"), "Choose"/"Change" action, and "Clear" action. Descriptions for auto-scan and scan buttons adapt dynamically to the configured folder.
+  - **Primary discovery method**: `EpubScanner.scan()` treats the configured SAF tree URI as the primary scan source using `androidx.documentfile.provider.DocumentFile` with `MAX_DEPTH = 8`. If no SAF folder is configured or if SAF finds nothing, it gracefully falls back to scanning common filesystem directories and `MediaStore.Files`.
+  - **Permission check update**: `EpubScanner.hasStoragePermission()` checks for active persisted SAF tree read permissions (`contentResolver.persistedUriPermissions.any { it.isReadPermission }`) alongside traditional storage permissions.
+  - **Shared private import pipeline without cache leaks**: `LibraryViewModel.scanDevice()` computes SHA-256 hashes streaming directly from the `ContentResolver` input stream, checks Room for duplicate `fileHash` or `importedFromPath`, and copies directly to app private storage via `persistParsedEpub`. No orphaned files in `cacheDir`.
+- **Test coverage**:
+  - Added unit test suite `EpubScannerTest.kt` verifying the exact 36-book Maxwell collection directory structure at depth 5.
+  - Verified root filesystem walk discovers all 36 books with `MAX_DEPTH = 8`.
+  - Verified SAF document tree traversal discovers all 36 books.
+  - Verified regression baseline where `MAX_DEPTH = 4` missed all 36 books.
+  - Verified deep folder skip counter increments when depth exceeds 8.
+
+### Changed
+
+- `app/build.gradle.kts` — Added `androidx.documentfile:documentfile:1.0.1` dependency and configured `testOptions.unitTests.isReturnDefaultValues = true`.
+- `gradle/libs.versions.toml` — Added `androidx-documentfile` version and library definition.
+- `app/src/main/java/com/makemission/folio/data/settings/SettingsRepository.kt` — Added `KEY_BOOKS_FOLDER_URI`, `booksFolderUri: Flow<String?>`, `setBooksFolderUri(uri: String?)`, and `getFolderDisplayName(uriString: String?): String?`.
+- `app/src/main/java/com/makemission/folio/data/scan/EpubScanner.kt` — Increased `MAX_DEPTH` to 8, introduced `ScannedBookSource` and `ScanResult(items, deepFoldersSkipped)`, added SAF `DocumentFile` traversal in `walkSafDoc`, added depth skip callback reporting, updated `hasStoragePermission` to recognize persisted SAF permissions, preserved backward-compatible `findEpubFiles`.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryViewModel.kt` — Updated `scanDevice()` to pass configured SAF folder to `EpubScanner.scan()`, streaming SHA-256 dedup, direct copy to private storage via `persistParsedEpub`, and user messaging with `deepFoldersSkipped` feedback.
+- `app/src/main/java/com/makemission/folio/ui/settings/SettingsScreen.kt` — Added `rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree())` with persistable permission grant, folder picker row with Change and Clear actions, and dynamic folder label in scan descriptions.
+- `app/src/test/java/com/makemission/folio/data/scan/EpubScannerTest.kt` — Unit tests for Maxwell 36-book structure, MAX_DEPTH 8, SAF walk, MAX_DEPTH 4 regression test, and deep folder skip reporting.
+- `.gitignore` — Added ignores for scratch archive files.
+- `README.md` — Updated device scanning and settings documentation with SAF folder picker, `MAX_DEPTH = 8`, and depth skip reporting.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew testDebugUnitTest` — All 4 tests in `EpubScannerTest` passed (Maxwell collection 36 books found via walkDir and SAF, MAX_DEPTH=4 failure reproduced, depth > 8 skip counted).
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew assembleDebug` — Build completed successfully with 0 errors.
+
+---
+
 ## Session 39 — 2026-09-11 — Bug fixes: ReadingViewModel priority, saveProgress cancellation, Library→Settings swipe transition
 
 Branch: `main`.

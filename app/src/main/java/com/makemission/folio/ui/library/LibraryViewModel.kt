@@ -17,6 +17,7 @@ import com.makemission.folio.data.model.FolioCoverPalette
 import com.makemission.folio.data.model.curatedSampleBooks
 import com.makemission.folio.data.scan.EpubScanner
 import com.makemission.folio.data.search.SearchRepository
+import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.data.work.BookProcessingScheduler
 import com.makemission.folio.data.xray.XRayCache
 import kotlinx.coroutines.Dispatchers
@@ -29,11 +30,13 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.InputStream
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -42,6 +45,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     private val db = FolioDatabase.get(application)
     private val bookDao = db.bookDao()
     private val vocabularyDao = db.vocabularyDao()
+    private val settingsRepo = SettingsRepository.get(application)
 
     private val _importError = MutableSharedFlow<String>(replay = 0)
     val importError = _importError.asSharedFlow()
@@ -269,12 +273,11 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     fun hasStoragePermission(context: Context): Boolean = EpubScanner.hasStoragePermission(context)
 
     /**
-     * Scan device storage for EPUBs (Downloads, Documents, general external storage) and
-     * import any not already in the library. Uses [EpubScanner.findEpubFiles] and reuses
-     * [persistParsedEpub] so the private-storage copy + EpubParser + Room path is identical
-     * to manual import (don't duplicate logic). Skips duplicates by file content hash or
-     * filename/path tracking. Runs off the UI thread and updates [isScanning]/[scanProgress].
-     * If permission denied, does nothing (feature unavailable, no crash, no repeated prompt).
+     * Scan device storage for EPUBs (Downloads, Documents, general external storage, and SAF folder grant)
+     * and import any not already in the library. Uses [EpubScanner.scan] and reuses [persistParsedEpub] so
+     * the private-storage copy + EpubParser + Room path is identical to manual import (don't duplicate logic).
+     * Skips duplicates by file content hash or filename/path tracking. Runs off the UI thread and updates
+     * [isScanning]/[scanProgress]. If permission denied and no SAF grant, does nothing.
      */
     fun scanDevice(context: Context) {
         if (_isScanning.value) return
@@ -282,16 +285,28 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             FolioLogger.i("Scan", "scanDevice started")
             if (!EpubScanner.hasStoragePermission(context)) {
                 FolioLogger.w("Scan", "scanDevice permission denied")
-                _scanResult.emit("Storage permission not granted — auto-scan unavailable. Use + to import manually.")
+                _scanResult.emit("Storage permission or books folder grant required — auto-scan unavailable.")
                 return@launch
             }
             _isScanning.value = true
             _scanProgress.value = "Scanning..."
             try {
-                val found = withContext(Dispatchers.IO) { EpubScanner.findEpubFiles(context) }
+                val configuredFolder = settingsRepo.booksFolderUri.firstOrNull()?.let {
+                    try { Uri.parse(it) } catch (_: Exception) { null }
+                }
+                val scanResult = withContext(Dispatchers.IO) {
+                    EpubScanner.scan(context, configuredFolder)
+                }
+                val found = scanResult.items
+                val deepFoldersSkipped = scanResult.deepFoldersSkipped
+                val tooDeepSuffix = if (deepFoldersSkipped > 0) {
+                    val folderWord = if (deepFoldersSkipped == 1) "1 folder was" else "$deepFoldersSkipped folders were"
+                    " ($folderWord too deep to search)"
+                } else ""
+
                 if (found.isEmpty()) {
                     _scanProgress.value = null
-                    _scanResult.emit("No EPUB files found on device.")
+                    _scanResult.emit("No EPUB files found on device$tooDeepSuffix.")
                     return@launch
                 }
                 // Load existing for deduplication (hash + path)
@@ -317,14 +332,21 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
                 var imported = 0
                 var skipped = 0
-                for ((idx, file) in found.withIndex()) {
+                for ((idx, item) in found.withIndex()) {
                     _scanProgress.value = "Scanning ${idx + 1}/${found.size} · ${imported} new"
-                    // --- Deduplication: hash + path ---
-                    val foundHash = withContext(Dispatchers.IO) { computeSha256(file) }
+                    // --- Deduplication: path / name / hash ---
+                    val isPathDuplicate = existingPaths.contains(item.originalPathOrUri) ||
+                            existingPaths.contains(item.displayName)
+
+                    val foundHash = if (!isPathDuplicate) {
+                        withContext(Dispatchers.IO) {
+                            item.file?.let { computeSha256(it) } ?: item.uri?.let { computeSha256(context, it) }
+                        }
+                    } else null
+
                     val isDuplicate = when {
+                        isPathDuplicate -> true
                         foundHash != null && existingHashes.contains(foundHash) -> true
-                        existingPaths.contains(file.absolutePath) -> true
-                        existingPaths.contains(file.name) -> true
                         else -> false
                     }
                     if (isDuplicate) {
@@ -332,32 +354,34 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                         continue
                     }
                     // Copy to private storage temp and reuse import pipeline
-                    val safeName = file.name.takeIf { it.endsWith(".epub", ignoreCase = true) } ?: "${file.name}.epub"
+                    val safeName = item.displayName.takeIf { it.endsWith(".epub", ignoreCase = true) } ?: "${item.displayName}.epub"
                     val booksDir = File(context.filesDir, "books").apply { mkdirs() }
                     val tmpScan = File(booksDir, "scan_tmp_${UUID.randomUUID()}_$safeName")
                     try {
-                        withContext(Dispatchers.IO) { file.copyTo(tmpScan, overwrite = true) }
-                    } catch (_: Exception) {
+                        withContext(Dispatchers.IO) {
+                            if (item.file != null) {
+                                item.file.copyTo(tmpScan, overwrite = true)
+                            } else if (item.uri != null) {
+                                context.contentResolver.openInputStream(item.uri)?.use { input ->
+                                    tmpScan.outputStream().use { outStream -> input.copyTo(outStream) }
+                                } ?: throw IllegalStateException("Cannot read stream for ${item.uri}")
+                            } else {
+                                throw IllegalStateException("Both file and uri are null for ${item.displayName}")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        FolioLogger.w("Scan", "Failed to copy ${item.displayName}: ${e.message}", e)
                         try { tmpScan.delete() } catch (_: Exception) {}
                         continue
                     }
                     // Reuse shared pipeline (same private copy + EpubParser + Room as manual import)
                     val result = withContext(Dispatchers.IO) {
-                        // Check again after copy in case of race; persistParsedEpub handles title reuse
-                        // If title already exists, persist will reuse id (update) — for scan we want to skip duplicates,
-                        // but reusing is okay (no duplicate row) and we count as skipped if title matched existing.
-                        // To strictly skip title duplicates, we check before persist:
-                        val nameForCheck = file.absolutePath
-                        // Quick title dedup: peek without persisting would require parse; let persist handle it
-                        persistParsedEpub(tmpScan, safeName, context, originalPathOrName = nameForCheck, sourceHash = foundHash)
+                        persistParsedEpub(tmpScan, safeName, context, originalPathOrName = item.originalPathOrUri, sourceHash = foundHash)
                     }
                     if (result != null) {
-                        // If result id already existed (title match reuse), it may have updated existing row
-                        // Count as imported only if it was a new book (title not previously present)
-                        // We already filtered by hash/path, so this is effectively new
-                        existingHashes.add(foundHash ?: "")
-                        existingPaths.add(file.absolutePath)
-                        existingPaths.add(file.name)
+                        foundHash?.let { existingHashes.add(it) }
+                        existingPaths.add(item.originalPathOrUri)
+                        existingPaths.add(item.displayName)
                         imported++
                     } else {
                         // Parse failed or empty
@@ -367,10 +391,10 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                     if (imported + skipped >= 80) break
                 }
                 _scanProgress.value = null
-                FolioLogger.i("Scan", "Scan done found=${found.size} imported=$imported skipped=$skipped")
+                FolioLogger.i("Scan", "Scan done found=${found.size} imported=$imported skipped=$skipped deepFoldersSkipped=$deepFoldersSkipped")
                 when {
-                    imported > 0 -> _scanResult.emit("Scan complete: $imported new book(s) added${if (skipped > 0) ", $skipped already in library" else ""}.")
-                    else -> _scanResult.emit("Scan complete: no new books (${found.size} found, all already imported).")
+                    imported > 0 -> _scanResult.emit("Scan complete: $imported new book(s) added${if (skipped > 0) ", $skipped already in library" else ""}$tooDeepSuffix.")
+                    else -> _scanResult.emit("Scan complete: no new books (${found.size} found, all already imported)$tooDeepSuffix.")
                 }
             } catch (e: Exception) {
                 FolioLogger.e("Scan", "Scan failed: ${e.message}", e)
@@ -433,13 +457,23 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     private fun computeSha256(file: File): String? {
         return try {
             if (!file.exists() || !file.isFile) return null
+            file.inputStream().use { computeSha256FromStream(it) }
+        } catch (_: Exception) { null }
+    }
+
+    private fun computeSha256(context: Context, uri: Uri): String? {
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { computeSha256FromStream(it) }
+        } catch (_: Exception) { null }
+    }
+
+    private fun computeSha256FromStream(input: InputStream): String? {
+        return try {
             val digest = MessageDigest.getInstance("SHA-256")
-            file.inputStream().use { input ->
-                val buf = ByteArray(8192)
-                var n: Int
-                while (input.read(buf).also { n = it } != -1) {
-                    digest.update(buf, 0, n)
-                }
+            val buf = ByteArray(8192)
+            var n: Int
+            while (input.read(buf).also { n = it } != -1) {
+                digest.update(buf, 0, n)
             }
             digest.digest().joinToString("") { "%02x".format(it) }
         } catch (_: Exception) { null }
