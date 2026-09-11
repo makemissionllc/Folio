@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -210,14 +211,20 @@ fun XRayBottomSheet(
             )
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (isLoading) {
-                androidx.compose.foundation.layout.Box(
+            if (isLoading && (xrayIndex.isEmpty() || xrayIndex.values.all { it.isEmpty() })) {
+                androidx.compose.foundation.layout.Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 24.dp),
-                    contentAlignment = Alignment.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = androidx.compose.ui.Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Preparing X-Ray — this chapter is being indexed",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             } else if (xrayIndex.isEmpty() || xrayIndex.values.all { it.isEmpty() }) {
                 Text(
@@ -230,6 +237,22 @@ fun XRayBottomSheet(
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
+                    if (isLoading && xrayIndex.size < chapters.size) {
+                        item {
+                            androidx.compose.foundation.layout.Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                CircularProgressIndicator(modifier = androidx.compose.ui.Modifier.size(14.dp), strokeWidth = 1.5.dp, color = MaterialTheme.colorScheme.primary)
+                                Text(
+                                    text = "Preparing next chapter — stay on this page",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                )
+                            }
+                        }
+                    }
                     val sorted = xrayIndex.entries.sortedBy { it.key }
                     items(sorted, key = { it.key }) { (chIdx, terms) ->
                         Column(

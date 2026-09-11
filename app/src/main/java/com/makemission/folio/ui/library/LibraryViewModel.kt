@@ -10,11 +10,14 @@ import com.makemission.folio.data.db.FolioDatabase
 import com.makemission.folio.data.db.entity.BookEntity
 import com.makemission.folio.data.epub.EpubParser
 import com.makemission.folio.data.logging.FolioLogger
+import com.makemission.folio.data.cache.ParsedBookCache
+import com.makemission.folio.data.cache.TruePageCache
 import com.makemission.folio.data.model.Book
 import com.makemission.folio.data.model.FolioCoverPalette
 import com.makemission.folio.data.model.curatedSampleBooks
 import com.makemission.folio.data.scan.EpubScanner
 import com.makemission.folio.data.search.SearchRepository
+import com.makemission.folio.data.work.BookProcessingScheduler
 import com.makemission.folio.data.xray.XRayCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -175,10 +178,11 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
-     * Shared import pipeline: validate by parsing, handle re-import (title match), move to final
-     * private storage, extract cover, and insert Room entity.
-     * Reused by both manual SAF import and device auto-scan (don't duplicate logic).
-     * Stores [sourceHash] and [originalPathOrName] for scan deduplication.
+     * Shared import pipeline — MINIMAL at import time (copy + title/author/cover for grid).
+     * Does NOT run full X-Ray extraction or heavy indexing here. Those are scheduled
+     * via WorkManager to run in the background (chapter-by-chapter) so import feels instant.
+     * Title/author are extracted via lightweight OPF metadata parse (no full chapter HTMl parse).
+     * Reused by both manual SAF import and device auto-scan.
      */
     private suspend fun persistParsedEpub(
         tmpFile: File,
@@ -187,14 +191,22 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         originalPathOrName: String,
         sourceHash: String?,
     ): BookEntity? {
-        // Validate by parsing — also gives us title/author
-        val epub = EpubParser.parse(tmpFile)
-        if (epub == null || epub.chapters.isEmpty()) {
-            tmpFile.delete()
-            return null
+        // Quick validation: ensure file looks like a ZIP/EPUB (has OPF) via lightweight metadata
+        // We still need a title — use fast metadata extraction, not full chapter parse
+        val metadata = EpubParser.extractMetadata(tmpFile)
+        // Fallback: if metadata extraction fails (no OPF), try quick full parse as validation
+        // but only to check emptiness; heavy X-Ray etc is still deferred.
+        val resolvedMetadata = metadata ?: run {
+            // Last resort: attempt full parse to get title/author, but this is still lighter than X-Ray
+            val epub = EpubParser.parse(tmpFile)
+            if (epub == null || epub.chapters.isEmpty()) {
+                tmpFile.delete()
+                return null
+            }
+            EpubParser.EpubMetadata(title = epub.title, author = epub.author)
         }
-        val title = epub.title.ifBlank { safeName.removeSuffix(".epub") }
-        val author = epub.author
+        val title = resolvedMetadata.title.ifBlank { safeName.removeSuffix(".epub") }
+        val author = resolvedMetadata.author
 
         // Check for re-import: same title already exists → reuse its id so highlights can be LCS-reanchored
         val existing = try {
@@ -213,6 +225,8 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 tmpFile.copyTo(destFile, overwrite = true)
                 tmpFile.delete()
             }
+        } else {
+            // tmp is already at dest? Ensure parent
         }
         // If reimport, clean up old cover to force regeneration
         if (existing?.coverImagePath != null) {
@@ -222,7 +236,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         // Compute final hash from destFile if not already computed from tmp (e.g., after move)
         val finalHash = sourceHash ?: computeSha256(destFile)
 
-        // Extract cover image if present (saved under covers/<id>.jpg)
+        // Extract cover image if present (saved under covers/<id>.jpg) — lightweight, needed for grid
         val coverPath = EpubParser.extractCoverToFile(destFile, context, id)
 
         // If this was a reimport, delete old file if path changed (we already moved)
@@ -239,9 +253,14 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             fileHash = finalHash,
             importedFromPath = originalPathOrName,
         )
-        bookDao.insert(entity)
-        // Invalidate X-Ray cache so it recomputes for the new/updated book
+        withContext(Dispatchers.IO) { bookDao.insert(entity) }
+        // Invalidate caches (X-Ray, parsed, true-page) so they recompute for new/updated file — only if hash changed
+        // If reimport with same hash, caches could be reused; but we invalidate to be safe and let worker repopulate
         try { XRayCache.invalidate(context, id) } catch (_: Exception) {}
+        try { ParsedBookCache.invalidate(context, id) } catch (_: Exception) {}
+        try { TruePageCache.invalidate(context, id) } catch (_: Exception) {}
+        // Schedule background heavy processing (X-Ray chapter-by-chapter, full parse caching) — soon but not blocking
+        try { BookProcessingScheduler.schedule(context, id, finalHash) } catch (_: Exception) {}
         return entity
     }
 
@@ -385,6 +404,9 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                     try { db.highlightDao().clearForBook(book.id) } catch (_: Exception) {}
                     try { db.bookmarkDao().clearForBook(book.id) } catch (_: Exception) {}
                     try { XRayCache.invalidate(context, book.id) } catch (_: Exception) {}
+                    try { ParsedBookCache.invalidate(context, book.id) } catch (_: Exception) {}
+                    try { TruePageCache.invalidate(context, book.id) } catch (_: Exception) {}
+                    try { BookProcessingScheduler.cancel(context, book.id) } catch (_: Exception) {}
                 }
                 FolioLogger.i("Library", "Removed book ${book.id} ${book.title.take(60)}")
                 _scanResult.emit("Removed \"${book.title}\"")

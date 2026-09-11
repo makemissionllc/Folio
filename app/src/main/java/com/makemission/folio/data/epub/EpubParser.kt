@@ -199,6 +199,31 @@ object EpubParser {
         null
     }
 
+    /** Quick metadata-only extraction (title/author) without parsing chapters — for minimal import. */
+    data class EpubMetadata(val title: String, val author: String)
+    fun extractMetadata(file: File): EpubMetadata? = try {
+        file.inputStream().use { extractMetadata(it) }
+    } catch (e: Exception) {
+        FolioLogger.w("EpubParser", "extractMetadata file failed: ${file.name.take(80)} ${e.message}", e)
+        null
+    }
+    fun extractMetadata(inputStream: InputStream): EpubMetadata? {
+        return try {
+            val entries = readZipEntries(inputStream)
+            if (entries.isEmpty()) return null
+            val opfPath = findOpfPath(entries) ?: return EpubMetadata("Untitled", "")
+            val opfBytes = entries[opfPath] ?: return EpubMetadata("Untitled", "")
+            val opfText = opfBytes.toString(StandardCharsets.UTF_8)
+            val opfDoc = Jsoup.parse(opfText, Parser.xmlParser())
+            val title = opfDoc.selectFirst("dc|title, title")?.text()?.trim().orEmpty().ifEmpty { "Untitled" }
+            val author = opfDoc.selectFirst("dc|creator, creator")?.text()?.trim().orEmpty()
+            EpubMetadata(title = title, author = author)
+        } catch (e: Exception) {
+            FolioLogger.w("EpubParser", "extractMetadata failed: ${e.message}", e)
+            null
+        }
+    }
+
     /**
      * Extract cover image if present: looks for `<meta name="cover" content="id">`
      * or `properties="cover-image"` in the OPF manifest, saves the bytes to

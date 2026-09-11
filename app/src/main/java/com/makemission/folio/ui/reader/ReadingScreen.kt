@@ -154,6 +154,7 @@ fun ReadingScreen(
         isInBookSearching = isInBookSearching,
         onInBookQueryChange = viewModel::onInBookQueryChange,
         onClearInBookSearch = viewModel::clearInBookSearch,
+        onPrioritizeXRay = viewModel::prioritizeXRayChapter,
         initialChapterIndex = initialChapterIndex,
         initialParagraphIndex = initialParagraphIndex,
         modifier = modifier,
@@ -179,6 +180,7 @@ private fun ReadingScreenContent(
     isInBookSearching: Boolean = false,
     onInBookQueryChange: (String) -> Unit = {},
     onClearInBookSearch: () -> Unit = {},
+    onPrioritizeXRay: (Int) -> Unit = {},
     initialChapterIndex: Int? = null,
     initialParagraphIndex: Int? = null,
     modifier: Modifier = Modifier,
@@ -300,6 +302,14 @@ private fun ReadingScreenContent(
         derivedStateOf {
             val (ch, para) = currentBookmarkPos
             bookmarks.any { it.chapterIndex == ch && it.paragraphIndex == para }
+        }
+    }
+
+    // Progressive X-Ray: when user opens X-Ray, prioritize the chapter they're reading
+    LaunchedEffect(showXRay) {
+        if (showXRay && uiState.chapters.isNotEmpty()) {
+            val (ch, _) = currentBookmarkPos
+            onPrioritizeXRay(ch.coerceIn(0, uiState.chapters.size - 1))
         }
     }
 
@@ -638,6 +648,8 @@ private fun ReadingScreenContent(
                             rightListState = tabletRightState,
                             pendingBookmarkJump = pendingBookmarkJump,
                             onJumpConsumed = { pendingBookmarkJump = null },
+                            bookId = uiState.bookId,
+                            fileHash = uiState.fileHash,
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {
@@ -659,6 +671,8 @@ private fun ReadingScreenContent(
                             listState = singleListState,
                             pendingBookmarkJump = pendingBookmarkJump,
                             onJumpConsumed = { pendingBookmarkJump = null },
+                            bookId = uiState.bookId,
+                            fileHash = uiState.fileHash,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -795,6 +809,8 @@ private fun SingleColumnReadingContent(
     listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     pendingBookmarkJump: Bookmark? = null,
     onJumpConsumed: () -> Unit = {},
+    bookId: String? = null,
+    fileHash: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -814,11 +830,13 @@ private fun SingleColumnReadingContent(
         onJumpConsumed()
     }
 
-    // True-Page Calculation Engine (§5) — virtual canvas, cached on rotate/font
+    // True-Page Calculation Engine (§5) — virtual canvas, cached on rotate/font + disk (hash-validated)
     val truePageInfo = rememberTruePageState(
         chapters = chapters,
         isTabletLandscape = false,
         bionicEnabled = bionicEnabled,
+        bookId = bookId,
+        fileHash = fileHash,
     )
     // Current page updates on scroll but totalPages stays cached
     val currentPage by remember {
@@ -1122,6 +1140,8 @@ private fun TwoColumnReadingContent(
     rightListState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     pendingBookmarkJump: Bookmark? = null,
     onJumpConsumed: () -> Unit = {},
+    bookId: String? = null,
+    fileHash: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val mid = (chapters.size + 1) / 2
@@ -1172,6 +1192,8 @@ private fun TwoColumnReadingContent(
         chapters = chapters,
         isTabletLandscape = true,
         bionicEnabled = bionicEnabled,
+        bookId = bookId,
+        fileHash = fileHash,
     )
     // Tablet spread shows 2 columns per physical page, but totalPages already
     // reflects physical turns. Current page tracks earliest visible spread.

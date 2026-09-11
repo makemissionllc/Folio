@@ -114,4 +114,64 @@ object XRayExtractor {
         }
         return result
     }
+
+    /** Precomputed global stats for progressive per-chapter extraction (lightweight). */
+    data class GlobalStats(
+        val totalChapters: Int,
+        val chapterTermCounts: List<Map<String, Int>>,
+        val chapterTotalWords: List<Int>,
+        val termDocFreq: Map<String, Int>,
+        val totalFreq: Map<String, Int>,
+        val termToChapters: Map<String, List<Int>>,
+    )
+
+    fun precomputeGlobalStats(chapters: List<EpubParser.EpubChapter>): GlobalStats {
+        if (chapters.isEmpty()) return GlobalStats(0, emptyList(), emptyList(), emptyMap(), emptyMap(), emptyMap())
+        val chapterTermCounts = mutableListOf<Map<String, Int>>()
+        val chapterTotalWords = mutableListOf<Int>()
+        val termDocFreq = mutableMapOf<String, Int>()
+        for (ch in chapters) {
+            val fullText = buildString { append(ch.title); append(" "); ch.paragraphs.forEach { append(it); append(" ") } }
+            val words = tokenize(fullText)
+            chapterTotalWords.add(words.size.coerceAtLeast(1))
+            val candidates = candidateTerms(fullText)
+            val counts = candidates.groupingBy { it.lowercase() }.eachCount()
+            chapterTermCounts.add(counts)
+            for (term in counts.keys) termDocFreq[term] = (termDocFreq[term] ?: 0) + 1
+        }
+        val totalFreq = mutableMapOf<String, Int>()
+        for (counts in chapterTermCounts) for ((term, c) in counts) totalFreq[term] = (totalFreq[term] ?: 0) + c
+        val termToChapters = mutableMapOf<String, MutableList<Int>>()
+        for ((chIdx, counts) in chapterTermCounts.withIndex()) for (term in counts.keys) termToChapters.getOrPut(term) { mutableListOf() }.add(chIdx)
+        val immutableTermToChapters = termToChapters.mapValues { it.value.toList() }
+        return GlobalStats(chapters.size, chapterTermCounts, chapterTotalWords, termDocFreq, totalFreq, immutableTermToChapters)
+    }
+
+    /** Extract only [chapterIndex] using precomputed [stats] — for progressive prioritization. */
+    fun extractChapter(
+        chapters: List<EpubParser.EpubChapter>,
+        chapterIndex: Int,
+        stats: GlobalStats,
+        topK: Int = 8,
+    ): List<XRayTerm> {
+        if (chapterIndex !in chapters.indices) return emptyList()
+        if (stats.totalChapters != chapters.size) return extract(chapters, topK)[chapterIndex] ?: emptyList()
+        val counts = stats.chapterTermCounts.getOrNull(chapterIndex) ?: return emptyList()
+        val totalWords = stats.chapterTotalWords.getOrNull(chapterIndex)?.toDouble() ?: 1.0
+        val scored = counts.map { (termLower, count) ->
+            val tf = count / totalWords
+            val df = stats.termDocFreq[termLower] ?: 1
+            val idf = ln(stats.totalChapters.toDouble() / df.toDouble())
+            val score = tf * idf
+            val display = candidateTerms(chapters[chapterIndex].let { ch -> ch.title + " " + ch.paragraphs.joinToString(" ") }).firstOrNull { it.lowercase() == termLower } ?: termLower.replaceFirstChar { it.uppercase() }
+            XRayTerm(
+                term = display,
+                normalized = termLower,
+                score = score,
+                chapterIndices = stats.termToChapters[termLower] ?: emptyList(),
+                totalFrequency = stats.totalFreq[termLower] ?: count,
+            )
+        }.sortedByDescending { it.score }.take(topK)
+        return scored
+    }
 }

@@ -4,11 +4,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import com.makemission.folio.data.cache.TruePageCache
 import com.makemission.folio.data.epub.EpubParser
 
 /**
@@ -44,12 +46,16 @@ data class TruePageInfo(
  * @param chapters whole book
  * @param isTabletLandscape true for landscape >=840dp spread
  * @param bionicEnabled affects measure (bold first syllable slightly wider)
+ * @param bookId optional for disk caching (smart cache with hash invalidation)
+ * @param fileHash optional file hash for cache invalidation (reuses dedup)
  */
 @Composable
 fun rememberTruePageState(
     chapters: List<EpubParser.EpubChapter>,
     isTabletLandscape: Boolean,
     bionicEnabled: Boolean,
+    bookId: String? = null,
+    fileHash: String? = null,
 ): TruePageInfo {
     val textMeasurer = rememberTextMeasurer()
     val configuration = LocalConfiguration.current
@@ -72,13 +78,37 @@ fun rememberTruePageState(
         h
     }
 
+    val context = LocalContext.current
+    val configKey = remember(screenWidthDp, screenHeightDp, orientation, fontScale, densityValue, bionicEnabled, isTabletLandscape, chaptersKey) {
+        TruePageCache.configKey(screenWidthDp, screenHeightDp, orientation, fontScale, densityValue, bionicEnabled, isTabletLandscape, chaptersKey)
+    }
+
     return remember(
         screenWidthDp, screenHeightDp, orientation,
         fontScale, densityValue, bionicEnabled,
-        isTabletLandscape, chaptersKey,
+        isTabletLandscape, chaptersKey, configKey, bookId, fileHash,
     ) {
         if (chapters.isEmpty()) {
             return@remember TruePageInfo(totalPages = 1, pageForFlatIndex = { 1 })
+        }
+
+        // Smart disk cache: try to load previously computed pages for this book+config+hash
+        if (bookId != null) {
+            try {
+                val cached = TruePageCache.load(context, bookId, configKey, fileHash)
+                if (cached != null && cached.prefixSums.isNotEmpty()) {
+                    val totalPages = cached.totalPages
+                    val prefixSums = cached.prefixSums
+                    val perScreen = cached.perScreenHeightPx
+                    val pageFor: (Int) -> Int = { flatIndex ->
+                        val clamped = flatIndex.coerceIn(0, prefixSums.size - 2)
+                        val heightBefore = prefixSums[clamped]
+                        val page = if (perScreen > 0) (heightBefore / perScreen) + 1 else 1
+                        page.coerceIn(1, totalPages)
+                    }
+                    return@remember TruePageInfo(totalPages = totalPages, pageForFlatIndex = pageFor)
+                }
+            } catch (_: Exception) {}
         }
 
         // ---- Available dimensions (virtual canvas) ----
@@ -178,6 +208,11 @@ fun rememberTruePageState(
             val heightBefore = prefixSums[clamped]
             val page = (heightBefore / perScreenHeightPx) + 1
             page.coerceIn(1, totalPages)
+        }
+
+        // Save to disk cache for instant reopen (hash-validated)
+        if (bookId != null) {
+            try { TruePageCache.save(context, bookId, configKey, fileHash, totalPages, prefixSums, perScreenHeightPx) } catch (_: Exception) {}
         }
 
         TruePageInfo(totalPages = totalPages, pageForFlatIndex = pageFor)

@@ -12,6 +12,7 @@ import com.makemission.folio.data.db.entity.Bookmark
 import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.db.entity.ReadingProgress
 import com.makemission.folio.data.epub.EpubParser
+import com.makemission.folio.data.cache.ParsedBookCache
 import com.makemission.folio.data.logging.FolioLogger
 import com.makemission.folio.data.vocabulary.Sm2
 import com.makemission.folio.data.xray.XRayCache
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class ReadingUiState(
@@ -38,6 +40,7 @@ data class ReadingUiState(
     val isLoading: Boolean = true,
     val restoredChapterIndex: Int = 0,
     val restoredParagraphIndex: Int = 0,
+    val fileHash: String? = null,
 )
 
 class ReadingViewModel(
@@ -94,22 +97,41 @@ class ReadingViewModel(
                 FolioLogger.w("Reading", "Failed to load progress for $bookId: ${e.message}", e)
                 null
             }
-            // Try to load the imported book's private file first (SAF copy), then assets, then fallback
             val app = getApplication<Application>()
             val stored = try { db.bookDao().getById(bookId) } catch (e: Exception) {
                 FolioLogger.w("Reading", "Failed to lookup book $bookId: ${e.message}", e)
                 null
             }
-            val epub = when {
-                stored?.filePath != null -> {
-                    val f = java.io.File(stored.filePath)
-                    if (f.exists() && f.canRead()) EpubParser.parse(f) else {
-                        FolioLogger.w("Reading", "Stored file missing/unreadable for $bookId: ${stored.filePath?.take(80)}")
-                        null
-                    }
+            val fileHash = stored?.fileHash
+            // Try smart disk cache first (parsed chapters) — avoids heavy re-parse if hash unchanged
+            var epub: EpubParser.EpubBook? = null
+            var fromCache = false
+            if (stored?.filePath != null && fileHash != null) {
+                epub = ParsedBookCache.load(app, bookId, fileHash)
+                if (epub != null) {
+                    fromCache = true
+                    FolioLogger.i("Reading", "Parsed cache hit for $bookId")
                 }
-                else -> null
-            } ?: EpubParser.loadFromAssetsOrNull(app)
+            }
+            if (epub == null) {
+                epub = when {
+                    stored?.filePath != null -> {
+                        val f = java.io.File(stored.filePath)
+                        if (f.exists() && f.canRead()) {
+                            // Parse and populate cache if needed (still on IO, but cached next time)
+                            val parsed = EpubParser.parse(f)
+                            if (parsed != null && fileHash != null) {
+                                try { ParsedBookCache.save(app, bookId, fileHash, parsed) } catch (_: Exception) {}
+                            }
+                            parsed
+                        } else {
+                            FolioLogger.w("Reading", "Stored file missing/unreadable for $bookId: ${stored.filePath?.take(80)}")
+                            null
+                        }
+                    }
+                    else -> null
+                } ?: EpubParser.loadFromAssetsOrNull(app)
+            }
             if (epub == null) FolioLogger.w("Reading", "EPUB parse null for $bookId, using fallback")
             val chapters = epub?.chapters ?: EpubParser.sampleFallbackChapters(bookTitle)
 
@@ -128,10 +150,11 @@ class ReadingViewModel(
                 isLoading = false,
                 restoredChapterIndex = chapterIdx,
                 restoredParagraphIndex = paraIdx,
+                fileHash = fileHash,
             )
 
-            // X-Ray TF-IDF (§5): compute once per book, cache
-            launchXRayIfNeeded(app, bookId, chapters)
+            // X-Ray (§5): chapter-level progressive — prioritize current chapter, then next, then rest
+            launchProgressiveXRay(app, bookId, chapters, fileHash, chapterIdx)
 
             // LCS re-anchoring (§5): if the EPUB file changed, relocate highlights
             reanchorHighlightsIfNeeded(chapters)
@@ -171,32 +194,108 @@ class ReadingViewModel(
         _inBookResults.value = emptyList()
     }
 
-    private fun launchXRayIfNeeded(
+    /**
+     * Progressive X-Ray — chapter-by-chapter, prioritizing the chapter the user is
+     * currently reading. Uses precomputed global TF-IDF stats so only the scored
+     * terms for one chapter are computed at a time. Each chapter is cached via
+     * [XRayCache.saveChapter] (hash-validated) so reopening doesn't redo work.
+     * Next chapter is prefetched while the user reads the current one.
+     */
+    private fun launchProgressiveXRay(
         app: Application,
         bookId: String,
         chapters: List<EpubParser.EpubChapter>,
+        fileHash: String?,
+        startChapter: Int,
     ) {
+        viewModelScope.launch {
+            if (chapters.isEmpty()) {
+                _isXRayLoading.value = false
+                return@launch
+            }
+            // If cache already complete for this hash, load and done
+            try {
+                if (XRayCache.isComplete(app, bookId, chapters.size, fileHash)) {
+                    val full = XRayCache.load(app, bookId, fileHash)
+                    if (full != null) {
+                        _xrayIndex.value = full
+                        _isXRayLoading.value = false
+                        return@launch
+                    }
+                }
+            } catch (_: Exception) {}
+            // Seed with whatever partial cache exists
+            try {
+                val partial = XRayCache.load(app, bookId, fileHash)
+                if (partial != null && partial.isNotEmpty()) {
+                    _xrayIndex.value = partial
+                }
+            } catch (_: Exception) {}
+            // Quick check: if start chapter already cached, don't block UI
+            val hasStart = try { XRayCache.loadChapter(app, bookId, startChapter, fileHash) != null } catch (_: Exception) { false }
+            _isXRayLoading.value = !hasStart
+            try {
+                val stats = try { XRayExtractor.precomputeGlobalStats(chapters) } catch (e: Exception) {
+                    FolioLogger.w("XRay", "Global stats failed for $bookId: ${e.message}", e)
+                    null
+                } ?: return@launch
+                // Order: current, next, then remaining in index order — so reading feels instant
+                val order = mutableListOf<Int>()
+                order.add(startChapter.coerceIn(0, chapters.size - 1))
+                if (startChapter + 1 < chapters.size) order.add(startChapter + 1)
+                for (i in chapters.indices) if (i !in order) order.add(i)
+
+                for (chIdx in order) {
+                    if (!isActive) return@launch
+                    val cached = try { XRayCache.loadChapter(app, bookId, chIdx, fileHash) } catch (_: Exception) { null }
+                    if (cached != null) {
+                        val cur = _xrayIndex.value.toMutableMap()
+                        cur[chIdx] = cached
+                        _xrayIndex.value = cur
+                        if (chIdx == startChapter) _isXRayLoading.value = false
+                        continue
+                    }
+                    val terms = try { XRayExtractor.extractChapter(chapters, chIdx, stats, topK = 8) } catch (e: Exception) {
+                        FolioLogger.w("XRay", "Extract ch $chIdx failed for $bookId: ${e.message}", e)
+                        emptyList()
+                    }
+                    try { XRayCache.saveChapter(app, bookId, chIdx, terms, fileHash) } catch (e: Exception) {
+                        FolioLogger.w("XRay", "Cache save ch $chIdx failed: ${e.message}", e)
+                    }
+                    val cur = _xrayIndex.value.toMutableMap()
+                    cur[chIdx] = terms
+                    _xrayIndex.value = cur
+                    if (chIdx == startChapter) _isXRayLoading.value = false
+                    // Yield to keep UI responsive while still prefetching next chapter
+                    kotlinx.coroutines.yield()
+                }
+            } finally {
+                _isXRayLoading.value = false
+            }
+        }
+    }
+
+    /** Public priority helper — if user jumps to a new chapter whose X-Ray isn't cached, compute it first. */
+    fun prioritizeXRayChapter(chapterIndex: Int) {
+        val chapters = _uiState.value.chapters
+        if (chapters.isEmpty() || chapterIndex !in chapters.indices) return
+        val app = getApplication<Application>()
+        val fileHash = _uiState.value.fileHash
+        // If already cached, nothing to do
+        try {
+            if (XRayCache.loadChapter(app, bookId, chapterIndex, fileHash) != null) return
+        } catch (_: Exception) {}
         viewModelScope.launch {
             _isXRayLoading.value = true
             try {
-                // Try disk cache first (computed on import/first open)
-                val cached = try { XRayCache.load(app, bookId) } catch (e: Exception) {
-                    FolioLogger.w("XRay", "Cache load failed for $bookId: ${e.message}", e)
-                    null
-                }
-                if (cached != null && cached.isNotEmpty()) {
-                    _xrayIndex.value = cached
-                    return@launch
-                }
-                // Compute locally, deterministic, no network/dictionary
-                val index = try { XRayExtractor.extract(chapters, topK = 8) } catch (e: Exception) {
-                    FolioLogger.w("XRay", "Extract failed for $bookId: ${e.message}", e)
-                    emptyMap()
-                }
-                _xrayIndex.value = index
-                try { XRayCache.save(app, bookId, index) } catch (e: Exception) {
-                    FolioLogger.w("XRay", "Cache save failed for $bookId: ${e.message}", e)
-                }
+                val stats = XRayExtractor.precomputeGlobalStats(chapters)
+                val terms = XRayExtractor.extractChapter(chapters, chapterIndex, stats, topK = 8)
+                try { XRayCache.saveChapter(app, bookId, chapterIndex, terms, fileHash) } catch (_: Exception) {}
+                val cur = _xrayIndex.value.toMutableMap()
+                cur[chapterIndex] = terms
+                _xrayIndex.value = cur
+            } catch (e: Exception) {
+                FolioLogger.w("XRay", "prioritize failed ch $chapterIndex: ${e.message}", e)
             } finally {
                 _isXRayLoading.value = false
             }

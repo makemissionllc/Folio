@@ -249,11 +249,23 @@ object SearchRepository {
 
     private suspend fun getChapters(entity: com.makemission.folio.data.db.entity.BookEntity, context: Context): List<EpubParser.EpubChapter> {
         chapterCache[entity.id]?.let { return it }
+        // Try smart disk cache first (hash-validated) — avoids heavy re-parse on each keystroke/reopen
+        try {
+            val cached = com.makemission.folio.data.cache.ParsedBookCache.load(context, entity.id, entity.fileHash)
+            if (cached != null && cached.chapters.isNotEmpty()) {
+                chapterCache[entity.id] = cached.chapters
+                return cached.chapters
+            }
+        } catch (_: Exception) {}
         return try {
             val f = File(entity.filePath)
             val epub = if (f.exists() && f.canRead()) EpubParser.parse(f) else null
             val chapters = epub?.chapters ?: emptyList()
-            if (chapters.isNotEmpty()) chapterCache[entity.id] = chapters
+            if (chapters.isNotEmpty()) {
+                chapterCache[entity.id] = chapters
+                // Populate disk cache for next time (hash-validated)
+                try { entity.fileHash?.let { hash -> epub?.let { com.makemission.folio.data.cache.ParsedBookCache.save(context, entity.id, hash, it) } } } catch (_: Exception) {}
+            }
             chapters
         } catch (_: Exception) { emptyList() }
     }

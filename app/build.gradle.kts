@@ -66,6 +66,7 @@ dependencies {
     implementation(libs.jsoup)
     implementation(libs.coil.compose)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.work.runtime.ktx)
 
     ksp(libs.androidx.room.compiler)
 
