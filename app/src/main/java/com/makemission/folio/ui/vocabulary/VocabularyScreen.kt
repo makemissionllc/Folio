@@ -35,6 +35,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.makemission.folio.data.vocabulary.Sm2
@@ -49,6 +52,9 @@ fun VocabularyScreen(
     val allCards by viewModel.allCards.collectAsState()
     val current by viewModel.currentReview.collectAsState()
     val showDef by viewModel.showDefinition.collectAsState()
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val hapticsEnabled by com.makemission.folio.data.settings.SettingsRepository.get(context).hapticsEnabled.collectAsState(initial = true)
     val dueListState = rememberLazyListState()
     val allListState = rememberLazyListState()
 
@@ -82,7 +88,7 @@ fun VocabularyScreen(
                     definition = current!!.definition,
                     showDefinition = showDef,
                     onReveal = { viewModel.revealDefinition() },
-                    onRate = { q -> viewModel.rateCurrent(q) },
+                    onRate = { q -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); viewModel.rateCurrent(q) },
                     onDismiss = { viewModel.dismissReview() },
                     dueCount = dueCards.size,
                 )

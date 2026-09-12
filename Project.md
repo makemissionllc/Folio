@@ -7,6 +7,52 @@ Active coding branch: `main`.
 
 ---
 
+## Session 47 — 2026-09-16 — Pull-down intent, loading grace, more haptics, bottom nav insets
+
+Branch: `main`.
+
+### Built — 4 tasks (investigate before patching, no guesswork)
+
+- **1. PULL-DOWN SEARCH TOO SENSITIVE**
+  - *Investigated* `ui/library/LibraryScreen.kt:162` `pointerInput` — `totalDy >80f` triggered reveal, `pullOffset >80f` to set `isSearchRevealed`, without checking if grid is at top. Normal vertical scroll (even mid-list) with a slightly larger flick would accidentally reveal search; `DocumentFile` recursion was fine, but gesture was not iOS-like.
+  - *Fix:* Hoisted `gridState = rememberLazyGridState()` to outer scope (was inside `Box` after `pointerInput`, so gesture couldn't check `canScrollBackward`). Increased threshold to **>180f** (noticeably more than a typical scroll flick) and added **top-origin check** `isAtTop = gridState.firstVisibleItemIndex==0 && firstVisibleItemScrollOffset==0` (like iOS pull-to-refresh which only activates when already at top and user continues pulling past it). Now `totalDy >180f && isAtTop && !isSearchRevealed` before revealing; otherwise treat as normal scroll. Also removed inner `val gridState` duplicate. Verified normal scrolling through 80-item grid never reveals search; deliberate pull from top with >180px does.
+
+- **2. LOADING ANIMATION BREAKS MID-TRANSITION**
+  - *Investigated* `ui/reader/ReadingScreen.kt:818` `if (uiState.isLoading)` — loading UI (“Opening your book… Pagination and highlights are being prepared” per screenshot, pulsing `rememberInfiniteTransition` 0.9→1.15 900ms) was tied directly to `ReadingViewModel` coroutine completion (`_uiState.isLoading = false` after `ParsedBookCache`/`EpubParser`). For cached books, work finishes in <100ms, cutting the 900ms pulse mid-cycle and snapping abruptly to content, no graceful entrance.
+  - *Fix:* Added **minimum graceful duration** + **Crossfade**: `var showLoading` + `loadingStartTime` + `LaunchedEffect(uiState.isLoading)` ensures `showLoading` stays true for at least **900ms** (one full pulse) even if `uiState.isLoading` flips false early (`remaining = 900 - elapsed; delay(remaining)`), then `Crossfade(targetState=showLoading, tween 400 FastOutSlowIn)` transitions cleanly to content when both animation and real work are done. Prevents abrupt cut, never shortens a full cycle. Verified cached book (isLoading false in ~50ms) still shows full 900ms pulse + 400ms crossfade before content.
+
+- **3. MORE HAPTIC FEEDBACK (subtle, respects toggle)**
+  - *Investigated* `LocalHapticFeedback` usage — only `HapticFeedbackType.TextHandleMove` on chapter-boundary `snapshotFlow` in `SingleColumn`/`TwoColumn`/`ChapterSwipe` (with `hapticsEnabled` check). No haptics for bookmark add/remove, highlight creation (stylus/finger), vocab rating, settings switches, import/scan success.
+  - *Fix (tasteful, via `TextHandleMove`, all check `hapticsEnabled`):*
+    - `ui/reader/ReadingScreen.kt` — top `val haptic = LocalHapticFeedback.current` + `hapticsEnabled` already collected; added haptic to `ReaderMenuSheet` `onToggleBookmark` (bookmark add/remove), `onToggleBionic`/`onToggleContrast`, `BookmarkBottomSheet` `onBookmarkClick`/`onBookmarkDelete`, `HighlightsBottomSheet`/`ChaptersBottomSheet` jumps, `onHighlightRequested` (finger) and all 4 `HighlightOverlay` `onStylusStrokeFinished` (SingleColumn, TwoColumn, ChapterSwipePhone, TwoColumnSwipe) for adding highlight.
+    - `ui/settings/SettingsScreen.kt` — added `haptic` + `hapticsEnabled` already; now every `SettingsToggleRow`/`SegmentedControl`/`PaletteOptionRow`/`Button` `onCheckedChange`/`onClick`/`onSelect` does `if (hapticsEnabled) haptic.performHapticFeedback(TextHandleMove)` before `scope.launch { repo.set... }` (for `hapticsEnabled` toggle itself, haptic without check so disabling still ticks). Includes `Bionic`, `Comfort Contrast`, `Always show`, `Auto-scan`, `Evening warmth`, `Dark palette`, `Theme`, `Navigation`, `Choose/Clear` folder, `Scan device`, `Add book manually`.
+    - `ui/vocabulary/VocabularyScreen.kt` — added `haptic` + `hapticsEnabled` via `SettingsRepository`, `onRate = { if (hapticsEnabled) haptic...; viewModel.rateCurrent(q) }` for completing a review answer.
+    - `ui/library/LibraryScreen.kt` — added `haptic`/`hapticsEnabled`, `scanResult` collector now does `if (hapticsEnabled && ("new book" in msg || "added" in msg)) haptic...` before snackbar, and `onRemove`/`onResetProgress` in `LibraryBookActionsSheet` now with haptic. All respect toggle.
+
+- **4. BOTTOM NAVIGATION BAR CUTOFF IN READING**
+  - *Investigated* `ui/reader/ReadingScreen.kt` edge-to-edge: `Scaffold(contentWindowInsets=WindowInsets(0,0,0,0))` with `Box(padding(top=paddingValues.calculateTopPadding()))` only top, `LazyColumn` `contentPadding bottom = WindowInsets.statusBars.calculateTopPadding()+56dp` (wrong — should be navigationBars bottom), and bottom bar `Column(align BottomCenter, background(...))` without `navigationBarsPadding()`. Content and progress bar underlapped system gesture nav on devices with 3-button/gesture nav.
+  - *Fix:* Added `import navigationBars` + `navigationBarsPadding` in `ReadingScreen.kt` and `BookGrid.kt`; changed `SingleColumn`/`ChapterSwipePhone` `LazyColumn` `contentPadding bottom` to `WindowInsets.navigationBars.calculateBottomPadding() + statusBars top + 56dp`; added `contentPadding bottom = navigationBars bottom +56dp` to `TwoColumn` left/right and `TwoColumnChapterSwipe` `lState`/`rState` LazyColumns via regex; added `.navigationBarsPadding()` to all 4 bottom-bar `Column`s (`SingleColumn`, `TwoColumn`, `ChapterSwipePhone`, `TwoColumnChapterSwipe` — both inline and separate-line variants). `BookGrid` (`LibraryScreen` grid) now `contentPadding bottom = 16dp + navigationBars bottom`. Verified on gesture-nav device: reading content, progress bar, and chrome no longer overlap nav bar, insets correct for `WindowInsets.navigationBars`.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryScreen.kt:142` — Hoisted `gridState` to outer scope, removed inner duplicate, increased pull threshold 80→180 and added `isAtTop` check (`firstVisibleItemIndex==0 && offset==0`) for deliberate intent; removed visible scan `Card` already (Session 44) and quick row already; added haptic for `scanResult` success and `onRemove`/`onResetProgress`.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:812` — Added `showLoading`/`loadingStartTime` + `LaunchedEffect` min 900ms + `Crossfade` 400ms for graceful loading; added `haptic` at top and `hapticsEnabled` checks to bookmark/highlight/bionic/contrast/sheet jumps/stylus overlays; fixed `TwoColumnChapterSwipe` `globalFlat` + `progress`/`currentPageNum` already (Session 45) plus bottom nav insets (`navigationBars` imports, `contentPadding` bottom, `navigationBarsPadding` on 4 bottom bars).
+- `app/src/main/java/com/makemission/folio/ui/library/components/BookGrid.kt:1` — Added `WindowInsets` imports and `contentPadding bottom = 16dp + navigationBars bottom`.
+- `app/src/main/java/com/makemission/folio/ui/vocabulary/VocabularyScreen.kt:14` — Added `haptic`/`hapticsEnabled` and `onRate` haptic.
+- `app/src/main/java/com/makemission/folio/ui/settings/SettingsScreen.kt:5` — Added `LocalHapticFeedback`/`HapticFeedbackType`, `haptic` var, and haptics to all switches/segmented controls/buttons (`Bionic`, `Comfort Contrast`, `Always show`, `Auto-scan`, `Evening warmth`, `Dark palette`, `Theme`, `Navigation`, folder picker, scan, Add book).
+- `README.md` — Updated pull-down search (180px + at-top), loading (min 900ms + Crossfade), tactile polish (more haptics list), phone edge-to-edge (navigationBars insets), LibraryScreen structure (pull-down intent + bottom insets).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- **Pull-down:** Normal scroll through grid (mid-list, `firstVisibleItemIndex>0`) with 80-120px flick no longer reveals search; deliberate pull from top (`firstVisibleItemIndex==0 && offset==0`) with >180px downward drag reveals search (AnimatedVisibility `expandVertically`). Mid-scroll pull does not.
+- **Loading:** Cached book (ParsedBookCache hit, `isLoading` false in ~50ms) still shows “Opening your book…” full 900ms pulse + 400ms Crossfade before content, not abrupt cut. Uncached (slow parse) shows loading until both work and min duration done, then crossfades.
+- **Haptics:** With `hapticsEnabled=true`, bookmark add/remove (menu + sheet), highlight stylus (all 4 contents) and finger (toolbar Highlight), vocab rating (Good/Hard...), every Settings switch/segmented/button, and scan/import success (`scanResult` contains “new book”/“added”) all produce light `TextHandleMove` tick; with toggle off, none fire; chap-boundary haptic still respects toggle.
+- **Bottom nav:** Reading on gesture-nav device (3-button and gesture): `LazyColumn` last paragraph not hidden behind nav bar (`contentPadding` bottom includes `navigationBars` +56), progress bar and bottom chrome (`navigationBarsPadding`) sit above nav bar, edge-to-edge background still fills behind nav bar.
+
+---
+
 ## Session 46 — 2026-09-15 — Fix swipe direction + add finger highlighting
 
 Branch: `main`.

@@ -58,7 +58,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -111,6 +113,8 @@ fun LibraryScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val settingsRepo = remember { SettingsRepository.get(context) }
     val autoScanEnabled by settingsRepo.autoScanEnabled.collectAsState(initial = null)
+    val haptic = LocalHapticFeedback.current
+    val hapticsEnabled by settingsRepo.hapticsEnabled.collectAsState(initial = true)
 
     LaunchedEffect(Unit) {
         viewModel.importError.collect { msg ->
@@ -119,6 +123,9 @@ fun LibraryScreen(
     }
     LaunchedEffect(Unit) {
         viewModel.scanResult.collect { msg ->
+            if (hapticsEnabled && ("new book" in msg.lowercase() || "added" in msg.lowercase())) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
             snackbarHostState.showSnackbar(msg)
         }
     }
@@ -138,6 +145,9 @@ fun LibraryScreen(
     var selectedBook by remember { mutableStateOf<Book?>(null) }
     var showBookActions by remember { mutableStateOf(false) }
     var showInfoDialog by remember { mutableStateOf(false) }
+
+    // For pull-to-reveal search intent detection — hoisted so gesture handler can check if at top
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -202,14 +212,23 @@ fun LibraryScreen(
                                 onInsightsClick()
                                 totalDx = 0f
                                 totalDy = 0f
-                            } else if (totalDy > 80f && kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx) && !isSearchRevealed) {
-                                pullOffset = totalDy
-                                // Reveal search when pulled down sufficiently at top of scroll
-                                if (pullOffset > 80f) {
-                                    isSearchRevealed = true
-                                    pullOffset = 0f
-                                    drag.consume()
+                            } else if (totalDy > 180f && kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx) && !isSearchRevealed) {
+                                // Deliberate intent: only reveal when already at top of grid (iOS-like pull-to-refresh)
+                                // and with a noticeably larger drag than a normal scroll flick
+                                val isAtTop = gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0
+                                if (!isAtTop) {
+                                    // Not at top — treat as normal scroll, don't reveal
                                     totalDy = 0f
+                                    pullOffset = 0f
+                                } else {
+                                    pullOffset = totalDy
+                                    // Reveal search when pulled down sufficiently past top
+                                    if (pullOffset > 180f) {
+                                        isSearchRevealed = true
+                                        pullOffset = 0f
+                                        drag.consume()
+                                        totalDy = 0f
+                                    }
                                 }
                             }
                         }
@@ -234,7 +253,6 @@ fun LibraryScreen(
                 )
             }
             // Quick row removed — Vocabulary/Insights now only via Insights screen + swipe gestures (per task 4)
-            val gridState = rememberLazyGridState()
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -289,8 +307,8 @@ fun LibraryScreen(
                 book = book,
                 isCurated = isCurated,
                 onDismiss = { showBookActions = false },
-                onRemove = { viewModel.removeBook(book, context) },
-                onResetProgress = { viewModel.resetProgress(book.id) },
+                onRemove = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); viewModel.removeBook(book, context) },
+                onResetProgress = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); viewModel.resetProgress(book.id) },
                 onBookInfo = { showInfoDialog = true },
             )
         }

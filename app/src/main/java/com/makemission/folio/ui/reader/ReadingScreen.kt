@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -208,6 +210,7 @@ private fun ReadingScreenContent(
     }
 
     var chromeVisible by remember { mutableStateOf(true) }
+    val haptic = LocalHapticFeedback.current
     var showXRay by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
     var showHighlights by remember { mutableStateOf(false) }
@@ -809,13 +812,35 @@ private fun ReadingScreenContent(
             }
         },
     ) { paddingValues ->
+        // Minimum graceful loading duration: ensure "Opening your book..." animation completes at least one full
+        // pulse (900ms) even if background work (pagination/highlights) finishes faster, then crossfade cleanly to content.
+        // Previously isLoading was tied directly to coroutine completion, which could be <100ms for cached books, cutting animation mid-cycle.
+        var showLoading by remember { mutableStateOf(uiState.isLoading) }
+        var loadingStartTime by remember { mutableStateOf(System.currentTimeMillis()) }
+        androidx.compose.runtime.LaunchedEffect(uiState.isLoading) {
+            if (uiState.isLoading) {
+                loadingStartTime = System.currentTimeMillis()
+                showLoading = true
+            } else {
+                val elapsed = System.currentTimeMillis() - loadingStartTime
+                val minDuration = 900L
+                val remaining = minDuration - elapsed
+                if (remaining > 0) kotlinx.coroutines.delay(remaining)
+                showLoading = false
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = paddingValues.calculateTopPadding())
                 .background(readingBg),
         ) {
-            if (uiState.isLoading) {
+            androidx.compose.animation.Crossfade(
+                targetState = showLoading,
+                animationSpec = androidx.compose.animation.core.tween(400, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                label = "loading_crossfade"
+            ) { loading ->
+                if (loading) {
                 // Pleasant editorial loading — not just a spinner
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -1036,20 +1061,22 @@ private fun ReadingScreenContent(
                     }
                 }
             }
+            }
         }
     }
 
     if (showMenu) {
         com.makemission.folio.ui.reader.components.ReaderMenuSheet(
             bionicEnabled = bionicEnabled,
-            onToggleBionic = { scope.launch { settingsRepo.setBionicEnabled(!bionicEnabled) } },
+            onToggleBionic = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { settingsRepo.setBionicEnabled(!bionicEnabled) } },
             onOpenXRay = { showXRay = true },
             contrastEnabled = adaptiveEnabled,
             hasSensor = hasSensor,
-            onToggleContrast = { if (hasSensor) scope.launch { settingsRepo.setAdaptiveContrastEnabled(!adaptiveEnabled) } },
+            onToggleContrast = { if (hasSensor) { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { settingsRepo.setAdaptiveContrastEnabled(!adaptiveEnabled) } } },
             bookmarksCount = bookmarks.size,
             isCurrentBookmarked = isCurrentBookmarked,
             onToggleBookmark = {
+                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 val (ch, para) = currentBookmarkPos
                 onToggleBookmark(ch, para)
             },
@@ -1075,10 +1102,14 @@ private fun ReadingScreenContent(
             bookmarks = bookmarks,
             chapters = uiState.chapters,
             onBookmarkClick = { bm ->
+                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 showBookmarks = false
                 pendingBookmarkJump = bm
             },
-            onBookmarkDelete = onDeleteBookmark,
+            onBookmarkDelete = { bm ->
+                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onDeleteBookmark(bm)
+            },
             onDismiss = { showBookmarks = false },
         )
     }
@@ -1087,6 +1118,7 @@ private fun ReadingScreenContent(
             highlights = highlights,
             chapters = uiState.chapters,
             onHighlightClick = { hl ->
+                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 showHighlights = false
                 // Jump to highlight's chapter (paragraph 0, or first para if we had position)
                 val synthetic = com.makemission.folio.data.db.entity.Bookmark(
@@ -1105,6 +1137,7 @@ private fun ReadingScreenContent(
             chapters = uiState.chapters,
             currentChapterIndex = currentBookmarkPos.first,
             onChapterClick = { chIdx ->
+                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 showChapters = false
                 val synthetic = com.makemission.folio.data.db.entity.Bookmark(
                     bookId = uiState.bookId,
@@ -1334,7 +1367,7 @@ private fun SingleColumnReadingContent(
                 ),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
                 top = 8.dp,
-                bottom = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp,
+                bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
@@ -1441,6 +1474,7 @@ private fun SingleColumnReadingContent(
         HighlightOverlay(
             highlights = highlights,
             onStylusStrokeFinished = { pts, pressures, tilts ->
+                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 val ch = flatIndexToChapterParagraph(listState.firstVisibleItemIndex, chapters).first
                 onAddHighlight(pts, pressures, tilts, ch)
             },
@@ -1467,7 +1501,8 @@ private fun SingleColumnReadingContent(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(readingBackground.copy(alpha = 0.92f)),
+                .background(readingBackground.copy(alpha = 0.92f))
+                .navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             AnimatedVisibility(
@@ -1736,6 +1771,7 @@ private fun TwoColumnReadingContent(
                     .weight(1f)
                     .fillMaxHeight()
                     .padding(horizontal = 14.dp, vertical = 8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 56.dp),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
                 left.forEachIndexed { chapterIndex, chapter ->
@@ -1860,7 +1896,8 @@ private fun TwoColumnReadingContent(
                         .weight(1f)
                         .fillMaxHeight()
                         .padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 56.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
                     right.forEachIndexed { chapterIndex, chapter ->
                         item(key = "R-title-$chapterIndex") {
@@ -1948,6 +1985,7 @@ private fun TwoColumnReadingContent(
         HighlightOverlay(
             highlights = highlights,
             onStylusStrokeFinished = { pts, pressures, tilts ->
+                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 val ch = flatIndexToChapterParagraph(leftState.firstVisibleItemIndex, left).first
                 onAddHighlight(pts, pressures, tilts, ch)
             },
@@ -1973,7 +2011,8 @@ private fun TwoColumnReadingContent(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(readingBackground.copy(alpha = 0.92f)),
+                .background(readingBackground.copy(alpha = 0.92f))
+                .navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             AnimatedVisibility(
@@ -2211,7 +2250,7 @@ private fun ChapterSwipePhoneContent(
                 // Highlight overlay for this chapter
                 HighlightOverlay(
                     highlights = highlights.filter { it.chapterIndex == page },
-                    onStylusStrokeFinished = { pts, pressures, tilts -> onAddHighlight(pts, pressures, tilts, page) },
+                    onStylusStrokeFinished = { pts, pressures, tilts -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onAddHighlight(pts, pressures, tilts, page) },
                     onLassoFinished = { pts, bounds -> onLasso(pts, bounds) },
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -2435,6 +2474,7 @@ private fun TwoColumnChapterSwipeContent(
         }
         // Highlight overlay for current spread (filter to leftIdx/rightIdx)
         HighlightOverlay(highlights = highlights.filter { it.chapterIndex == leftIdx || it.chapterIndex == rightIdx }, onStylusStrokeFinished = { pts, pressures, tilts ->
+            if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             val ch = leftIdx
             onAddHighlight(pts, pressures, tilts, ch)
         }, onLassoFinished = { pts, bounds -> onLasso(pts, bounds) }, modifier = Modifier.fillMaxSize())

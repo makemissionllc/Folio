@@ -57,7 +57,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -92,6 +94,7 @@ fun SettingsScreen(
     val alwaysShow by repo.alwaysShowProgressBar.collectAsState(initial = false)
     val hapticsEnabled by repo.hapticsEnabled.collectAsState(initial = true)
     val autoScanEnabled by repo.autoScanEnabled.collectAsState(initial = true)
+    val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -159,6 +162,9 @@ fun SettingsScreen(
 
     LaunchedEffect(Unit) {
         libraryViewModel.scanResult.collect { msg ->
+            if (hapticsEnabled && ("new book" in msg.lowercase() || "added" in msg.lowercase() || "complete" in msg.lowercase())) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
             snackbarHostState.showSnackbar(msg)
         }
     }
@@ -199,6 +205,7 @@ fun SettingsScreen(
                         subtitle = "",
                         checked = alwaysShow,
                         onCheckedChange = { checked ->
+                            if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             scope.launch { repo.setAlwaysShowProgressBar(checked) }
                         },
                     )
@@ -208,6 +215,7 @@ fun SettingsScreen(
                         subtitle = "On chapter turn",
                         checked = hapticsEnabled,
                         onCheckedChange = { checked ->
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             scope.launch { repo.setHapticsEnabled(checked) }
                         },
                     )
@@ -220,6 +228,7 @@ fun SettingsScreen(
                         subtitle = "Bold first syllable to guide eyes — read faster, stay focused",
                         checked = bionicEnabled,
                         onCheckedChange = { checked ->
+                            if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             scope.launch { repo.setBionicEnabled(checked) }
                         },
                     )
@@ -230,14 +239,15 @@ fun SettingsScreen(
                         checked = adaptiveContrastEnabled && hasSensor,
                         enabled = hasSensor,
                         onCheckedChange = { checked ->
-                            if (hasSensor) scope.launch { repo.setAdaptiveContrastEnabled(checked) }
+                            if (hasSensor) { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { repo.setAdaptiveContrastEnabled(checked) } }
                         },
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     val navigationMode by repo.readingNavigationMode.collectAsState(initial = ReadingNavigationMode.CONTINUOUS)
                     ReadingNavigationModeSegmentedControl(
                         selected = navigationMode,
-                        onSelect = { mode -> scope.launch { repo.setReadingNavigationMode(mode) } }
+                        onSelect = { mode -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            scope.launch { repo.setReadingNavigationMode(mode) } }
                     )
                 }
             }
@@ -256,6 +266,7 @@ fun SettingsScreen(
                         },
                         checked = autoScanEnabled && hasPermission,
                         onCheckedChange = { checked ->
+                            if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             scope.launch { repo.setAutoScanEnabled(checked) }
                         },
                     )
@@ -313,7 +324,7 @@ fun SettingsScreen(
                                 Spacer(modifier = Modifier.width(4.dp))
                             }
                             Button(
-                                onClick = { folderPickerLauncher.launch(null) },
+                                onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); folderPickerLauncher.launch(null) },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primary,
                                     contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -355,7 +366,7 @@ fun SettingsScreen(
                             )
                         } else {
                             Button(
-                                onClick = { libraryViewModel.scanDevice(context) },
+                                onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); libraryViewModel.scanDevice(context) },
                                 enabled = hasPermission,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primary,
@@ -389,7 +400,7 @@ fun SettingsScreen(
                             )
                         }
                         TextButton(
-                            onClick = { epubPickerLauncher.launch(arrayOf("application/epub+zip", "application/octet-stream", "*/*")) },
+                            onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); epubPickerLauncher.launch(arrayOf("application/epub+zip", "application/octet-stream", "*/*")) },
                             modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 36.dp),
                         ) {
                             Text("Add…", style = MaterialTheme.typography.labelLarge)
@@ -444,7 +455,8 @@ fun SettingsScreen(
                     val timeTintEnabled by repo.timeTintEnabled.collectAsState(initial = false)
                     ThemeModeSegmentedControl(
                         selected = themeMode,
-                        onSelect = { mode -> scope.launch { repo.setThemeMode(mode) } }
+                        onSelect = { mode -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            scope.launch { repo.setThemeMode(mode) } }
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
@@ -457,7 +469,8 @@ fun SettingsScreen(
                         PaletteOptionRow(
                             palette = palette,
                             selected = selectedPalette == palette,
-                            onClick = { scope.launch { repo.setDarkPalette(palette) } }
+                            onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            scope.launch { repo.setDarkPalette(palette) } }
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                     }
@@ -471,7 +484,8 @@ fun SettingsScreen(
                         title = "Evening warmth",
                         subtitle = "Warmer tones after sunset",
                         checked = timeTintEnabled,
-                        onCheckedChange = { checked -> scope.launch { repo.setTimeTintEnabled(checked) } }
+                        onCheckedChange = { checked -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            scope.launch { repo.setTimeTintEnabled(checked) } }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     SettingsInfoRow(
