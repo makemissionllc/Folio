@@ -134,30 +134,30 @@ fun FolioNavHost() {
         }
         composable(
             route = FolioRoute.Settings.route,
-            // Swipe right on Library → Settings should slide in from the RIGHT (consistent with gesture)
-            // Previously this used the default popEnter (from LEFT), which felt backwards for a right-swipe
+            // Swipe right (finger left→right) → Settings enters from left edge, sliding rightward — matches finger drag
+            // Previously this was hardcoded from RIGHT (it), opposite to finger direction
             enterTransition = {
                 slideInHorizontally(
                     animationSpec = tween(340, easing = FastOutSlowInEasing),
-                    initialOffsetX = { it } // from right (positive X)
+                    initialOffsetX = { -it } // from left (negative X) — enters sliding right, same as finger
                 ) + fadeIn(animationSpec = tween(260, easing = LinearOutSlowInEasing))
             },
             exitTransition = {
                 slideOutHorizontally(
                     animationSpec = tween(300, easing = FastOutSlowInEasing),
-                    targetOffsetX = { -it / 5 }
+                    targetOffsetX = { it / 5 } // Library slides out to right, same direction as finger
                 ) + fadeOut(animationSpec = tween(200, easing = LinearOutSlowInEasing))
             },
             popEnterTransition = {
                 slideInHorizontally(
                     animationSpec = tween(340, easing = FastOutSlowInEasing),
-                    initialOffsetX = { -it / 5 }
+                    initialOffsetX = { it / 5 } // Library re-enters from right when popping back
                 ) + fadeIn(animationSpec = tween(260, easing = LinearOutSlowInEasing))
             },
             popExitTransition = {
                 slideOutHorizontally(
                     animationSpec = tween(300, easing = FastOutSlowInEasing),
-                    targetOffsetX = { it } // to right when popping back to Library
+                    targetOffsetX = { -it } // Settings exits to left, reverse of enter
                 ) + fadeOut(animationSpec = tween(200, easing = LinearOutSlowInEasing))
             },
         ) {
@@ -168,7 +168,34 @@ fun FolioNavHost() {
                 onLogsClick = { navController.navigate(FolioRoute.Logs.route) { launchSingleTop = true } },
             )
         }
-        composable(FolioRoute.Insights.route) {
+        composable(
+            route = FolioRoute.Insights.route,
+            // Swipe left (finger right→left) → Insights enters from right edge, sliding leftward — matches finger drag
+            enterTransition = {
+                slideInHorizontally(
+                    animationSpec = tween(340, easing = FastOutSlowInEasing),
+                    initialOffsetX = { it } // from right (positive X) — enters sliding left, same as finger
+                ) + fadeIn(animationSpec = tween(260, easing = LinearOutSlowInEasing))
+            },
+            exitTransition = {
+                slideOutHorizontally(
+                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                    targetOffsetX = { -it / 5 } // Library slides out to left, same direction as finger
+                ) + fadeOut(animationSpec = tween(200, easing = LinearOutSlowInEasing))
+            },
+            popEnterTransition = {
+                slideInHorizontally(
+                    animationSpec = tween(340, easing = FastOutSlowInEasing),
+                    initialOffsetX = { -it / 5 } // Library re-enters from left when popping back
+                ) + fadeIn(animationSpec = tween(260, easing = LinearOutSlowInEasing))
+            },
+            popExitTransition = {
+                slideOutHorizontally(
+                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                    targetOffsetX = { it } // Insights exits to right, reverse of enter
+                ) + fadeOut(animationSpec = tween(200, easing = LinearOutSlowInEasing))
+            },
+        ) {
             com.makemission.folio.ui.insights.InsightsScreen(
                 onBack = { navController.popBackStack() },
                 onVocabularyClick = { navController.navigate(FolioRoute.Vocabulary.route) { launchSingleTop = true } },

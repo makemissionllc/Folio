@@ -158,6 +158,9 @@ fun ReadingScreen(
         onAddHighlight = { pts, pressures, tilts, ch ->
             viewModel.addHighlight(pts, pressures, tilts, ch)
         },
+        onAddHighlightWithAnchor = { pts, pressures, tilts, ch, anchor ->
+            viewModel.addHighlight(pts, pressures, tilts, ch, anchorText = anchor)
+        },
         onTrackVocabulary = viewModel::trackVocabulary,
         onToggleBookmark = viewModel::toggleBookmark,
         onDeleteBookmark = viewModel::removeBookmark,
@@ -184,6 +187,7 @@ private fun ReadingScreenContent(
     onBack: () -> Unit,
     onSaveProgress: (Int, Int) -> Unit,
     onAddHighlight: (List<Offset>, List<Float>, List<Float>, Int) -> Unit,
+    onAddHighlightWithAnchor: (List<Offset>, List<Float>, List<Float>, Int, String) -> Unit = { _, _, _, _, _ -> },
     onTrackVocabulary: (String, String?) -> Unit = { _, _ -> },
     onToggleBookmark: (Int, Int) -> Unit = { _, _ -> },
     onDeleteBookmark: (Bookmark) -> Unit = {},
@@ -891,6 +895,31 @@ private fun ReadingScreenContent(
                                 ?: DictionaryRepository.lookup(phrase, context)
                             dictPopup = phrase to def
                             if (def != null) onTrackVocabulary(phrase, def)
+                        }
+                    },
+                    onHighlightRequested = { selected ->
+                        val phrase = selected.trim().replace(Regex("\\s+"), " ").take(120)
+                        if (phrase.isNotBlank()) {
+                            // Find which chapter contains this phrase for correct anchor chapter
+                            var foundChapter = currentBookmarkPos.first
+                            outer@ for ((cIdx, ch) in uiState.chapters.withIndex()) {
+                                if (ch.title.contains(phrase, ignoreCase = true)) {
+                                    foundChapter = cIdx
+                                    break@outer
+                                }
+                                for (para in ch.paragraphs) {
+                                    if (para.contains(phrase, ignoreCase = true)) {
+                                        foundChapter = cIdx
+                                        break@outer
+                                    }
+                                }
+                            }
+                            // Finger has no pressure/tilt — use defaults, amber. Points are dummy horizontal line
+                            // that will be rendered via HighlightOverlay Multiply (same path as stylus).
+                            val dummyPoints = listOf(Offset(0.08f, 0.5f), Offset(0.92f, 0.5f))
+                            val dummyPressures = listOf(0.7f, 0.7f)
+                            val dummyTilts = listOf(0f, 0f)
+                            onAddHighlightWithAnchor(dummyPoints, dummyPressures, dummyTilts, foundChapter, phrase)
                         }
                     }
                 ) {

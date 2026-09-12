@@ -7,6 +7,39 @@ Active coding branch: `main`.
 
 ---
 
+## Session 46 — 2026-09-15 — Fix swipe direction + add finger highlighting
+
+Branch: `main`.
+
+### Fixed — 2 tasks (investigate root cause before patching)
+
+- **1. FIX SWIPE DIRECTION (Settings/Insights enter opposite to finger)**
+  - *Investigated* `navigation/FolioNav.kt:135` — `composable(FolioRoute.Settings.route)` had `enterTransition = slideInHorizontally(initialOffsetX = { it })` (from **right** edge, sliding left) and `exitTransition = slideOutHorizontally(targetOffsetX = { -it/5 })` (Library to left). For a Library swipe-right (finger left→right drag), Settings entering from right and sliding left moves **opposite** to finger, feels wrong. Comment even said “should slide in from the RIGHT (consistent with gesture)” — hardcoded backwards. `Insights` had no explicit custom (used default `it/5` from right), which *was* correct for swipe-left, but should be explicit and consistent.
+  - *Root cause:* Hardcoded `slideInHorizontally`/`slideOutHorizontally` offsets were inverted for Settings. Swipe-right should make new screen enter from **left** edge (`-it`) translating **rightward** (same direction as finger left→right), with Library exiting to right (`it/5`). Swipe-left (Library→Insights) should enter from **right** (`it`) translating leftward, Library exiting to left (`-it/5`). Pop transitions should mirror reverse (Library re-enters from opposite side).
+  - *Fix:* `FolioNav.kt:135` — Settings: `enter = slideIn { -it }` (from left), `exit = slideOut { it/5 }` (Library to right), `popEnter = slideIn { it/5 }` (Library from right), `popExit = slideOut { -it }` (Settings to left). Added explicit `Insights` composable transitions (previously default): `enter { it }` (from right), `exit { -it/5 }` (Library to left), `popEnter { -it/5 }`, `popExit { it }`. Now Settings (swipe right) and Insights (swipe left) both visually match finger drag. Verified via `Layout Inspector` offsets and visual.
+
+- **2. ADD FINGER HIGHLIGHTING (no stylus required)**
+  - *Investigated* `ui/reader/components/HighlightOverlay.kt:81` — `pointerInteropFilter` returns `false` unless `TOOL_TYPE_STYLUS`, so finger touch is deliberately ignored to allow scroll/tap/select. `ui/reader/components/ExplainSelectionContainer.kt` / `FolioTextActionModeCallback` already provides floating toolbar with **Copy** and **Explain** via `SelectionContainer` + `TextToolbar` + `ActionMode` + clipboard-copy trick. `data/db/entity/Highlight.kt` + `HighlightDao` + `ReadingViewModel.addHighlight` store `bookId`, `chapterIndex`, `pointsData`/`pressures`/`tilts`, `anchorText` (LCS), `color` (amber) and render via `HighlightOverlay` Multiply.
+  - *Root cause:* Finger could only select text (long-press drag → Copy/Explain), no way to create a highlight without stylus. The existing finger flow (selection toolbar) lacked a Highlight action, and stylus path required `normalizedPoints` ≥2 (finger has no pressure/tilt).
+  - *Fix (additive, stylus unchanged):* Extended `ExplainSelectionContainer`/`FolioSelectionToolbar`/`FolioTextActionModeCallback` (`MENU_ITEM_HIGHLIGHT = 2`) to add **“Highlight”** to the floating toolbar alongside Copy/Explain, reusing the same clipboard-copy trick to get selected text. Added `ExplainSelectionContainer( onHighlightRequested: (String)->Unit )` and `FolioSelectionToolbar(onHighlightRequest)` plumbing. In `ReadingScreen` (`ReadingScreenContent` `ExplainSelectionContainer`), `onHighlightRequested` trims selected to 120 chars, finds `foundChapter` by searching `uiState.chapters` for title/paragraph `contains(phrase, ignoreCase)`, fallback to `currentBookmarkPos.first`, then creates dummy points `Offset(0.08,0.5)→(0.92,0.5)` with default `pressures 0.7`/`tilts 0` and calls `onAddHighlightWithAnchor(dummyPoints, ... , foundChapter, phrase)` → `viewModel.addHighlight(..., anchorText=phrase, color=FolioAmber)` (same DAO/LCS path as stylus, `onAddHighlightWithAnchor` new param, default pressure/tilt since finger has none). Highlight now appears in `HighlightsBottomSheet` and renders via existing `HighlightOverlay` Multiply (stylus path untouched — `HighlightOverlay` still filters `TOOL_TYPE_STYLUS` for freehand, finger now goes via toolbar). Long-press drag to select + tap Highlight → saves and shows ink.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/navigation/FolioNav.kt:135` — Settings `enter -it` (from left, rightward) / `exit it/5` (Library to right) / `popEnter it/5` / `popExit -it` (reverse), previously `it`/`-it/5`/`-it/5`/`it` backwards; added explicit Insights `enter it` (from right, leftward) `exit -it/5` `popEnter -it/5` `popExit it` for consistency (was default, now explicit).
+- `app/src/main/java/com/makemission/folio/ui/reader/components/ExplainSelectionContainer.kt:25` — Added `MENU_ITEM_HIGHLIGHT`, `onHighlightRequested` to `FolioTextActionModeCallback` and `FolioSelectionToolbar` (`onHighlightRequest`), menu `Highlight` item, and `ExplainSelectionContainer` param `onHighlightRequested` with toolbar plumbing.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:178` — Added `onAddHighlightWithAnchor` param to `ReadingScreenContent` and `ReadingScreen` outer; `ExplainSelectionContainer` now handles `onHighlightRequested` (find chapter, dummy points `0.08,0.5→0.92,0.5` with `0.7` pressure, `FolioAmber`, `anchorText`); `ReadingScreenContent` still passes `onAddHighlight` for stylus, `onAddHighlightWithAnchor` for finger.
+- `app/src/main/java/com/makemission/folio/ui/reader/components/HighlightOverlay.kt` — no change to stylus filter (still `TOOL_TYPE_STYLUS` only), now also renders finger highlights via same Multiply path (dummy points).
+- `README.md` — Updated `FolioNav` structure note (Settings left/Insights right matching finger), `HighlightOverlay`/`ExplainSelectionContainer` notes (finger Highlight action via same DAO/LCS, stylus unchanged), `Stylus engine` bullet to “Stylus engine + Finger highlighting (new)” with toolbar details.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- **Swipe:** Library swipe-right (drag left→right) → Settings enters from left edge sliding rightward (Layout Inspector `initialOffsetX = -width`), Library exits to right (`+width/5`), visually follows finger; swipe-left (right→left) → Insights enters from right sliding leftward, Library exits to left. Previously Settings entered from right opposite to finger. Verified both via visual and `Layout Inspector` offset signs, and other gestures (Library→Reader tap still uses default `it/5` from right, not affected).
+- **Finger highlight:** Long-press drag with finger to select “Folio” in How to use Folio guide → toolbar shows **Copy / Explain / Highlight** → tap Highlight → `ReadingViewModel` inserts `Highlight(bookId, chapterIndex, anchorText=selected, pointsData dummy, pressures 0.7, amber)` via `highlightDao` (same path as stylus, `LcsAnchor` snippet), appears in `HighlightsBottomSheet` (`Highlights · N` count increments), and `HighlightOverlay` renders horizontal amber Multiply line at mid-viewport (dummy points). Stylus freehand still draws instantly with pressure/tilt, finger scroll/tap still works (HighlightOverlay returns false for non-stylus except via toolbar). No change to stylus flow.
+
+---
+
 ## Session 45 — 2026-09-14 — SAF subfolders, scan merging, progress bar, quick-row removal (4 bugs)
 
 Branch: `main`.

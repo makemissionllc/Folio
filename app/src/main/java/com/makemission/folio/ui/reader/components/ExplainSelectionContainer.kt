@@ -24,12 +24,14 @@ import androidx.compose.ui.platform.TextToolbarStatus
 
 private const val MENU_ITEM_COPY = 0
 private const val MENU_ITEM_EXPLAIN = 1
+private const val MENU_ITEM_HIGHLIGHT = 2
 
 private class FolioTextActionModeCallback(
     private val context: Context,
     var rect: Rect = Rect.Zero,
     var onCopyRequested: (() -> Unit)? = null,
     var onExplainRequested: (() -> Unit)? = null,
+    var onHighlightRequested: (() -> Unit)? = null,
 ) : ActionMode.Callback {
     override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {
         requireNotNull(menu)
@@ -42,6 +44,10 @@ private class FolioTextActionModeCallback(
             menu.add(0, MENU_ITEM_EXPLAIN, 1, "Explain")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         }
+        onHighlightRequested?.let {
+            menu.add(0, MENU_ITEM_HIGHLIGHT, 2, "Highlight")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        }
         return true
     }
 
@@ -51,6 +57,7 @@ private class FolioTextActionModeCallback(
         when (item!!.itemId) {
             MENU_ITEM_COPY -> onCopyRequested?.invoke()
             MENU_ITEM_EXPLAIN -> onExplainRequested?.invoke()
+            MENU_ITEM_HIGHLIGHT -> onHighlightRequested?.invoke()
             else -> return false
         }
         mode?.finish()
@@ -95,6 +102,7 @@ private class FolioSelectionToolbar(
     context: Context,
     private val onCopyRequest: (() -> Unit)?,
     private val onExplainRequest: ((String) -> Unit)?,
+    private val onHighlightRequest: ((String) -> Unit)?,
 ) : TextToolbar {
     private var actionMode: ActionMode? = null
     private val callback = FolioTextActionModeCallback(context = context)
@@ -130,6 +138,21 @@ private class FolioSelectionToolbar(
             } catch (_: Exception) {}
             if (selected.isNotBlank()) onExplainRequest?.invoke(selected)
         }
+        callback.onHighlightRequested = {
+            val previousClip = clipboardManager.primaryClip
+            onCopyRequested?.invoke()
+            val selected = try {
+                clipboardManager.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+            } catch (_: Exception) { "" }
+            try {
+                if (previousClip != null) {
+                    clipboardManager.setPrimaryClip(previousClip)
+                } else {
+                    clipboardManager.setPrimaryClip(ClipData.newPlainText(null, ""))
+                }
+            } catch (_: Exception) {}
+            if (selected.isNotBlank()) onHighlightRequest?.invoke(selected)
+        }
 
         if (actionMode == null) {
             status = TextToolbarStatus.Shown
@@ -150,13 +173,15 @@ private class FolioSelectionToolbar(
 }
 
 /**
- * Wraps [SelectionContainer] with Folio's "Explain" toolbar item.
+ * Wraps [SelectionContainer] with Folio's "Explain" and "Highlight" toolbar items.
  * Double-tap still goes through existing [DictionaryRepository.lookup] flow;
- * long-press selection now shows "Explain" alongside "Copy" and opens the same popup.
+ * long-press selection now shows "Explain" and "Highlight" alongside "Copy" and opens the same popups/highlights.
+ * Highlight via finger reuses the same Highlight entity/DAO + LCS anchor as stylus (bookId, chapterIndex, anchorText).
  */
 @Composable
 fun ExplainSelectionContainer(
     onExplainRequested: (String) -> Unit,
+    onHighlightRequested: (String) -> Unit = {},
     onCopyRequested: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
@@ -168,7 +193,8 @@ fun ExplainSelectionContainer(
             view = view,
             context = context,
             onCopyRequest = { onCopyRequested?.invoke() },
-            onExplainRequest = { selected -> onExplainRequested(selected) }
+            onExplainRequest = { selected -> onExplainRequested(selected) },
+            onHighlightRequest = { selected -> onHighlightRequested(selected) }
         )
     }
     val isHidden by remember { derivedStateOf { toolbar.status == TextToolbarStatus.Hidden } }
