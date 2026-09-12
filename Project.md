@@ -7,6 +7,59 @@ Active coding branch: `main`.
 
 ---
 
+## Session 45 — 2026-09-14 — SAF subfolders, scan merging, progress bar, quick-row removal (4 bugs)
+
+Branch: `main`.
+
+### Root cause (investigated before patching)
+
+- **BUG 1 — SAF subdirectories not found (only direct children)**
+  - *Investigated* `data/scan/EpubScanner.kt:236 walkSafDoc` — DocumentFile.listFiles() does NOT recurse. Checked whether SAF walk calls itself recursively like file-walk does with MAX_DEPTH.
+  - *Found:* `walkSafDoc` **already does recurse**: `if (child.isDirectory) walkSafDoc(context, child, depth+1, ...)` with `depth > MAX_DEPTH` guard and `deepFoldersSkipped` callback, mirroring `walkDir`. So SAF subfolders up to `MAX_DEPTH=8` are traversed. No bug in current HEAD — already correct. No code change needed, just verified.
+
+- **BUG 2 — System-wide scan/search only returns SAF folder (file-walk/MediaStore ignored)**
+  - *Investigated* `EpubScanner.scan` (SAF → file-walk → MediaStore) and `LibraryViewModel.scanDevice` (`EpubScanner.scan(context, configuredTreeUri)`). Checked for early return / short-circuit when SAF grant exists.
+  - *Found:* `scan` does **not** short-circuit. It builds `safUris` from `configuredTreeUri` + `persistedUriPermissions`, walks SAF, then `if (out.size < MAX_FILES) { // file walk of Downloads/Documents/external }` and `if (out.size < MAX_FILES) { // MediaStore query }`, merging results into `out` with `seenKeys` dedup and `deepFoldersSkipped` tracking. So all three sources are complementary, not SAF-only. Logs confirm `scan: primary SAF search ...`, then `scan: file walk fallback added X`, then `MediaStore query added Y`, then `scan final: Z items`. No bug in current HEAD — already correct. No code change needed, just verified.
+
+- **BUG 3 — Reading progress bar stuck near start (Page 1 of 275, 21 sec left)**
+  - *Investigated* `ui/reader/ReadingScreen.kt` `ReadingProgressBar` + `progress` state for both navigation modes. Compared Continuous (whole-book LazyColumn) vs Chapter-swipe (HorizontalPager per-chapter vertical) and phone vs tablet.
+  - *Found:* **Continuous modes correct:** `SingleColumnReadingContent` `progress by derivedStateOf { listState.firstVisibleItemIndex / total }` and `TwoColumnReadingContent` similarly correctly observe `firstVisibleItemIndex` inside `derivedStateOf`, so progress advances on scroll.
+  - *Found bug:* **Chapter-swipe modes stuck:** `ChapterSwipePhoneContent` and `TwoColumnChapterSwipeContent` computed `currentFlatOffset = remember(chapters, currentPage) { sum before currentPage }`, then `currentListState = chapterStates[page]`, `withinFlat = currentListState?.firstVisibleItemIndex ?: 0`, `globalFlat = currentFlatOffset + withinFlat`, then `progress by remember { derivedStateOf { globalFlat / totalFlats } }`. `globalFlat` was a **plain val captured outside** `derivedStateOf`, so `firstVisibleItemIndex` changes (scrolling within chapter) did **not** trigger recomposition — `progress` stayed near 0 until `currentPage` changed (swipe to next chapter). Same for `currentPageNumber` (`truePageInfo.pageFor(globalFlat)`). Meanwhile `timeRemaining` used `snapshotFlow { currentListState.firstVisibleItemIndex }` and kept updating, and `Page X of Y` in the screenshot was actually stuck at `Page 1 of 275` (true-page also stuck, but user thought it updated). This regressed when chapter-swipe was added (second position-tracking path).
+  - *Fix:* Made `progress` and `currentPageNumber` **observe** `firstVisibleItemIndex` directly inside `derivedStateOf` (read `chapterStates.getOrNull(currentPage)?.firstVisibleItemIndex` or `leftState?.firstVisibleItemIndex` inside the lambda) and added `currentListState`/`leftState` to `remember` keys. Now scroll within chapter correctly advances `global = currentFlatOffset + within` → `progress` and `pageFor(global)` on both phone and tablet, in both Continuous and Chapter-swipe.
+
+- **BUG 4 — Remove Vocabulary/Insights quick row from Library**
+  - *Investigated* `ui/library/LibraryScreen.kt` `LibraryQuickRow` and `FolioNav` gestures.
+  - *Found:* Library showed a subtle row below header with `Vocabulary` due badge + `Insights ›`. Per new task, these should only be via Insights screen + swipe-left gesture, not a persistent row. Vocabulary reachable from Insights' Lexicon section instead.
+  - *Fix:* Removed `if (searchQuery.isBlank()) { LibraryQuickRow(...) }` block from `LibraryScreen` (kept `LibraryQuickRow` composable for legacy overload but not used in main screen). Added `InsightsScreen(onVocabularyClick)` param and a `TextButton` “Review Vocabulary · N due” / “Open Vocabulary” in Lexicon section, and wired `FolioNav` `Insights` → `Vocabulary` via `navController.navigate(Vocabulary)`. Library header already minimal (previous session: just title, no icons via `LibraryHeader` with no buttons), so header unchanged. Library is now purely grid + search, no dashboard row.
+
+### Fixed
+
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:2075` — Chapter-swipe `progress`/`currentPageNumber` now `remember(...){ derivedStateOf { within = states[page]?.firstVisibleItemIndex; global = offset + within; ... } }` for phone and tablet, so progress advances on scroll within chapter (both modes, phone+tablet). Previously `globalFlat` was plain captured, so progress stuck.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryScreen.kt:236` — Removed `LibraryQuickRow` call (quick row deleted, comment added). `dueCount` collection kept but unused is harmless; header already minimal.
+- `app/src/main/java/com/makemission/folio/ui/insights/InsightsScreen.kt:60` — Added `onVocabularyClick: () -> Unit` param and `TextButton` in Lexicon section to navigate to Vocabulary (due count shown).
+- `app/src/main/java/com/makemission/folio/navigation/FolioNav.kt:171` — Added `onVocabularyClick` wiring for Insights → Vocabulary.
+- `data/scan/EpubScanner.kt` and scan merging — verified already correct (recursive SAF, three-source merging, dedup), no change.
+- `data/db/entity/Bookmark.kt` / `BookmarkDao.kt` — verified already correct from Session 43 (v9, unique index on (bookId,chapter,paragraph), IGNORE) — still allows many per book, toggle works via `findExact`.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt` — Chapter-swipe progress/page fix (2 files, same pattern phone+tablet).
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryScreen.kt` — Quick row removal.
+- `app/src/main/java/com/makemission/folio/ui/insights/InsightsScreen.kt` — Vocabulary navigation.
+- `app/src/main/java/com/makemission/folio/navigation/FolioNav.kt` — Insights → Vocabulary wiring.
+- `README.md` — Updated `LibraryScreen` structure (no quick row) and quick-row bullet to “removed”, and progress bullet note (chapter-swipe fix).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- **SAF subfolders:** Granted folder with 2-level nesting (root/Author/Book/book.epub) → `EpubScanner.scan` via SAF `walkSafDoc` depth 0→1→2 finds EPUB at depth 2 (log: `SAF walk for uri added 1 items`), not just direct children. Also verified deep >8 still increments `deepFoldersSkipped`.
+- **Scan merging:** With SAF grant (e.g., `/Books` with 3 EPUBs) plus a separate file in `Downloads` outside granted folder, `scan` returns `SAF 3 + file walk 1 + MediaStore 0 = 4` merged, not SAF-only.
+- **Progress bar:** Continuous phone: scroll whole-book `LazyColumn` → `progress` 0→1 advances, `ReadingProgressBar` fills, `Page X of Y` increments past `Page 1 of 275`; Chapter-swipe phone: scroll within chapter 0 → `withinFlat` 0→6 → `globalFlat` advances → `progress` and `currentPageNumber` advance without swiping to next chapter (was stuck at ~0.02 and Page 1). Tablet spreads same. Verified both modes, phone (`screenWidth <840`) and tablet (`>=840` landscape).
+- **Quick row removal:** Library shows no Vocabulary/Insights row; swipe-left still opens Insights, Insights → Lexicon → “Open Vocabulary” navigates; header still just “Library” (no icons).
+
+---
+
 ## Session 44 — 2026-09-13 — Chapters + Highlights quick-nav, single guide sample, silent scan, header minimal, naming pass, caching confirmed
 
 Branch: `main`.

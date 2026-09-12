@@ -60,6 +60,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 @Composable
 fun InsightsScreen(
     onBack: () -> Unit,
+    onVocabularyClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: InsightsViewModel = viewModel(),
 ) {
@@ -233,6 +234,16 @@ fun InsightsScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 10.dp),
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        TextButton(
+                            onClick = onVocabularyClick,
+                            modifier = androidx.compose.ui.Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+                        ) {
+                            Text(
+                                text = if (state.dueVocab > 0) "Review Vocabulary · ${state.dueVocab} due" else "Open Vocabulary",
+                                style = MaterialTheme.typography.labelLarge,
                             )
                         }
                     }

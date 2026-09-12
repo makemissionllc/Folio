@@ -2082,13 +2082,29 @@ private fun ChapterSwipePhoneContent(
         off
     }
     val currentListState = chapterStates.getOrNull(currentPage)
-    val withinFlat = currentListState?.firstVisibleItemIndex ?: 0
-    val globalFlat = currentFlatOffset + withinFlat
     val totalFlats = remember(chapters) {
         chapters.indices.sumOf { idx -> 1 + chapters[idx].paragraphs.size + (if (idx == 0) 1 else 0) + 1 }.coerceAtLeast(1)
     }
-    val progress by remember { derivedStateOf { (globalFlat.toFloat() / (totalFlats - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f) } }
-    val currentPageNumber by remember { derivedStateOf { truePageInfo.pageFor(globalFlat) } }
+    // FIX: progress/page must observe scroll within chapter, not just pager page.
+    // Previously globalFlat was a plain val captured outside derivedStateOf, so
+    // withinFlat (firstVisibleItemIndex) changes didn't trigger recomposition — progress stuck near start
+    // while Page X / time-left (which used snapshotFlow) kept updating. Now derivedStateOf reads
+    // firstVisibleItemIndex directly so progress advances in both Continuous and Chapter-swipe, phone and tablet.
+    val progress by remember(chapters, currentPage, currentFlatOffset, totalFlats, currentListState) {
+        derivedStateOf {
+            val within = currentListState?.firstVisibleItemIndex ?: chapterStates.getOrNull(currentPage)?.firstVisibleItemIndex ?: 0
+            val global = currentFlatOffset + within
+            (global.toFloat() / (totalFlats - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+        }
+    }
+    val currentPageNumber by remember(chapters, currentPage, currentFlatOffset, currentListState) {
+        derivedStateOf {
+            val within = currentListState?.firstVisibleItemIndex ?: chapterStates.getOrNull(currentPage)?.firstVisibleItemIndex ?: 0
+            val global = currentFlatOffset + within
+            truePageInfo.pageFor(global)
+        }
+    }
+    val globalFlat = currentFlatOffset + (currentListState?.firstVisibleItemIndex ?: 0)
     val estimator = remember { VelocityEstimator() }
     var timeRemaining by remember { mutableStateOf<String?>(null) }
     var lastFlatSwipe by remember { mutableStateOf(globalFlat) }
@@ -2269,6 +2285,7 @@ private fun TwoColumnChapterSwipeContent(
 
     val truePageInfo = rememberTruePageState(chapters = chapters, isTabletLandscape = true, bionicEnabled = bionicEnabled, bookId = bookId, fileHash = fileHash)
     val knuthAdjustments = rememberKnuthAdjustments(chapters = chapters, isTabletLandscape = true, bionicEnabled = bionicEnabled)
+    val totalFlats = remember(chapters) { chapters.indices.sumOf { idx -> 1 + chapters[idx].paragraphs.size + (if (idx == 0) 1 else 0) + 1 }.coerceAtLeast(1) }
     val currentFlatOffset = remember(chapters, page) {
         var off = 0
         for (i in 0 until leftIdx) {
@@ -2278,11 +2295,22 @@ private fun TwoColumnChapterSwipeContent(
         off
     }
     val leftState = leftStates.getOrNull(page)
-    val withinFlat = leftState?.firstVisibleItemIndex ?: 0
-    val globalFlat = currentFlatOffset + withinFlat
-    val totalFlats = remember(chapters) { chapters.indices.sumOf { idx -> 1 + chapters[idx].paragraphs.size + (if (idx == 0) 1 else 0) + 1 }.coerceAtLeast(1) }
-    val progress by remember { derivedStateOf { (globalFlat.toFloat() / (totalFlats - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f) } }
-    val currentPageNum by remember { derivedStateOf { truePageInfo.pageFor(globalFlat) } }
+    val globalFlat = currentFlatOffset + (leftState?.firstVisibleItemIndex ?: 0)
+    // FIX: same as phone — observe within-spread scroll, not just pager page
+    val progress by remember(chapters, page, currentFlatOffset, totalFlats, leftState) {
+        derivedStateOf {
+            val within = leftState?.firstVisibleItemIndex ?: 0
+            val global = currentFlatOffset + within
+            (global.toFloat() / (totalFlats - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+        }
+    }
+    val currentPageNum by remember(chapters, page, currentFlatOffset, leftState) {
+        derivedStateOf {
+            val within = leftState?.firstVisibleItemIndex ?: 0
+            val global = currentFlatOffset + within
+            truePageInfo.pageFor(global)
+        }
+    }
     val estimator = remember { VelocityEstimator() }
     var timeRemaining by remember { mutableStateOf<String?>(null) }
     var lastFlatSwipe by remember { mutableStateOf(globalFlat) }

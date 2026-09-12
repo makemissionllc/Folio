@@ -171,6 +171,7 @@ fun FolioNavHost() {
         composable(FolioRoute.Insights.route) {
             com.makemission.folio.ui.insights.InsightsScreen(
                 onBack = { navController.popBackStack() },
+                onVocabularyClick = { navController.navigate(FolioRoute.Vocabulary.route) { launchSingleTop = true } },
             )
         }
         composable(FolioRoute.SmartFeatures.route) {

@@ -233,13 +233,7 @@ fun LibraryScreen(
                     onDismiss = { isSearchRevealed = false },
                 )
             }
-            if (searchQuery.isBlank()) {
-                LibraryQuickRow(
-                    dueCount = dueCount,
-                    onVocabularyClick = onVocabularyClick,
-                    onInsightsClick = onInsightsClick,
-                )
-            }
+            // Quick row removed — Vocabulary/Insights now only via Insights screen + swipe gestures (per task 4)
             val gridState = rememberLazyGridState()
             Box(
                 modifier = Modifier
