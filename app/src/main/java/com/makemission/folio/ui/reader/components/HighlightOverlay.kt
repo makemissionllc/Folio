@@ -54,6 +54,26 @@ fun HighlightOverlay(
     var currentPoints by remember { mutableStateOf<List<StylusPoint>?>(null) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
 
+    // Performance: cache decoded highlight strokes so Canvas doesn't re-parse
+    // points/pressures/tilts strings on every frame/scroll. Only recomputed when
+    // highlights list actually changes (stable key), not on every recomposition.
+    data class DecodedHighlight(
+        val norm: List<Offset>,
+        val pressures: List<Float>,
+        val tilts: List<Float>,
+        val color: Color,
+    )
+    val decodedHighlights = remember(highlights) {
+        highlights.mapNotNull { hl ->
+            val norm = decodePoints(hl.pointsData)
+            if (norm.size < 2) return@mapNotNull null
+            val pressures = decodeFloats(hl.pressuresData)
+            val tilts = decodeFloats(hl.tiltsData)
+            val col = try { Color(hl.color) } catch (_: Exception) { highlightColor }
+            DecodedHighlight(norm, pressures, tilts, col)
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -148,18 +168,13 @@ fun HighlightOverlay(
                 )
             }
 
-            // Persisted highlights — denormalize from 0..1.
-            for (hl in highlights) {
-                val norm = decodePoints(hl.pointsData)
-                if (norm.size < 2) continue
-                val pts = norm.map { Offset(it.x * size.width, it.y * size.height) }
-                val pressures = decodeFloats(hl.pressuresData)
-                val tilts = decodeFloats(hl.tiltsData)
-                val col = try { Color(hl.color) } catch (_: Exception) { highlightColor }
-                if (pressures.size == pts.size && tilts.size == pts.size && pressures.isNotEmpty()) {
-                    drawVariable(pts, pressures, tilts, col)
+            // Persisted highlights — denormalize from 0..1 (decodedHighlights cached via remember).
+            for (dh in decodedHighlights) {
+                val pts = dh.norm.map { Offset(it.x * size.width, it.y * size.height) }
+                if (dh.pressures.size == pts.size && dh.tilts.size == pts.size && dh.pressures.isNotEmpty()) {
+                    drawVariable(pts, dh.pressures, dh.tilts, dh.color)
                 } else {
-                    drawFixed(pts, col)
+                    drawFixed(pts, dh.color)
                 }
             }
 

@@ -317,14 +317,31 @@ private fun ReadingScreenContent(
     }
     val targetBg = timeTintedPair?.first ?: adaptiveBg
     val targetText = timeTintedPair?.second ?: adaptiveText
+    // Performance: avoid restarting animateColorAsState on imperceptible changes
+    // (sensor EMA + warmth lerps can produce visually identical colors each tick).
+    // Only update animation target when color distance exceeds threshold; otherwise
+    // keep previous target to prevent per-frame 900ms tweens that recompose the
+    // entire reading tree (LazyColumns, Knuth, TruePage) at 60fps for no visual gain.
+    fun colorDistance(a: Color, b: Color): Float {
+        val dr = a.red - b.red; val dg = a.green - b.green; val db = a.blue - b.blue; val da = a.alpha - b.alpha
+        return kotlin.math.sqrt(dr*dr + dg*dg + db*db + da*da)
+    }
+    var debouncedTargetBg by remember { mutableStateOf(targetBg) }
+    var debouncedTargetText by remember { mutableStateOf(targetText) }
+    LaunchedEffect(targetBg) {
+        if (colorDistance(targetBg, debouncedTargetBg) > 0.015f) debouncedTargetBg = targetBg
+    }
+    LaunchedEffect(targetText) {
+        if (colorDistance(targetText, debouncedTargetText) > 0.015f) debouncedTargetText = targetText
+    }
     // Smooth/gradual — adaptive 800ms, time tint 900ms but unified here as 900ms for combined, still not jarring
     val animatedBg by animateColorAsState(
-        targetValue = targetBg,
+        targetValue = debouncedTargetBg,
         animationSpec = tween(durationMillis = 900, easing = LinearOutSlowInEasing),
         label = "readingBg",
     )
     val animatedText by animateColorAsState(
-        targetValue = targetText,
+        targetValue = debouncedTargetText,
         animationSpec = tween(durationMillis = 900, easing = LinearOutSlowInEasing),
         label = "readingText",
     )
@@ -738,7 +755,10 @@ private fun ReadingScreenContent(
                                         modifier = Modifier.fillMaxWidth().height(220.dp),
                                         verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
                                     ) {
-                                        items(inBookResults.size) { idx ->
+                                        items(
+                                            count = inBookResults.size,
+                                            key = { idx -> "${inBookResults[idx].chapterIndex}-${inBookResults[idx].paragraphIndex}-${inBookResults[idx].matchType}-${inBookResults[idx].snippet.hashCode()}" }
+                                        ) { idx ->
                                             val r = inBookResults[idx]
                                             androidx.compose.material3.Surface(
                                                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { jumpInBookTo(r.chapterIndex, r.paragraphIndex) },

@@ -59,7 +59,14 @@ fun rememberAmbientLightLux(
                     // EMA: smoothed = alpha*new + (1-alpha)*old
                     smoothingAlpha * clamped + (1f - smoothingAlpha) * (currentSmoothed ?: clamped)
                 }
-                luxState.value = currentSmoothed
+                // Performance: throttle tiny fluctuations — only publish if change exceeds
+                // perceptible threshold (~2% or ~5 lux) to avoid retriggering adaptivePair
+                // + animateColorAsState on every sensor tick (SENSOR_DELAY_NORMAL ~200ms).
+                val prev = luxState.value
+                val next = currentSmoothed
+                if (prev == null || next == null || kotlin.math.abs(next - prev) > 5f || kotlin.math.abs(next - prev) / (prev.coerceAtLeast(1f)) > 0.02f) {
+                    luxState.value = next
+                }
             }
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit

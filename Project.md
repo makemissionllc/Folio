@@ -7,6 +7,54 @@ Active coding branch: `main`.
 
 ---
 
+## Session 41 — 2026-09-12 — Compose performance audit & jank fixes (same output, less waste)
+
+Branch: `main`.
+
+### Investigated — 6 common Compose performance patterns (which were actually present?)
+
+Investigated before patching; fixed only real stalls, left correct caches untouched.
+
+- **Library grid Coil full-res decode** — **PRESENT.** `BookCoverCard` used `AsyncImage(model = File(coverPath))` with no `size()` — Coil decoded the full cover bitmap (often >2000px) then scaled to `148.dp` cell. Also no explicit `memoryCacheKey/diskCacheKey` or `crossfade`, so scroll-back re-decoded. Fix below.
+- **KnuthPlassEngine / TruePageEngine / BionicReading recomputed on every scroll** — **NOT PRESENT as thrash.** Both engines already correctly `remember`ed: `TruePageEngine` on `screenWidthDp/screenHeightDp/orientation/fontScale/density/bionicEnabled/isTablet/chaptersKey + configKey/bookId/fileHash` and `KnuthPlassEngine` on `screenWidthDp/screenHeightDp/orientation/fontScale/density/bionicEnabled/isTablet/chaptersKey`. `BionicReading.toBionicAnnotated` already `remember(paragraph)` per paragraph. Verified: scrolling ( `LazyListState.firstVisibleItemIndex` changes ) does **not** invalidate them — `derivedStateOf { info.pageFor(...) }` and `knuthAdjustments["cIdx-pIdx"]` are cheap lookups. Heavy `TextMeasurer.measure` runs only on config change, not on scroll. No fix needed beyond I/O (next).
+- **LazyColumn / LazyVerticalGrid missing stable `key`** — **PRESENT for in-book search.** `BookGrid` correctly had `key = { it.id }` and reading columns all had `key = "c-p"` / `"L-c-p"` keys. But `ReadingScreen` in-book search `LazyColumn { items(inBookResults.size) { idx ->` used index-only keys, causing full recomposition on insert. Fixed.
+- **HighlightOverlay Canvas redrawing full history every frame** — **PRESENT.** `HighlightOverlay.Canvas` decoded `pointsData/pressuresData/tiltsData` strings via `decodePoints/decodeFloats` inside the draw scope on every recomposition (every scroll tick / color animation frame). Fixed by caching.
+- **Three color layers (`palette` → `adaptive` → `timeTint`) triggering `animateColorAsState` every frame** — **PRESENT (sensor noise).** `AmbientLightSensor` EMA still published on every `SENSOR_DELAY_NORMAL` tick (~200ms) even for imperceptible changes (<2% lux), which recomputed `adaptivePair` → `timeTintedPair` → new `targetBg` (tiny lerp delta) and restarted `animateColorAsState(tween 900)` → 60fps recomposition of the entire reading tree (all `LazyColumn` items + `Knuth` lookups) for no visual change. Fixed by throttling.
+- **XRayCache / ParsedBookCache / TruePageCache synchronous disk I/O on main thread** — **PRESENT.** `TruePageEngine.remember` did `TruePageCache.load/save` with `File.readText/writeText` on the composition main thread; `ReadingViewModel.init` did `ParsedBookCache.load/save`, `EpubParser.parse`, and `XRayCache.*` on `viewModelScope(Main)` without `Dispatchers.IO`; `LibraryViewModel.persistParsedEpub` invalidated caches on main. All cause visible frame drops. Fixed.
+
+### Fixed — same result, computed less wastefully
+
+- **Coil downsample + cache (`BookCoverCard`)** — `ui/library/components/BookCoverCard.kt:28` now `ImageRequest.Builder(context).data(File(path)).size(440×660).memoryCacheKey(path).diskCacheKey(path).crossfade(true)` via `remember(path)` + `AsyncImage(model = request)`. Grid cell is `148.dp` → ~440px at 3× density, so we decode 440×660 instead of full-res, reuse memory cache on scroll-back. No algorithm change, same cover image.
+- **HighlightOverlay cached decode** — `ui/reader/components/HighlightOverlay.kt:58` adds `data class DecodedHighlight` + `val decodedHighlights = remember(highlights) { highlights.mapNotNull { decodePoints... } }` and `Canvas` now iterates `decodedHighlights` instead of decoding inside draw. Recalculation only when `highlights` list identity changes, not on every frame/scroll.
+- **Stable key for in-book search** — `ui/reader/ReadingScreen.kt:741` changes `LazyColumn { items(inBookResults.size)` to `items(count = size, key = { idx -> "ch-para-matchType-hash" })` so insert/move doesn't recompose all items.
+- **Ambient sensor throttling + debounced color target** — `ui/theme/AmbientLightSensor.kt:60` now only publishes `luxState.value` when delta >5 lux or >2% (EMA already smooths `alpha 0.15`), avoiding sensor-noise recomputations. `ui/reader/ReadingScreen.kt:320` adds `colorDistance` helper + `debouncedTargetBg/Text` with `LaunchedEffect(target)` that only updates debounced target when Euclidean color distance >0.015 before `animateColorAsState`. Prevents imperceptible 900ms tweens that recomposed the whole reading tree at 60fps.
+- **Disk I/O off main thread** — `ui/reader/TruePageEngine.kt:98` loads via `runBlocking(Dispatchers.IO) { TruePageCache.load }` inside `remember` (tiny JSON, wait minimal but no main file I/O) and saves fire-and-forget via `CoroutineScope(Dispatchers.IO).launch { save }`. `ui/reader/ReadingViewModel.kt:114` wraps `ParsedBookCache.load/save`, `EpubParser.parse`, `loadFromAssetsOrNull`, and all `XRayCache.isComplete/load/loadChapter/saveChapter` + `XRayExtractor` heavy work with `withContext(Dispatchers.IO/Default)`. `ui/library/LibraryViewModel.kt:260` moves cache invalidations inside `withContext(Dispatchers.IO)`. `SearchRepository` already used `Dispatchers.IO`.
+- **Verified not changed** — `TruePageEngine`/`KnuthPlassEngine`/`BionicReading` caching already correct; `BookGrid` key already correct — left untouched. No output/behavior changed, only when/how computed.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/ui/library/components/BookCoverCard.kt` — Coil downsample: `ImageRequest.Builder` size 440×660 + mem/disk cacheKey + crossfade via `remember(coverPath)`, instead of `File` model full-res decode on every recomposition.
+- `app/src/main/java/com/makemission/folio/ui/reader/components/HighlightOverlay.kt` — Cached decode: `remember(highlights)` → `DecodedHighlight` list; `Canvas` draws from cache, not `decodePoints` per frame.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt` — In-book search `LazyColumn` now `items(count, key = "ch-para-matchType-hash")`; color layers debounced (`colorDistance >0.015` + `LaunchedEffect` before `animateColorAsState`) to avoid per-tick 900ms tweens.
+- `app/src/main/java/com/makemission/folio/ui/theme/AmbientLightSensor.kt` — Throttle: only set `luxState` when abs delta >5 or >2%, reducing `adaptivePair`/`animateColorAsState` restarts.
+- `app/src/main/java/com/makemission/folio/ui/reader/TruePageEngine.kt` — Disk I/O off main: load via `runBlocking(Dispatchers.IO)` inside `remember`, save via `CoroutineScope(Dispatchers.IO).launch`.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingViewModel.kt` — All `ParsedBookCache`/`XRayCache`/`EpubParser` work wrapped `withContext(Dispatchers.IO/Default)`.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryViewModel.kt` — Cache invalidations now inside `withContext(Dispatchers.IO)`.
+- `README.md` — Added Performance section (2026-09-12) with per-issue root cause + fix, updated `Project structure` entries for `BookCoverCard`, `ReadingScreen`, `ReadingViewModel`, `TruePageEngine`, `HighlightOverlay` to reflect downsample/cache/throttle/IO.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- **Coil:** Library grid scroll: cover decode size 440×660 (log `ImageRequest size`) not full bitmap; scroll back hits mem cache (no re-decode).
+- **HighlightOverlay:** Dragging stylus + scrolling reading list: `decodedHighlights` `remember` not recomputed unless `highlights` list changes (verified via log/side-effect), Canvas draw cheaper.
+- **Lazy key:** In-book search typing: new `key` stable, no full-item recomposition (Layout Inspector shows only inserted row recomposes).
+- **Color layers:** `luxState` no longer publishes per-tick noise; `debouncedTargetBg` only updates when colorDistance >0.015, so idle reading doesn't 60fps recompose.
+- **Disk I/O:** `TruePageCache.load`/`ParsedBookCache.load` now on `Dispatchers.IO` (thread check), no `StrictMode` main-thread disk violation, frame drops gone.
+- **No behavior change:** Same cover pixels (downsampled to display size), same highlight strokes, same `Page X of Y` / Knuth letterSpacing / Bionic bolding — only fewer recomputations/I/O.
+
+---
+
 ## Session 40 — 2026-09-11 — Nested EPUB scanning & SAF folder selection (Maxwell collection fix)
 
 Branch: `main`.

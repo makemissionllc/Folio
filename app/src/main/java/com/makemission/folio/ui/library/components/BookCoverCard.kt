@@ -24,7 +24,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.size.Size
 import com.makemission.folio.data.model.Book
 import java.io.File
 
@@ -54,9 +58,21 @@ fun BookCoverCard(
                 },
         ) {
             // Cover image when available (imported EPUB), otherwise palette color
+            // Performance: downsample to display size (~148dp → ~440px at 3x) via Coil size(),
+            // reuse memory/disk cache and avoid re-decoding full-res bitmap on every recomposition.
             if (book.coverImagePath != null) {
+                val context = LocalContext.current
+                val coverRequest = remember(book.coverImagePath) {
+                    ImageRequest.Builder(context)
+                        .data(File(book.coverImagePath))
+                        .size(Size(440, 660))
+                        .crossfade(true)
+                        .memoryCacheKey(book.coverImagePath)
+                        .diskCacheKey(book.coverImagePath)
+                        .build()
+                }
                 AsyncImage(
-                    model = File(book.coverImagePath),
+                    model = coverRequest,
                     contentDescription = book.title,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,

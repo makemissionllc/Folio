@@ -12,6 +12,10 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import com.makemission.folio.data.cache.TruePageCache
 import com.makemission.folio.data.epub.EpubParser
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * True-Page Calculation Engine (§5).
@@ -93,9 +97,11 @@ fun rememberTruePageState(
         }
 
         // Smart disk cache: try to load previously computed pages for this book+config+hash
+        // Performance: disk I/O off main thread via Dispatchers.IO (even inside remember, runBlocking on IO pool
+        // avoids blocking composition with file read on main thread; file is tiny JSON so wait is minimal).
         if (bookId != null) {
             try {
-                val cached = TruePageCache.load(context, bookId, configKey, fileHash)
+                val cached = runBlocking(Dispatchers.IO) { TruePageCache.load(context, bookId, configKey, fileHash) }
                 if (cached != null && cached.prefixSums.isNotEmpty()) {
                     val totalPages = cached.totalPages
                     val prefixSums = cached.prefixSums
@@ -210,9 +216,16 @@ fun rememberTruePageState(
             page.coerceIn(1, totalPages)
         }
 
-        // Save to disk cache for instant reopen (hash-validated)
+        // Save to disk cache for instant reopen (hash-validated) — off main thread
         if (bookId != null) {
-            try { TruePageCache.save(context, bookId, configKey, fileHash, totalPages, prefixSums, perScreenHeightPx) } catch (_: Exception) {}
+            val tp = totalPages; val ps = prefixSums; val per = perScreenHeightPx
+            val ctx = context; val ck = configKey; val fh = fileHash; val bid = bookId
+            try {
+                // Fire-and-forget on IO so composition isn't blocked by file write
+                kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                    try { TruePageCache.save(ctx, bid, ck, fh, tp, ps, per) } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
         }
 
         TruePageInfo(totalPages = totalPages, pageForFlatIndex = pageFor)

@@ -257,12 +257,13 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             fileHash = finalHash,
             importedFromPath = originalPathOrName,
         )
-        withContext(Dispatchers.IO) { bookDao.insert(entity) }
-        // Invalidate caches (X-Ray, parsed, true-page) so they recompute for new/updated file — only if hash changed
-        // If reimport with same hash, caches could be reused; but we invalidate to be safe and let worker repopulate
-        try { XRayCache.invalidate(context, id) } catch (_: Exception) {}
-        try { ParsedBookCache.invalidate(context, id) } catch (_: Exception) {}
-        try { TruePageCache.invalidate(context, id) } catch (_: Exception) {}
+        withContext(Dispatchers.IO) {
+            bookDao.insert(entity)
+            // Invalidate caches (X-Ray, parsed, true-page) so they recompute for new/updated file — off main thread
+            try { XRayCache.invalidate(context, id) } catch (_: Exception) {}
+            try { ParsedBookCache.invalidate(context, id) } catch (_: Exception) {}
+            try { TruePageCache.invalidate(context, id) } catch (_: Exception) {}
+        }
         // Schedule background heavy processing (X-Ray chapter-by-chapter, full parse caching) — soon but not blocking
         try { BookProcessingScheduler.schedule(context, id, finalHash) } catch (_: Exception) {}
         return entity
