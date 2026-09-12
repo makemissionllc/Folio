@@ -20,7 +20,7 @@ interface BookmarkDao {
     @Query("SELECT * FROM bookmarks WHERE bookId = :bookId AND chapterIndex = :chapterIndex AND paragraphIndex = :paragraphIndex LIMIT 1")
     suspend fun findExact(bookId: String, chapterIndex: Int, paragraphIndex: Int): Bookmark?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(bookmark: Bookmark): Long
 
     @Delete

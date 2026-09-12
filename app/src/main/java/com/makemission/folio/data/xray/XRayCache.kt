@@ -59,6 +59,8 @@ object XRayCache {
             result
         } catch (_: Exception) {
             null
+        } catch (_: OutOfMemoryError) {
+            null
         }
     }
 
@@ -79,8 +81,15 @@ object XRayCache {
                 }
                 obj.put(chIdx.toString(), arr)
             }
-            cacheFile(context, bookId).writeText(obj.toString())
+            val cache = cacheFile(context, bookId)
+            val tmp = File(cache.parentFile, "${cache.name}.tmp")
+            tmp.writeText(obj.toString())
+            if (!tmp.renameTo(cache)) {
+                try { tmp.copyTo(cache, overwrite = true) } catch (_: Exception) {}
+                try { tmp.delete() } catch (_: Exception) {}
+            }
         } catch (_: Exception) {
+        } catch (_: OutOfMemoryError) {
         }
     }
 

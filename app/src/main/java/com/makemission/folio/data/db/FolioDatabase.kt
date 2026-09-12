@@ -17,7 +17,7 @@ import com.makemission.folio.data.db.entity.VocabularyCard
 
 @Database(
     entities = [ReadingProgress::class, Highlight::class, BookEntity::class, VocabularyCard::class, Bookmark::class],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class FolioDatabase : RoomDatabase() {

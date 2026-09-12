@@ -38,8 +38,17 @@ object ParsedBookCache {
                 chaptersArr.put(chObj)
             }
             obj.put("chapters", chaptersArr)
-            cacheFile(context, bookId).writeText(obj.toString())
+            // Atomic write: write to tmp then rename to avoid partially-written file being read by search while many workers run concurrently.
+            val cache = cacheFile(context, bookId)
+            val tmp = File(cache.parentFile, "${cache.name}.tmp")
+            tmp.writeText(obj.toString())
+            // Best-effort atomic rename; fallback to direct write if rename fails.
+            if (!tmp.renameTo(cache)) {
+                try { tmp.copyTo(cache, overwrite = true) } catch (_: Exception) {}
+                try { tmp.delete() } catch (_: Exception) {}
+            }
         } catch (_: Exception) {
+        } catch (_: OutOfMemoryError) {
         }
     }
 
@@ -47,9 +56,9 @@ object ParsedBookCache {
         return try {
             val f = cacheFile(context, bookId)
             if (!f.exists()) return null
-            val text = f.readText()
+            val text = try { f.readText() } catch (_: Exception) { return null } catch (_: OutOfMemoryError) { return null }
             if (text.isBlank()) return null
-            val obj = JSONObject(text)
+            val obj = try { JSONObject(text) } catch (_: Exception) { return null } catch (_: OutOfMemoryError) { return null }
             // Hash check — invalidate if file changed (reuse dedup logic)
             val cachedHash = if (obj.has("fileHash")) if (obj.has("fileHash")) obj.optString("fileHash") else null else null
             if (currentFileHash != null && cachedHash != null && cachedHash != currentFileHash) {
@@ -74,6 +83,8 @@ object ParsedBookCache {
             if (chapters.isEmpty()) return null
             EpubParser.EpubBook(title = title, author = author, chapters = chapters)
         } catch (_: Exception) {
+            null
+        } catch (_: OutOfMemoryError) {
             null
         }
     }

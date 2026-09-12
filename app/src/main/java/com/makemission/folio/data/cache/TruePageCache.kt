@@ -46,10 +46,17 @@ object TruePageCache {
             val arr = JSONArray()
             for (v in prefixSums) arr.put(v)
             obj.put("prefixSums", arr)
-            cacheFile(context, bookId, configKey, fileHash).writeText(obj.toString())
+            val cache = cacheFile(context, bookId, configKey, fileHash)
+            val tmp = File(cache.parentFile, "${cache.name}.tmp")
+            tmp.writeText(obj.toString())
+            if (!tmp.renameTo(cache)) {
+                try { tmp.copyTo(cache, overwrite = true) } catch (_: Exception) {}
+                try { tmp.delete() } catch (_: Exception) {}
+            }
             // Evict old configs for same book (keep at most 3)
             evictOld(context, bookId)
         } catch (_: Exception) {}
+        catch (_: OutOfMemoryError) {}
     }
 
     fun load(

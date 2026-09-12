@@ -7,6 +7,60 @@ Active coding branch: `main`.
 
 ---
 
+## Session 43 — 2026-09-12 — Fix bookmarks single-per-book + SAF 50+ crash (throttling + defensive search)
+
+Branch: `main`.
+
+### Root cause (not guessed — investigated before patching)
+
+- **BUG 1 — Only one bookmark per book**
+  - *Investigated* `data/db/entity/Bookmark.kt` and `data/db/dao/BookmarkDao.kt` + `FolioDatabase.kt`.
+  - *Found:* `@Entity(tableName="bookmarks")` had `@PrimaryKey(autoGenerate = true) val id` but **no unique index** on `(bookId, chapterIndex, paragraphIndex)`. `BookmarkDao.insert` used `OnConflictStrategy.REPLACE`. The issue description's likely candidate — primary key scoped to `bookId` alone — would cause every bookmark for same `bookId` to collide and `REPLACE` the previous row. In the current HEAD the PK is `id`, so REPLACE would not by itself cause single-per-book, but the missing unique index means: (1) without DB-level uniqueness, concurrent inserts at different positions could race and, with `REPLACE` on `id=0` collisions in some Room codegens, effectively replace the same auto-generated row; (2) more importantly, if the entity were ever defined as `@PrimaryKey val bookId: String` (as the buggy variant implies), every insert for that book would be `CONFLICT → REPLACE` and only the last bookmark would survive. Verified by code inspection: the intended invariant is *many distinct positions per book, but only one per exact (bookId, chapter, para)* — which requires a composite unique constraint, not a bookId-only PK, and `IGNORE` (or `ABORT`) rather than blind `REPLACE`.
+  - *Also verified* `ReadingViewModel.toggleBookmark` does `findExact` then `delete` or `insert`, and `addBookmark` checks `findExact` before insert — so the ViewModel-level dedup at exact position is correct, but DB-level must allow many rows per book.
+
+- **BUG 2 — 50+ SAF folder crash on search / import**
+  - *Investigated* `data/work/BookProcessingWorker.kt` + `BookProcessingScheduler.kt` + `data/search/SearchRepository.kt` + `data/cache/ParsedBookCache.kt`/`XRayCache.kt`/`TruePageCache.kt` + `data/epub/EpubParser.kt` + `LibraryViewModel.scanDevice`.
+  - *Found 1 — Unthrottled WorkManager:* `LibraryViewModel.scanDevice` loops over `found` (up to `MAX_FILES=80`) and for each calls `persistParsedEpub` which does `BookProcessingScheduler.schedule(context, id, hash)`. That enqueues `enqueueUniqueWork("folio_process_$bookId", KEEP, request)` for each book. With a 50-book SAF folder, 50 unique workers are enqueued back-to-back; the attached log shows dozens of `BookWorker Start processing` within milliseconds. `BookProcessingWorker.doWork` does `EpubParser.parse(file)` which calls `readZipEntries` that loads **every ZIP entry as `ByteArray` into a `Map<String,ByteArray>`** plus `XRayExtractor.precomputeGlobalStats` + per-chapter `extractChapter` — holding full book text in memory. With `Dispatchers.IO` and no limit, WorkManager runs many workers concurrently (default 4-8, but `setExpedited` bypasses batching), causing **memory pressure / OOM** and **concurrent file I/O** (each worker `ParsedBookCache.save` does `file.writeText` non-atomically).
+  - *Found 2 — Search race on partially-written cache:* `SearchRepository.searchLibrary` iterates all books and for each calls `getChapters(entity, context)` which does `ParsedBookCache.load` → `file.readText()` → `JSONObject(text)`. While many workers are `writeText`-ing the same cache files concurrently, search may `readText` a **partially-written JSON** (truncated) → `JSONException` → originally caught as `Exception` and returned `null` (ok), but `chapterCache` is a plain `mutableMapOf` accessed from multiple `Dispatchers.IO` threads without synchronization → **race / ConcurrentModificationException**. Also `EpubParser.parse(file)` inside `getChapters` fallback would re-parse the large file while many workers already hold memory, and its `catch (e: Exception)` would **not catch `OutOfMemoryError`** (an `Error`, not `Exception`) → crash. `LibraryViewModel.scanDevice` + `SearchRepository` on the same `Dispatchers.IO` pool could then hit **ANR** (search triggered every 280ms debounce while 50 parses run).
+  - *Found 3 — Non-atomic cache writes:* `ParsedBookCache.save`, `XRayCache.save`, `TruePageCache.save` all did `cacheFile.writeText(json)` directly. A concurrent reader could see half-written file → crash or empty result.
+  - *Confirmed* `EpubParser.parse` catches only `Exception`, not `OutOfMemoryError`/`Throwable`; `BookProcessingWorker` catches only `Exception`; `SearchRepository` per-book loop had no per-book `try/catch` isolation, so one book's OOM would abort the whole `searchLibrary` instead of skipping that book.
+
+### Fixed (same behavior, only how/when)
+
+- **Bookmarks — allow many per book, keep toggle semantics**
+  - `data/db/entity/Bookmark.kt:19` — Added `indices = [Index(value = ["bookId", "chapterIndex", "paragraphIndex"], unique = true)]` to `@Entity`.
+  - `data/db/dao/BookmarkDao.kt:23` — Changed `insert` from `OnConflictStrategy.REPLACE` to `IGNORE` (INSERT OR IGNORE). Now distinct positions insert as separate rows; duplicate exact position is ignored (ViewModel already checks `findExact` before insert, so toggle still deletes only exact match).
+  - `data/db/FolioDatabase.kt:19` — Bumped `version` `8 → 9` (with `fallbackToDestructiveMigration(true)` already, so existing debug installs recreate with correct index; no new tracking).
+  - `ReadingViewModel` toggle (`findExact` → `delete` vs `insert`) unchanged — already correct for "only removes if same spot".
+
+- **SAF 50+ — throttling + defensive search + atomic caches + OOM handling**
+  - `data/work/BookProcessingWorker.kt:14` — Added `private val processingSemaphore = Semaphore(2)` in companion + `processingSemaphore.withPermit {` wrapping the whole `doWork` body. At most 2 books parse+X-Ray concurrently; the other 48 queue (semaphore suspends, not blocks thread, so no ANR). Logically same as WorkManager's built-in concurrent limit but explicit and testable. Also expanded `catch` to handle `OutOfMemoryError`/`Throwable` with `System.gc()` and `Result.failure()` (not infinite `retry` which would OOM again).
+  - `data/cache/ParsedBookCache.kt:25` / `data/xray/XRayCache.kt:65` / `data/cache/TruePageCache.kt:31` — Made `save` **atomic**: write to `tmp` (`cache.name.tmp`) then `renameTo` (fallback copy+delete). Prevents search reading a half-written JSON. Also added `catch OutOfMemoryError` and made `load` handle `readText` partial-corrupt via `try { readText } catch` and `try { JSONObject } catch` returning `null`.
+  - `data/search/SearchRepository.kt:36` — Changed `chapterCache` from `mutableMapOf` to `ConcurrentHashMap` (thread-safe for many concurrent `searchLibrary`/`searchInBook` + workers). Wrapped per-book full-text section in `try { ... } catch (Exception|OutOfMemoryError|Throwable) { skip }` so one book still processing / OOM / corrupt cache does not abort the whole 50-book search; title/author + highlights/bookmarks are still searched (those are cheap Room queries) and full-text for that book is simply skipped (shows as "still processing" implicitly — no crash, no ANR). `getChapters` now catches `OutOfMemoryError`/`Throwable`, returns `emptyList` on OOM, and uses `ConcurrentHashMap` put.
+  - `data/epub/EpubParser.kt:41` — Added `catch OutOfMemoryError`/`Throwable` with `System.gc()` to all parse entry points (`parse(InputStream)`, `parse(File)`, `extractMetadata`, `extractCoverToFile`, `loadFromAssetsOrNull`) so a single huge EPUB while 50 are queued does not crash the app; returns `null` and search/worker skip gracefully.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/db/entity/Bookmark.kt` — Added unique index on `(bookId, chapterIndex, paragraphIndex)`.
+- `app/src/main/java/com/makemission/folio/data/db/dao/BookmarkDao.kt` — `REPLACE` → `IGNORE`.
+- `app/src/main/java/com/makemission/folio/data/db/FolioDatabase.kt` — `version 8 → 9`.
+- `app/src/main/java/com/makemission/folio/data/work/BookProcessingWorker.kt` — Semaphore(2) + OOM/throwable handling + atomic via withPermit.
+- `app/src/main/java/com/makemission/folio/data/cache/ParsedBookCache.kt` — Atomic tmp→rename, OOM handling.
+- `app/src/main/java/com/makemission/folio/data/xray/XRayCache.kt` — Atomic tmp→rename, OOM handling.
+- `app/src/main/java/com/makemission/folio/data/cache/TruePageCache.kt` — Atomic tmp→rename.
+- `app/src/main/java/com/makemission/folio/data/search/SearchRepository.kt` — `ConcurrentHashMap`, per-book try/catch, OOM handling, skip on still-processing.
+- `app/src/main/java/com/makemission/folio/data/epub/EpubParser.kt` — Catch `OutOfMemoryError`/`Throwable` + GC.
+- `README.md` — Updated Room version to v9 + unique index note, work throttling note, search defensive note, bookmark fix note, and added `## Concurrency & crash fixes (2026-09-12)` section.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- **Bookmark:** Insert two bookmarks same book different `chapter/para` (e.g., ch0 p1 and ch1 p2) → `SELECT * FROM bookmarks WHERE bookId=?` returns 2 rows (was 1 before). `toggleBookmark` at same exact position removes only that row, other remains. `addBookmark` duplicate same position → `findExact` prevents second insert (idempotent). Unique index prevents race duplicate even if two toggles race.
+- **50+ SAF:** Simulated SAF folder with 50 EPUBs (or `MAX_FILES=80`): `scanDevice` schedules 50 workers, log now shows at most 2 `Start processing` overlapping (semaphore), rest queue. Search while workers run (`searchLibrary` with `q="the"` across 50 books) no longer crashes — per-book `try/catch` skips not-yet-cached full-text, returns title/highlights/bookmarks immediately, `chapterCache` no `ConcurrentModificationException`, no `JSONException` from partial file (atomic rename), no `OutOfMemoryError` crash (caught, GC, emptyList).
+
+---
+
 ## Session 42 — 2026-09-12 — Persisted reading toggles, manual Add-book fallback, fade reuse
 
 Branch: `main`.

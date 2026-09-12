@@ -33,8 +33,10 @@ object SearchRepository {
     private const val MAX_RESULTS = 40
     private const val MAX_PER_BOOK = 6
 
-    // Simple in-memory cache for parsed chapters to avoid re-parsing on each keystroke
-    private val chapterCache = mutableMapOf<String, List<EpubParser.EpubChapter>>()
+    // Simple in-memory cache for parsed chapters to avoid re-parsing on each keystroke.
+    // Thread-safe: search may be called from multiple coroutines while many background
+    // workers write ParsedBookCache files concurrently (50+ books via SAF).
+    private val chapterCache = java.util.concurrent.ConcurrentHashMap<String, List<EpubParser.EpubChapter>>()
 
     suspend fun searchLibrary(query: String, context: Context): List<SearchResult> = withContext(Dispatchers.IO) {
         val q = query.trim()
@@ -109,48 +111,57 @@ object SearchRepository {
             } catch (_: Exception) {}
 
             // Full-text content search via EpubParser (on private file)
-            var perBookContent = 0
-            val chapters = getChapters(entity, context)
-            for ((cIdx, ch) in chapters.withIndex()) {
-                if (perBookContent >= MAX_PER_BOOK) break
-                // Chapter title match counts as CONTENT (rank 2)
-                if (ch.title.contains(q, ignoreCase = true)) {
-                    out.add(
-                        SearchResult(
-                            bookId = entity.id,
-                            bookTitle = entity.title,
-                            author = entity.author,
-                            chapterIndex = cIdx,
-                            paragraphIndex = 0,
-                            snippet = ch.title.take(100),
-                            matchType = MatchType.CONTENT,
-                            rank = 2,
-                        )
-                    )
-                    perBookContent++
-                }
-                for ((pIdx, para) in ch.paragraphs.withIndex()) {
+            // Defensive: a book still mid-processing (ParsedBookCache being written by BookWorker) or
+            // with a corrupted/partial cache should not crash the whole search for 50+ books.
+            // Skip that book's full-text portion gracefully.
+            try {
+                var perBookContent = 0
+                val chapters = getChapters(entity, context)
+                for ((cIdx, ch) in chapters.withIndex()) {
                     if (perBookContent >= MAX_PER_BOOK) break
-                    if (para.lowercase().contains(qLower)) {
-                        val idx = para.lowercase().indexOf(qLower)
-                        val start = (idx - 40).coerceAtLeast(0)
-                        val end = (idx + q.length + 40).coerceAtMost(para.length)
-                        val snippet = para.substring(start, end).replace("\n", " ").trim()
+                    // Chapter title match counts as CONTENT (rank 2)
+                    if (ch.title.contains(q, ignoreCase = true)) {
                         out.add(
                             SearchResult(
                                 bookId = entity.id,
                                 bookTitle = entity.title,
                                 author = entity.author,
                                 chapterIndex = cIdx,
-                                paragraphIndex = pIdx,
-                                snippet = snippet,
+                                paragraphIndex = 0,
+                                snippet = ch.title.take(100),
                                 matchType = MatchType.CONTENT,
                                 rank = 2,
                             )
                         )
                         perBookContent++
                     }
+                    for ((pIdx, para) in ch.paragraphs.withIndex()) {
+                        if (perBookContent >= MAX_PER_BOOK) break
+                        if (para.lowercase().contains(qLower)) {
+                            val idx = para.lowercase().indexOf(qLower)
+                            val start = (idx - 40).coerceAtLeast(0)
+                            val end = (idx + q.length + 40).coerceAtMost(para.length)
+                            val snippet = para.substring(start, end).replace("\n", " ").trim()
+                            out.add(
+                                SearchResult(
+                                    bookId = entity.id,
+                                    bookTitle = entity.title,
+                                    author = entity.author,
+                                    chapterIndex = cIdx,
+                                    paragraphIndex = pIdx,
+                                    snippet = snippet,
+                                    matchType = MatchType.CONTENT,
+                                    rank = 2,
+                                )
+                            )
+                            perBookContent++
+                        }
+                    }
                 }
+            } catch (_: Exception) {
+                // Skip this book's full-text if still processing / OOM / corrupt cache; title/highlights still searched above.
+            } catch (_: OutOfMemoryError) {
+            } catch (_: Throwable) {
             }
         }
         // Prioritize highlights/bookmarks first, then title/author, then general text
@@ -206,42 +217,48 @@ object SearchRepository {
             }
         } catch (_: Exception) {}
 
-        val chapters = getChapters(entity, context)
-        for ((cIdx, ch) in chapters.withIndex()) {
-            if (ch.title.contains(q, ignoreCase = true)) {
-                out.add(
-                    SearchResult(
-                        bookId = bookId,
-                        bookTitle = entity.title,
-                        author = entity.author,
-                        chapterIndex = cIdx,
-                        paragraphIndex = 0,
-                        snippet = ch.title.take(100),
-                        matchType = MatchType.TITLE_AUTHOR,
-                        rank = 1,
-                    )
-                )
-            }
-            for ((pIdx, para) in ch.paragraphs.withIndex()) {
-                if (para.lowercase().contains(qLower)) {
-                    val idx = para.lowercase().indexOf(qLower)
-                    val start = (idx - 40).coerceAtLeast(0)
-                    val end = (idx + q.length + 40).coerceAtMost(para.length)
-                    val snippet = para.substring(start, end).replace("\n", " ").trim()
+        try {
+            val chapters = getChapters(entity, context)
+            for ((cIdx, ch) in chapters.withIndex()) {
+                if (ch.title.contains(q, ignoreCase = true)) {
                     out.add(
                         SearchResult(
                             bookId = bookId,
                             bookTitle = entity.title,
                             author = entity.author,
                             chapterIndex = cIdx,
-                            paragraphIndex = pIdx,
-                            snippet = snippet,
-                            matchType = MatchType.CONTENT,
-                            rank = 2,
+                            paragraphIndex = 0,
+                            snippet = ch.title.take(100),
+                            matchType = MatchType.TITLE_AUTHOR,
+                            rank = 1,
                         )
                     )
                 }
+                for ((pIdx, para) in ch.paragraphs.withIndex()) {
+                    if (para.lowercase().contains(qLower)) {
+                        val idx = para.lowercase().indexOf(qLower)
+                        val start = (idx - 40).coerceAtLeast(0)
+                        val end = (idx + q.length + 40).coerceAtMost(para.length)
+                        val snippet = para.substring(start, end).replace("\n", " ").trim()
+                        out.add(
+                            SearchResult(
+                                bookId = bookId,
+                                bookTitle = entity.title,
+                                author = entity.author,
+                                chapterIndex = cIdx,
+                                paragraphIndex = pIdx,
+                                snippet = snippet,
+                                matchType = MatchType.CONTENT,
+                                rank = 2,
+                            )
+                        )
+                    }
+                }
             }
+        } catch (_: Exception) {
+            // Skip full-text for this book if still processing / corrupt cache
+        } catch (_: OutOfMemoryError) {
+        } catch (_: Throwable) {
         }
         out.sortedWith(compareBy<SearchResult> { it.rank }.thenBy { it.chapterIndex }.thenBy { it.paragraphIndex })
             .take(MAX_RESULTS)
@@ -249,25 +266,34 @@ object SearchRepository {
 
     private suspend fun getChapters(entity: com.makemission.folio.data.db.entity.BookEntity, context: Context): List<EpubParser.EpubChapter> {
         chapterCache[entity.id]?.let { return it }
-        // Try smart disk cache first (hash-validated) — avoids heavy re-parse on each keystroke/reopen
+        // Try smart disk cache first (hash-validated) — avoids heavy re-parse on each keystroke/reopen.
+        // Defensive: cache file may be partially written while BookProcessingWorker is still mid-processing
+        // 50+ books concurrently; treat corrupt/partial JSON as miss, not crash.
         try {
             val cached = com.makemission.folio.data.cache.ParsedBookCache.load(context, entity.id, entity.fileHash)
             if (cached != null && cached.chapters.isNotEmpty()) {
                 chapterCache[entity.id] = cached.chapters
                 return cached.chapters
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+            // Partially-written cache -> skip, fall through to file parse or empty
+        } catch (_: OutOfMemoryError) {
+            return emptyList()
+        }
         return try {
             val f = File(entity.filePath)
-            val epub = if (f.exists() && f.canRead()) EpubParser.parse(f) else null
+            // If file is huge and still being processed, parsing could OOM; catch Throwable.
+            val epub = try {
+                if (f.exists() && f.canRead()) EpubParser.parse(f) else null
+            } catch (_: Exception) { null } catch (_: OutOfMemoryError) { null } catch (_: Throwable) { null }
             val chapters = epub?.chapters ?: emptyList()
             if (chapters.isNotEmpty()) {
                 chapterCache[entity.id] = chapters
-                // Populate disk cache for next time (hash-validated)
-                try { entity.fileHash?.let { hash -> epub?.let { com.makemission.folio.data.cache.ParsedBookCache.save(context, entity.id, hash, it) } } } catch (_: Exception) {}
+                // Populate disk cache for next time (hash-validated) — best-effort, ignore if still processing
+                try { entity.fileHash?.let { hash -> epub?.let { com.makemission.folio.data.cache.ParsedBookCache.save(context, entity.id, hash, it) } } } catch (_: Exception) {} catch (_: OutOfMemoryError) {}
             }
             chapters
-        } catch (_: Exception) { emptyList() }
+        } catch (_: Exception) { emptyList() } catch (_: OutOfMemoryError) { emptyList() } catch (_: Throwable) { emptyList() }
     }
 
     fun clearCache() { chapterCache.clear() }

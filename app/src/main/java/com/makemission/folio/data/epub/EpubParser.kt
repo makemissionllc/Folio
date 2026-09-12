@@ -99,6 +99,13 @@ object EpubParser {
         } catch (e: Exception) {
             FolioLogger.w("EpubParser", "Parse failed: ${e.message}", e)
             null
+        } catch (e: OutOfMemoryError) {
+            FolioLogger.w("EpubParser", "Parse OOM: ${e.message}", e)
+            System.gc()
+            null
+        } catch (e: Throwable) {
+            FolioLogger.w("EpubParser", "Parse failed throwable: ${e.message}", e)
+            null
         }
     }
 
@@ -197,6 +204,13 @@ object EpubParser {
     } catch (e: Exception) {
         FolioLogger.w("EpubParser", "Parse file failed: ${file.name.take(80)} ${e.message}", e)
         null
+    } catch (e: OutOfMemoryError) {
+        FolioLogger.w("EpubParser", "Parse file OOM: ${file.name.take(80)} ${e.message}", e)
+        System.gc()
+        null
+    } catch (e: Throwable) {
+        FolioLogger.w("EpubParser", "Parse file throwable: ${file.name.take(80)} ${e.message}", e)
+        null
     }
 
     /** Quick metadata-only extraction (title/author) without parsing chapters — for minimal import. */
@@ -205,6 +219,12 @@ object EpubParser {
         file.inputStream().use { extractMetadata(it) }
     } catch (e: Exception) {
         FolioLogger.w("EpubParser", "extractMetadata file failed: ${file.name.take(80)} ${e.message}", e)
+        null
+    } catch (e: OutOfMemoryError) {
+        FolioLogger.w("EpubParser", "extractMetadata file OOM: ${file.name.take(80)} ${e.message}", e)
+        null
+    } catch (e: Throwable) {
+        FolioLogger.w("EpubParser", "extractMetadata file throwable: ${file.name.take(80)} ${e.message}", e)
         null
     }
     fun extractMetadata(inputStream: InputStream): EpubMetadata? {
@@ -220,6 +240,12 @@ object EpubParser {
             EpubMetadata(title = title, author = author)
         } catch (e: Exception) {
             FolioLogger.w("EpubParser", "extractMetadata failed: ${e.message}", e)
+            null
+        } catch (e: OutOfMemoryError) {
+            FolioLogger.w("EpubParser", "extractMetadata OOM: ${e.message}", e)
+            null
+        } catch (e: Throwable) {
+            FolioLogger.w("EpubParser", "extractMetadata throwable: ${e.message}", e)
             null
         }
     }
@@ -284,6 +310,12 @@ object EpubParser {
         } catch (e: Exception) {
             FolioLogger.w("EpubParser", "Cover extract failed for $bookId: ${e.message}", e)
             null
+        } catch (e: OutOfMemoryError) {
+            FolioLogger.w("EpubParser", "Cover extract OOM for $bookId: ${e.message}", e)
+            null
+        } catch (e: Throwable) {
+            FolioLogger.w("EpubParser", "Cover extract throwable for $bookId: ${e.message}", e)
+            null
         }
     }
 
@@ -292,6 +324,12 @@ object EpubParser {
             file.inputStream().use { extractCoverToFile(it, context, bookId) }
         } catch (e: Exception) {
             FolioLogger.w("EpubParser", "Cover extract (file) failed for $bookId: ${e.message}", e)
+            null
+        } catch (e: OutOfMemoryError) {
+            FolioLogger.w("EpubParser", "Cover extract (file) OOM for $bookId: ${e.message}", e)
+            null
+        } catch (e: Throwable) {
+            FolioLogger.w("EpubParser", "Cover extract (file) throwable for $bookId: ${e.message}", e)
             null
         }
     }
@@ -361,6 +399,12 @@ object EpubParser {
         context.assets.open("sample.epub").use { stream -> parse(stream) }
     } catch (e: Exception) {
         FolioLogger.w("EpubParser", "loadFromAssetsOrNull failed: ${e.message}", e)
+        null
+    } catch (e: OutOfMemoryError) {
+        FolioLogger.w("EpubParser", "loadFromAssetsOrNull OOM: ${e.message}", e)
+        null
+    } catch (e: Throwable) {
+        FolioLogger.w("EpubParser", "loadFromAssetsOrNull throwable: ${e.message}", e)
         null
     }
 }

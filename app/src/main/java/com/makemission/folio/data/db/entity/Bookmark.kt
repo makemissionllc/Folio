@@ -1,6 +1,7 @@
 package com.makemission.folio.data.db.entity
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
@@ -16,7 +17,10 @@ import androidx.room.PrimaryKey
  * [previewText] is a short snippet (first 120 chars of the paragraph) for
  * the list UI — derived at bookmark time, no extra query.
  */
-@Entity(tableName = "bookmarks")
+@Entity(
+    tableName = "bookmarks",
+    indices = [Index(value = ["bookId", "chapterIndex", "paragraphIndex"], unique = true)],
+)
 data class Bookmark(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val bookId: String,

@@ -11,6 +11,8 @@ import com.makemission.folio.data.logging.FolioLogger
 import com.makemission.folio.data.xray.XRayCache
 import com.makemission.folio.data.xray.XRayExtractor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -38,6 +40,11 @@ class BookProcessingWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        // Concurrency limit: throttle many books selected via SAF (50+). Without this,
+        // WorkManager would start dozens of BookProcessingWorkers within ms (log: "Start processing"
+        // back-to-back), each holding full EPUB bytes + X-Ray TF-IDF in memory -> OOM / file contention.
+        // Semaphore with 2 permits ensures at most 2 books parse+X-Ray concurrently, rest queue.
+        processingSemaphore.withPermit {
         val bookId = inputData.getString(KEY_BOOK_ID) ?: return@withContext Result.failure()
         val fileHash = inputData.getString(KEY_FILE_HASH)
         FolioLogger.i("BookWorker", "Start processing bookId=$bookId hash=${fileHash?.take(8)}")
@@ -96,9 +103,17 @@ class BookProcessingWorker(
 
             FolioLogger.i("BookWorker", "Done bookId=$bookId processed=$processed total=${chapters.size}")
             Result.success()
+        } catch (e: OutOfMemoryError) {
+            FolioLogger.w("BookWorker", "OOM bookId=$bookId: ${e.message}", e)
+            System.gc()
+            Result.failure()
         } catch (e: Exception) {
             FolioLogger.w("BookWorker", "Failed bookId=$bookId: ${e.message}", e)
             Result.retry()
+        } catch (e: Throwable) {
+            FolioLogger.w("BookWorker", "Failed throwable bookId=$bookId: ${e.message}", e)
+            Result.retry()
+        }
         }
     }
 
@@ -106,5 +121,8 @@ class BookProcessingWorker(
         const val KEY_BOOK_ID = "bookId"
         const val KEY_FILE_HASH = "fileHash"
         const val KEY_PROGRESS = "progress"
+        // Throttle concurrent heavy parsing: at most 2 books parse+X-Ray at once.
+        // Prevents OOM / file-race when user picks 50+ books via SAF.
+        private val processingSemaphore = Semaphore(2)
     }
 }
