@@ -13,6 +13,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import com.makemission.folio.ui.reader.components.BottomReadingFade
+import com.makemission.folio.ui.reader.components.TopReadingFade
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -43,6 +49,8 @@ fun VocabularyScreen(
     val allCards by viewModel.allCards.collectAsState()
     val current by viewModel.currentReview.collectAsState()
     val showDef by viewModel.showDefinition.collectAsState()
+    val dueListState = rememberLazyListState()
+    val allListState = rememberLazyListState()
 
     Scaffold(
         topBar = {
@@ -91,8 +99,13 @@ fun VocabularyScreen(
                     TextButton(onClick = { viewModel.startReview() }) {
                         Text("Start review")
                     }
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(dueCards, key = { it.word }) { card ->
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        LazyColumn(
+                            state = dueListState,
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(dueCards, key = { it.word }) { card ->
                             Card(
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -115,6 +128,19 @@ fun VocabularyScreen(
                                 }
                             }
                         }
+                        }
+                        val canUpDue by remember { derivedStateOf { dueListState.canScrollBackward } }
+                        val canDownDue by remember { derivedStateOf { dueListState.canScrollForward } }
+                        TopReadingFade(
+                            backgroundColor = MaterialTheme.colorScheme.background,
+                            visible = canUpDue,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
+                        BottomReadingFade(
+                            backgroundColor = MaterialTheme.colorScheme.background,
+                            visible = canDownDue,
+                            modifier = Modifier.align(Alignment.BottomCenter),
+                        )
                     }
                 }
             } else if (allCards.isEmpty()) {
@@ -148,8 +174,13 @@ fun VocabularyScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(allCards, key = { it.word }) { card ->
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        LazyColumn(
+                            state = allListState,
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(allCards, key = { it.word }) { card ->
                             Card(
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -166,6 +197,19 @@ fun VocabularyScreen(
                                 }
                             }
                         }
+                        }
+                        val canUpAll by remember { derivedStateOf { allListState.canScrollBackward } }
+                        val canDownAll by remember { derivedStateOf { allListState.canScrollForward } }
+                        TopReadingFade(
+                            backgroundColor = MaterialTheme.colorScheme.background,
+                            visible = canUpAll,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
+                        BottomReadingFade(
+                            backgroundColor = MaterialTheme.colorScheme.background,
+                            visible = canDownAll,
+                            modifier = Modifier.align(Alignment.BottomCenter),
+                        )
                     }
                 }
             }

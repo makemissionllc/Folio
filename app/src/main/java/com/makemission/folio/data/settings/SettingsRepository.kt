@@ -32,6 +32,8 @@ class SettingsRepository(private val context: Context) {
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         private val KEY_READING_NAV_MODE = stringPreferencesKey("reading_nav_mode")
         private val KEY_BOOKS_FOLDER_URI = stringPreferencesKey("books_folder_uri")
+        private val KEY_BIONIC_ENABLED = booleanPreferencesKey("bionic_enabled")
+        private val KEY_ADAPTIVE_CONTRAST_ENABLED = booleanPreferencesKey("adaptive_contrast_enabled")
 
         @Volatile
         private var INSTANCE: SettingsRepository? = null
@@ -142,6 +144,28 @@ class SettingsRepository(private val context: Context) {
             } else {
                 prefs.remove(KEY_BOOKS_FOLDER_URI)
             }
+        }
+    }
+
+    val bionicEnabled: Flow<Boolean> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            prefs[KEY_BIONIC_ENABLED] ?: false
+        }
+
+    suspend fun setBionicEnabled(value: Boolean) {
+        context.folioSettingsDataStore.edit { prefs ->
+            prefs[KEY_BIONIC_ENABLED] = value
+        }
+    }
+
+    val adaptiveContrastEnabled: Flow<Boolean> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            prefs[KEY_ADAPTIVE_CONTRAST_ENABLED] ?: false
+        }
+
+    suspend fun setAdaptiveContrastEnabled(value: Boolean) {
+        context.folioSettingsDataStore.edit { prefs ->
+            prefs[KEY_ADAPTIVE_CONTRAST_ENABLED] = value
         }
     }
 

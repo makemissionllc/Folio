@@ -7,6 +7,53 @@ Active coding branch: `main`.
 
 ---
 
+## Session 42 — 2026-09-12 — Persisted reading toggles, manual Add-book fallback, fade reuse
+
+Branch: `main`.
+
+### Built
+
+- **Persisted reading toggles (Bionic + Contrast) via DataStore**
+  - Root cause: `ui/reader/ReadingScreen.kt:208,289` used `rememberSaveable { mutableStateOf(false) }` for `bionicEnabled` and `adaptiveEnabled`. `rememberSaveable` survives config change / process recreation via Bundle but not full process death + app restart from launcher — toggles reset to false. Also toggling from reader menu did not reflect in Settings (and vice versa) because state was local.
+  - Fix: Added `SettingsRepository.KEY_BIONIC_ENABLED` + `KEY_ADAPTIVE_CONTRAST_ENABLED` (`booleanPreferencesKey`), `bionicEnabled: Flow<Boolean>` / `adaptiveContrastEnabled: Flow<Boolean>` (default false) + `setBionicEnabled` / `setAdaptiveContrastEnabled` (same `folio_settings` DataStore, survives restart, pattern as `alwaysShowProgressBar`). `ReadingScreen` now `collectAsState` from `settingsRepo.bionicEnabled` / `adaptiveContrastEnabled` (replaces `rememberSaveable`), and `ReaderMenuSheet` toggles do `scope.launch { repo.setBionicEnabled(!bionicEnabled) }` / `setAdaptiveContrastEnabled`. Added matching toggles in **Settings → Reading** (`SettingsScreen` `Reading` section: `SettingsToggleRow` "Bionic reading — Bold first syllable" and "Contrast — Auto (7:1) / Fixed / No sensor" with `hasAmbientLightSensor` check, `enabled = hasSensor`). Now toggling from either place writes same DataStore key, survives `adb shell am kill` + relaunch, and stays consistent (verified).
+  - No behavior change except persistence — same `bionicEnabled` drives `BionicReading.toBionicAnnotated` + `TruePageEngine`/`Knuth` configKey, same `adaptiveEnabled` drives `rememberAmbientLightLux` + `AdaptiveContrastEngine` + `tintedPair`.
+
+- **Manual "Add book" fallback in Settings → Library (ACTION_OPEN_DOCUMENT)**
+  - Root cause: primary intake is auto-scan + `ACTION_VIEW` from Files/browser/email (no FAB). If a niche folder is missed or VIEW intent not offered, user had no manual fallback (auto-scan was the only in-app path). Need a safety net that reuses exactly the same import pipeline, not a duplicate.
+  - Fix: `ui/settings/SettingsScreen.kt` Library section now has a subtle fallback row (not a prominent FAB, per spec): `Row` "Add book manually — Pick an EPUB if scan missed it" + `TextButton` "Add…" (`sizeIn 48x36`). `rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument())` with `arrayOf("application/epub+zip", "application/octet-stream", "*/*")` → `libraryViewModel.importEpub(uri, context)` (same `persistParsedEpub` → lightweight OPF metadata → cover → Room → `BookProcessingScheduler` X-Ray). Takes persistable URI permission best-effort. Visually minor (text row, 4dp spacer above Scan, no elevation), keeps auto-scan primary.
+
+- **Extended ReadingFadeOverlay to Library / Settings / Insights / Vocabulary**
+  - Root cause: `ui/reader/components/ReadingFadeOverlay.kt` (`TopReadingFade` 36dp / `BottomReadingFade` 40dp, 3-stop `Brush.verticalGradient` + `animateFloatAsState` 220ms) was only used in `ReadingScreen` (phone `singleListState`, tablet `left/right`, swipe `listState`). Library grid and Settings/Insights/Vocabulary scrollable lists hard-cut at edges.
+  - Fix: Reused same component, not rewritten per screen:
+    - `ui/library/components/BookGrid.kt` now takes optional `state: LazyGridState = rememberLazyGridState()` and passes to `LazyVerticalGrid(state = state)`.
+    - `ui/library/LibraryScreen.kt` creates `gridState = rememberLazyGridState()`, passes to `BookGrid(state = gridState)`, and wraps the `Box( weight 1f )` with `TopReadingFade`/`BottomReadingFade` (`derivedStateOf { gridState.canScrollBackward/Forward }`, `background = MaterialTheme.colorScheme.background`, `Modifier.align(TopCenter/BottomCenter)`) only when `searchQuery.isBlank() && books.isNotEmpty()`.
+    - `ui/settings/SettingsScreen.kt` adds `listState = rememberLazyListState()`, wraps `LazyColumn(state = listState, ...)` in `Box( fillMaxSize + padding )` + same fades (`canScrollBackward/Forward`).
+    - `ui/insights/InsightsScreen.kt` same pattern: `listState = rememberLazyListState()`, `Box` wrapper + fades (skip when `isLoading` early-return).
+    - `ui/vocabulary/VocabularyScreen.kt` adds `dueListState` + `allListState` (`rememberLazyListState()`), each `LazyColumn(state = ..., weight 1f)` inside `Box(weight 1f)` + its own `Top/BottomReadingFade` (`canScrollBackward/Forward`). ReviewCard / empty states no fade.
+  - All fades share same 36/40dp 3-stop gradient + 220ms alpha, editorial feather, no hard band.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/settings/SettingsRepository.kt:34` — Added `KEY_BIONIC_ENABLED` + `KEY_ADAPTIVE_CONTRAST_ENABLED`, `bionicEnabled`/`adaptiveContrastEnabled` Flows + setters.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:240` — Replaced `rememberSaveable` `bionicEnabled`/`adaptiveEnabled` with `settingsRepo.bionicEnabled`/`adaptiveContrastEnabled` `collectAsState`; `ReaderMenuSheet` toggles now `scope.launch { repo.set... }`; removed `rememberSaveable` import.
+- `app/src/main/java/com/makemission/folio/ui/settings/SettingsScreen.kt:5` — Added `hasAmbientLightSensor` import; `SettingsToggleRow` now has `enabled` param (for Contrast No-sensor dim); Reading section now shows Bionic + Contrast toggles (collect from repo, write via scope); Library section now has `epubPickerLauncher` (`OpenDocument`) + subtle "Add book manually" `TextButton` row reusing `libraryViewModel.importEpub`.
+- `app/src/main/java/com/makemission/folio/ui/library/components/BookGrid.kt:16` — Added `state: LazyGridState = rememberLazyGridState()` param, passed to `LazyVerticalGrid(state = state)`.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryScreen.kt:3` — Added `rememberLazyGridState`/`derivedStateOf`/`Top/BottomReadingFade` imports; `gridState` + fades in `Box` when grid visible.
+- `app/src/main/java/com/makemission/folio/ui/settings/SettingsScreen.kt:30` — Wrapped `LazyColumn` with `Box` + `listState` + fades.
+- `app/src/main/java/com/makemission/folio/ui/insights/InsightsScreen.kt:14` — Wrapped `LazyColumn` with `Box` + `listState` + fades.
+- `app/src/main/java/com/makemission/folio/ui/vocabulary/VocabularyScreen.kt:15` — Added `dueListState`/`allListState`, each `LazyColumn` inside `Box(weight 1f)` + fades.
+- `README.md` — Updated DataStore tech stack (`bionicEnabled`, `adaptiveContrastEnabled`), `SettingsRepository` structure note (Bionic/Contrast now DataStore), `BookGrid` (LazyGridState + fade), `ReadingScreen` (adaptive DataStore, Bionic DataStore), `ReadingFadeOverlay` reused note, Library intake primary + manual fallback bullet, Reading menu persistence note, Tactile fade reuse note.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- Bionic/Contrast persistence: toggle Bionic ON in reader menu → `adb shell am kill com.makemission.folio` → relaunch → Bionic still ON (DataStore `bionic_enabled=true`); toggle OFF in Settings → Reading → Bionic → return to reader menu shows OFF (same Flow). Same for Contrast (sensor present → Auto/ Fixed persists, no-sensor shows disabled "No sensor").
+- Add book fallback: Settings → Library → Add book manually → picker shows EPUBs → pick → `importEpub` → same `persistParsedEpub` pipeline (cover + Room + WorkManager), appears in grid, dedup same as scan.
+- Fades: Library grid scroll shows 36/40dp feather at top when `canScrollBackward` and bottom when `canScrollForward` (same as reading); Settings/Insights/Vocabulary LazyColumns same; no per-screen rewrite, same `ReadingFadeOverlay` component.
+
+---
+
 ## Session 41 — 2026-09-12 — Compose performance audit & jank fixes (same output, less waste)
 
 Branch: `main`.

@@ -61,7 +61,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.animation.animateColorAsState
@@ -205,7 +204,6 @@ private fun ReadingScreenContent(
     }
 
     var chromeVisible by remember { mutableStateOf(true) }
-    var bionicEnabled by rememberSaveable { mutableStateOf(false) }
     var showXRay by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
     var showInBookSearch by remember { mutableStateOf(false) }
@@ -243,6 +241,11 @@ private fun ReadingScreenContent(
     val alwaysShowProgressBar by settingsRepo.alwaysShowProgressBar.collectAsState(initial = false)
     val hapticsEnabled by settingsRepo.hapticsEnabled.collectAsState(initial = true)
     val navigationMode by settingsRepo.readingNavigationMode.collectAsState(initial = com.makemission.folio.ui.reader.ReadingNavigationMode.CONTINUOUS)
+    // Persisted reading toggles (Bionic + Contrast) — DataStore backed so they survive process death / app restart.
+    // Replaces previous rememberSaveable (process-death only) with folio_settings persistence.
+    // Same keys are used in Settings → Reading so toggling from either place stays consistent.
+    val bionicEnabled by settingsRepo.bionicEnabled.collectAsState(initial = false)
+    val adaptiveEnabled by settingsRepo.adaptiveContrastEnabled.collectAsState(initial = false)
 
     // --- Chapter swipe pager states (only used when navigationMode == CHAPTER_SWIPE) ---
     // Phone: one page per chapter, vertical LazyColumn within each chapter
@@ -287,7 +290,6 @@ private fun ReadingScreenContent(
     // Time-aware ambient tinting layers on top — see TimeTintEngine; all three
     // (palette via baseBg, adaptive contrast via lux, time tint via warmth) layer
     // sensibly via sequential lerps + final WCAG ensure, not fighting/muddy.
-    var adaptiveEnabled by rememberSaveable { mutableStateOf(false) }
     val themeMode by settingsRepo.themeMode.collectAsState(initial = com.makemission.folio.ui.theme.ThemeMode.AUTO)
     val systemDark = isSystemInDarkTheme()
     val isDark = when (themeMode) {
@@ -1009,11 +1011,11 @@ private fun ReadingScreenContent(
     if (showMenu) {
         com.makemission.folio.ui.reader.components.ReaderMenuSheet(
             bionicEnabled = bionicEnabled,
-            onToggleBionic = { bionicEnabled = !bionicEnabled },
+            onToggleBionic = { scope.launch { settingsRepo.setBionicEnabled(!bionicEnabled) } },
             onOpenXRay = { showXRay = true },
             contrastEnabled = adaptiveEnabled,
             hasSensor = hasSensor,
-            onToggleContrast = { if (hasSensor) adaptiveEnabled = !adaptiveEnabled },
+            onToggleContrast = { if (hasSensor) scope.launch { settingsRepo.setAdaptiveContrastEnabled(!adaptiveEnabled) } },
             bookmarksCount = bookmarks.size,
             isCurrentBookmarked = isCurrentBookmarked,
             onToggleBookmark = {

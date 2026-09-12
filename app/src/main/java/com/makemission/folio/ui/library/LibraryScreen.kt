@@ -61,6 +61,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.runtime.derivedStateOf
+import com.makemission.folio.ui.reader.components.BottomReadingFade
+import com.makemission.folio.ui.reader.components.TopReadingFade
 import com.makemission.folio.data.search.SearchRepository
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.makemission.folio.data.model.Book
@@ -273,6 +277,7 @@ fun LibraryScreen(
                     )
                 }
             }
+            val gridState = rememberLazyGridState()
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -299,6 +304,22 @@ fun LibraryScreen(
                             showBookActions = true
                         },
                         modifier = Modifier.fillMaxSize(),
+                        state = gridState,
+                    )
+                }
+                // Reuse ReadingFadeOverlay — iOS-like top/bottom feather so grid doesn't hard-cutoff
+                if (searchQuery.isBlank() && books.isNotEmpty()) {
+                    val canScrollUp by remember { derivedStateOf { gridState.canScrollBackward } }
+                    val canScrollDown by remember { derivedStateOf { gridState.canScrollForward } }
+                    TopReadingFade(
+                        backgroundColor = MaterialTheme.colorScheme.background,
+                        visible = canScrollUp,
+                        modifier = Modifier.align(Alignment.TopCenter),
+                    )
+                    BottomReadingFade(
+                        backgroundColor = MaterialTheme.colorScheme.background,
+                        visible = canScrollDown,
+                        modifier = Modifier.align(Alignment.BottomCenter),
                     )
                 }
             }

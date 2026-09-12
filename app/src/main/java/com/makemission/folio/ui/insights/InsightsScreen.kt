@@ -22,6 +22,12 @@ import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import com.makemission.folio.ui.reader.components.BottomReadingFade
+import com.makemission.folio.ui.reader.components.TopReadingFade
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -93,13 +99,19 @@ fun InsightsScreen(
 
         val isEmpty = state.totalBooks == 0 && state.totalHighlights == 0 && state.totalBookmarks == 0 && state.totalVocab == 0 && state.readingSessions == 0
 
-        LazyColumn(
+        val listState = rememberLazyListState()
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
             item { Spacer(Modifier.height(4.dp)) }
             item { InsightsHero(isEmpty = isEmpty) }
 
@@ -301,6 +313,19 @@ fun InsightsScreen(
             }
 
             item { Spacer(Modifier.height(24.dp)) }
+            }
+            val canScrollUp by remember { derivedStateOf { listState.canScrollBackward } }
+            val canScrollDown by remember { derivedStateOf { listState.canScrollForward } }
+            TopReadingFade(
+                backgroundColor = MaterialTheme.colorScheme.background,
+                visible = canScrollUp,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+            BottomReadingFade(
+                backgroundColor = MaterialTheme.colorScheme.background,
+                visible = canScrollDown,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
     }
 }

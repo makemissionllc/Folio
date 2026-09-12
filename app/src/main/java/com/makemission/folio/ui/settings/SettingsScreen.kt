@@ -28,6 +28,11 @@ import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import com.makemission.folio.ui.reader.components.BottomReadingFade
+import com.makemission.folio.ui.reader.components.TopReadingFade
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -62,6 +67,7 @@ import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.ui.library.LibraryViewModel
 import com.makemission.folio.ui.reader.ReadingNavigationMode
 import com.makemission.folio.ui.theme.ThemeMode
+import com.makemission.folio.ui.theme.hasAmbientLightSensor
 import kotlinx.coroutines.launch
 
 /**
@@ -131,6 +137,26 @@ fun SettingsScreen(
         }
     }
 
+    // Manual fallback import — ACTION_OPEN_DOCUMENT reusing existing persistParsedEpub pipeline
+    // Visually minor (text row, not FAB) since auto-scan / VIEW intent are primary.
+    val epubPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                // Take persistable read permission so we can re-read if needed (best-effort)
+                try {
+                    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (_: Exception) {}
+                libraryViewModel.importEpub(uri, context)
+                FolioLogger.i("Settings", "Manual add book picked: $uri")
+            } catch (e: Exception) {
+                FolioLogger.w("Settings", "Manual add book error: ${e.message}", e)
+                scope.launch { snackbarHostState.showSnackbar("Could not add book: ${e.message}") }
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         libraryViewModel.scanResult.collect { msg ->
             snackbarHostState.showSnackbar(msg)
@@ -145,13 +171,19 @@ fun SettingsScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
-        LazyColumn(
+        val listState = rememberLazyListState()
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
 
             // Illustration header — editorial, flat, Folio palette (amber sun + books)
@@ -177,6 +209,28 @@ fun SettingsScreen(
                         checked = hapticsEnabled,
                         onCheckedChange = { checked ->
                             scope.launch { repo.setHapticsEnabled(checked) }
+                        },
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val bionicEnabled by repo.bionicEnabled.collectAsState(initial = false)
+                    val adaptiveContrastEnabled by repo.adaptiveContrastEnabled.collectAsState(initial = false)
+                    val hasSensor = remember { hasAmbientLightSensor(context) }
+                    SettingsToggleRow(
+                        title = "Bionic reading",
+                        subtitle = "Bold first syllable",
+                        checked = bionicEnabled,
+                        onCheckedChange = { checked ->
+                            scope.launch { repo.setBionicEnabled(checked) }
+                        },
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SettingsToggleRow(
+                        title = if (!hasSensor) "Contrast — No sensor" else if (adaptiveContrastEnabled) "Contrast — Auto (7:1)" else "Contrast — Fixed",
+                        subtitle = "Adaptive via light sensor",
+                        checked = adaptiveContrastEnabled && hasSensor,
+                        enabled = hasSensor,
+                        onCheckedChange = { checked ->
+                            if (hasSensor) scope.launch { repo.setAdaptiveContrastEnabled(checked) }
                         },
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -315,6 +369,32 @@ fun SettingsScreen(
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    // Manual fallback — minor text row, not a prominent FAB, reuses same import pipeline
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text(
+                                text = "Add book manually",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = "Pick an EPUB if scan missed it",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            )
+                        }
+                        TextButton(
+                            onClick = { epubPickerLauncher.launch(arrayOf("application/epub+zip", "application/octet-stream", "*/*")) },
+                            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 36.dp),
+                        ) {
+                            Text("Add…", style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
                 }
             }
 
@@ -445,6 +525,19 @@ fun SettingsScreen(
             }
 
             item { Spacer(modifier = Modifier.height(24.dp)) }
+            }
+            val canScrollUp by remember { derivedStateOf { listState.canScrollBackward } }
+            val canScrollDown by remember { derivedStateOf { listState.canScrollForward } }
+            TopReadingFade(
+                backgroundColor = MaterialTheme.colorScheme.background,
+                visible = canScrollUp,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+            BottomReadingFade(
+                backgroundColor = MaterialTheme.colorScheme.background,
+                visible = canScrollDown,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
     }
 }
@@ -562,6 +655,7 @@ private fun SettingsToggleRow(
     subtitle: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val scale by animateFloatAsState(
@@ -580,7 +674,7 @@ private fun SettingsToggleRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (subtitle.isNotBlank()) {
                 Spacer(modifier = Modifier.height(2.dp))
@@ -594,6 +688,7 @@ private fun SettingsToggleRow(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            enabled = enabled,
             modifier = Modifier.graphicsLayer {
                 scaleX = scale
                 scaleY = scale
