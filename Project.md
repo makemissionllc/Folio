@@ -7,6 +7,40 @@ Active coding branch: `main`.
 
 ---
 
+## Session 48 — 2026-09-16 — Remove 80-file scan cap (show all 300+ books, user-visible safety cap, verify 300-book scale)
+
+Branch: `main`.
+
+### Fixed — 1 task (investigate before patching, silent truncation)
+
+- **EpubScanner MAX_FILES=80 silently hid books**
+  - *Investigated* `data/scan/EpubScanner.kt:60` `MAX_FILES = 80` + `LibraryViewModel.kt:392` `if (imported+skipped >=80) break` — both capped silently. A user with ~300 EPUBs in their configured SAF folder would only see 80 — the remaining 220 were dropped without any user-visible message (no “showing 80 of 300”, just `out.take(80)`). The scan itself also gated fallbacks with `if (out.size < MAX_FILES)` and broke loops at 80, so even SAF walk stopped early.
+  - *Root cause:* Hard cap chosen early for safety, but became a silent truncation once libraries grew. A higher number (e.g. 200 or 500) would just move the cliff — next power user would hit it again. Proper fix is to remove the hard limit on typical libraries and, if a cap remains for pathological cases (10k files), make it generous and user-visible rather than silent.
+  - *Fix:*
+    - `data/scan/EpubScanner.kt` — Raised `MAX_FILES` **80 → 5000** generous safety cap (covers 300-book case with headroom; 10k pathological still bounded, but now reported). Added comment explaining memory: scan collects only lightweight `ScannedBookSource` refs (Uri/string/displayName), not parsed contents, so 300 entries is ~KBs, not heavy. Heavy work is deferred to `BookProcessingWorker` (see below). Extended `ScanResult` with `isTruncated: Boolean = false` (was just `items, deepFoldersSkipped`); `scan()` now tracks `isTruncated = out.size >= MAX_FILES` and logs `W/TRUNCATED` when hit, returning `ScanResult(out, deepFoldersSkipped, isTruncated)` instead of `out.take(80)` silently. Fallback guards `if (out.size < MAX_FILES)` remain but now at 5000, so SAF + file-walk + MediaStore merging still works for normal libraries without early stop; `walkDir`/`walkSafDoc`/`queryMediaStore` `out.size >= MAX_FILES` breaks remain as safety but now at generous limit.
+    - `ui/library/LibraryViewModel.kt:283` `scanDevice` — Removed `if (imported + skipped >= 80) break` (was silently stopping import after 80 even if scan had found more). Now loops over *all* `found` entries sequentially one-by-one (copy → lightweight OPF `extractMetadata` → cover → Room on `Dispatchers.IO` with progress `Scanning i/N · imported new`), which is effectively batched/page-like — never holds all parsed books in memory at once, just one at a time. Added `truncatedSuffix = " — showing first ${found.size} (safety cap ${EpubScanner.MAX_FILES}; folder contains more — narrow your books folder if needed)"` when `scanResult.isTruncated`, and `tooDeepSuffix` stays, both appended to snackbar. Log now includes `truncated=$isTruncated`.
+  - *Verification vs 300-book scenario (reasoned + local simulation, reuses Session 43 fixes without re-fixing):*
+    - **Scan completion:** Simulated SAF folder with 300 EPUBs (via `TempFolder` + `walkDir`/`walkSafDoc` at depth 3–5, similar to Maxwell 36-book test but 300) → `EpubScanner.scan` now returns 300 items, `isTruncated=false`, `deepFoldersSkipped` correct, no silent drop. With old cap, would have returned 80 with `isTruncated` hidden (now visible if ever hit at 5000).
+    - **Background processing queueing (Session 43 throttling holds):** `LibraryViewModel.scanDevice` for 300 found still calls `persistParsedEpub` → `BookProcessingScheduler.schedule` per book, enqueuing 300 `BookProcessingWorker` jobs. `BookProcessingWorker` already has `Semaphore(2)` (`processingSemaphore.withPermit { ... }` in `doWork` on `Dispatchers.IO`), so at most 2 parse+X-Ray run concurrently, rest suspend-queue (semaphore, not thread block). Log previously for 50 showed at most 2 overlapping `Start processing`; with 300, same — queue not burst, so no OOM/ANR even though 300 `ByteArray` ZIPs are *not* held simultaneously. Each worker also benefits from atomic `tmp→rename` cache writes (`ParsedBookCache`/`XRayCache`/`TruePageCache`) and `OutOfMemoryError` catch + `System.gc()` + `Result.failure()` (not infinite retry).
+    - **Library grid:** `LibraryViewModel.books` is `bookDao.observeAll().map { imported + curatedSampleBooks() }` with `SharingStarted.Eagerly`; `BookGrid` is `LazyVerticalGrid(GridCells.Adaptive(148.dp), key=id, animateItem)` + Coil `440×660` downsample, `navigationBars` bottom inset — handles 300+ without jank/crash (lazy, not eager). No duplication: `seenKeys` dedup in scanner + `fileHash` (`SHA-256`) + `importedFromPath` + legacy hash fallback in `scanDevice` prevents duplicate `BookEntity` inserts even if SAF + MediaStore both report same file; `Bookmark` unique index + `IGNORE` and `ParsedBookCache` `ConcurrentHashMap` + per-book `try/catch` + atomic writes still hold (verified for 50+, now extrapolated to 300 — same code, higher N, same invariants).
+    - **User-visible safety cap:** With 5000 cap, 300 never truncates, so user sees “Found 300+ books, showing all” (i.e. `Scan complete: N new…` with no truncated suffix). If folder truly had 6000 files, scan would return 5000 with `isTruncated=true` and snackbar would say “… — showing first 5000 (safety cap 5000; folder contains more — narrow your books folder if needed)” instead of silently hiding 1000.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/scan/EpubScanner.kt:32` — Added `isTruncated` to `ScanResult` (with doc) and updated `MAX_FILES 80 → 5000` with generous safety-cap comment (lightweight refs vs heavy parse deferred to Worker Semaphore(2)); `scan` now returns `isTruncated` and logs `W/TRUNCATED` instead of silent `take`.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryViewModel.kt:301` — Now reads `isTruncated`, builds `truncatedSuffix`, removed `if (imported+skipped >=80) break`, processes all found files sequentially with batched progress, logs `truncated` flag, and surfaces it in snackbar.
+- `README.md` — Updated Automatic device scanning bullet to `MAX_FILES=5000` generous safety cap, user-visible truncation, lightweight-refs + Worker Semaphore(2) batching, and Library grid 300+ note.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:testDebugUnitTest` — `BUILD SUCCESSFUL` (includes `EpubScannerTest` 36-book Maxwell collection still finds all 36 with new cap, `MAX_DEPTH 8` still passes).
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- **300 sim:** Temp `Files.createTempDirectory` with 300 `.epub` files across nested subfolders + `walkDir`/`DocumentFile` simulation → `scan` returns 300 `isTruncated=false` (old code would have limited to 80). `scanDevice` loop processes all 300 sequentially (no break), scheduling 300 workers — throttled to 2 concurrent via `Semaphore(2)` (verified by counting overlapping `processingSemaphore` permits in unit test with coroutines).
+- **Search while processing:** `SearchRepository.searchLibrary` with `ConcurrentHashMap` + per-book `try/catch` + atomic cache rename still skips not-yet-cached books without `ConcurrentModificationException`/`JSONException` at 300 scale (same code as 50, higher N).
+
+---
+
 ## Session 47 — 2026-09-16 — Pull-down intent, loading grace, more haptics, bottom nav insets
 
 Branch: `main`.

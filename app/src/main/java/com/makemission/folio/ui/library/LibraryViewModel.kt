@@ -300,9 +300,13 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 }
                 val found = scanResult.items
                 val deepFoldersSkipped = scanResult.deepFoldersSkipped
+                val isTruncated = scanResult.isTruncated
                 val tooDeepSuffix = if (deepFoldersSkipped > 0) {
                     val folderWord = if (deepFoldersSkipped == 1) "1 folder was" else "$deepFoldersSkipped folders were"
                     " ($folderWord too deep to search)"
+                } else ""
+                val truncatedSuffix = if (isTruncated) {
+                    " — showing first ${found.size} (safety cap ${EpubScanner.MAX_FILES}; folder contains more — narrow your books folder if needed)"
                 } else ""
 
                 if (found.isEmpty()) {
@@ -388,14 +392,20 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                         // Parse failed or empty
                         skipped++
                     }
-                    // Cooperative yield to keep UI responsive
-                    if (imported + skipped >= 80) break
+                    // Cooperative yield: loop processes one file at a time (copy → lightweight
+                    // OPF metadata → cover → Room) on Dispatchers.IO, so holding 300
+                    // ScannedBookSource refs in memory is trivial (KBs, not parsed books).
+                    // Heavy parse + X-Ray are deferred per-book to BookProcessingWorker,
+                    // which throttles to 2 concurrent via Semaphore(2) and queues the rest
+                    // — 300 queued is a queue, not a burst, so no OOM/ANR (Session 43 fixes).
+                    // No artificial 80-item cap: all found files are processed in batches,
+                    // updating scanProgress each iteration so the UI stays responsive.
                 }
                 _scanProgress.value = null
-                FolioLogger.i("Scan", "Scan done found=${found.size} imported=$imported skipped=$skipped deepFoldersSkipped=$deepFoldersSkipped")
+                FolioLogger.i("Scan", "Scan done found=${found.size} imported=$imported skipped=$skipped deepFoldersSkipped=$deepFoldersSkipped truncated=$isTruncated")
                 when {
-                    imported > 0 -> _scanResult.emit("Scan complete: $imported new book(s) added${if (skipped > 0) ", $skipped already in library" else ""}$tooDeepSuffix.")
-                    else -> _scanResult.emit("Scan complete: no new books (${found.size} found, all already imported)$tooDeepSuffix.")
+                    imported > 0 -> _scanResult.emit("Scan complete: $imported new book(s) added${if (skipped > 0) ", $skipped already in library" else ""}$tooDeepSuffix$truncatedSuffix.")
+                    else -> _scanResult.emit("Scan complete: no new books (${found.size} found, all already imported)$tooDeepSuffix$truncatedSuffix.")
                 }
             } catch (e: Exception) {
                 FolioLogger.e("Scan", "Scan failed: ${e.message}", e)

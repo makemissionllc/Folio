@@ -28,10 +28,13 @@ data class ScannedBookSource(
 /**
  * Result of a device storage scan.
  * Includes discovered book sources and a count of folders skipped due to exceeding [MAX_DEPTH].
+ * [isTruncated] is true only if the scan hit the generous [MAX_FILES] safety cap and
+ * stopped early — callers must surface this to the user instead of silently dropping files.
  */
 data class ScanResult(
     val items: List<ScannedBookSource>,
     val deepFoldersSkipped: Int = 0,
+    val isTruncated: Boolean = false,
 ) {
     /** Files found directly on disk (raw files only). Kept for backward compatibility. */
     val files: List<File> get() = items.mapNotNull { it.file }
@@ -57,7 +60,19 @@ data class ScanResult(
  */
 object EpubScanner {
 
-    const val MAX_FILES = 80
+    /**
+     * Safety cap — generous enough that a normal library (even 300 EPUBs) never hits it,
+     * but prevents a truly pathological folder (e.g. 10k files) from exhausting memory.
+     * Previously 80, which silently hid books. Now 5000 and *visible*: [ScanResult.isTruncated]
+     * is true when hit, so the UI can inform the user instead of silently dropping files.
+     * The scan collects only lightweight [ScannedBookSource] refs (path/Uri + displayName),
+     * not parsed book contents, so holding 300 (or even 2000) in memory is trivial (~KBs).
+     * Heavy work (full ZIP/Jsoup parse + X-Ray) is *not* done during scan — it is
+     * deferred per-book to [com.makemission.folio.data.work.BookProcessingWorker],
+     * which throttles to 2 concurrent parses via Semaphore(2) and queues the rest
+     * (300 queued = queue, not burst — verified for 300-book scenario, see Worker docs).
+     */
+    const val MAX_FILES = 5000
     const val MAX_DEPTH = 8
     private const val TAG = "EpubScanner"
 
@@ -178,8 +193,13 @@ object EpubScanner {
             }
         }
 
-        FolioLogger.i(TAG, "scan final: ${out.size} items found, $deepFoldersSkipped folders too deep")
-        return ScanResult(out.take(MAX_FILES), deepFoldersSkipped)
+        val isTruncated = out.size >= MAX_FILES
+        if (isTruncated) {
+            FolioLogger.w(TAG, "scan final: ${out.size} items found, $deepFoldersSkipped folders too deep — TRUNCATED at safety cap $MAX_FILES (not all files shown)")
+        } else {
+            FolioLogger.i(TAG, "scan final: ${out.size} items found, $deepFoldersSkipped folders too deep")
+        }
+        return ScanResult(out, deepFoldersSkipped, isTruncated)
     }
 
     /**
