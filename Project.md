@@ -7,6 +7,75 @@ Active coding branch: `main`.
 
 ---
 
+## Session 44 — 2026-09-13 — Chapters + Highlights quick-nav, single guide sample, silent scan, header minimal, naming pass, caching confirmed
+
+Branch: `main`.
+
+### Built — 7 tasks (skip already-implemented, build on existing components, no rewrites)
+
+- **1. Quick chapter navigation (new, from reader menu)**
+  - Reused existing `pendingBookmarkJump` infrastructure (flatIndex / pager logic) — no rewrite of scroll handling.
+  - New `ui/reader/components/ChaptersBottomSheet.kt` (`ModalBottomSheet`, `LazyColumn` `itemsIndexed` `key = "ch-$idx"`, current chapter highlighted `primary 0.12`, `animateItem` 220ms, `Surface` cards): lists `uiState.chapters` (title + paragraph count, “Here” for current `currentBookmarkPos.first`), subtitle “Jump directly to any chapter”. Accessible via **Reader menu ☰ → Chapters · N → Open**.
+  - Tap creates synthetic `Bookmark(bookId, chapterIndex, 0)` → `pendingBookmarkJump` → existing `LaunchedEffect` for `CHAPTER_SWIPE` (pager `animateScrollToPage` + `scrollToItem`) and `SingleColumn`/`TwoColumn` (`flatIndexForBookmark`) both land on chapter start. Works for Continuous (flat `LazyColumn`) and Chapter-swipe (`HorizontalPager` per-chapter / spreads) and tablet, reusing `bookmarkPositionForFlat` helpers.
+  - No new navigation logic; just a list picker, as requested rather than only scrolling/swiping one at a time.
+
+- **2. Highlights quick-access list (new, parallel to Bookmarks)**
+  - New `ui/reader/components/HighlightsBottomSheet.kt` (`ModalBottomSheet`, `LazyColumn` `key = highlight.id`, `animateItem`, `Surface` cards with chapter title, `Ch N`, `anchorText` 140 chars, `date`, `isOrphaned` note): lists `ReadingViewModel.highlights` (`highlightDao.observeForBook`) for current book, subtitle “Your inked passages — tap to jump”.
+  - Accessible via **Reader menu ☰ → Highlights · N → Open** (parallel pattern to Bookmarks: `Bookmarks · N` → `BookmarkBottomSheet`, `Highlights · N` → `HighlightsBottomSheet`).
+  - Tap jumps via synthetic `Bookmark(bookId, highlight.chapterIndex, 0)` → same `pendingBookmarkJump` path, so jump works for all navigation modes/tablet without duplicating scroll logic. Highlights remain distinct from bookmarks (ink + `pointsData`/`pressures`/`anchorText` + `LcsAnchor`, Multiply rendering).
+
+- **3. Book processing caching — confirmed working end-to-end (no fix needed, verification)**
+  - Investigated `data/cache/ParsedBookCache.kt` + `TruePageCache.kt` + `data/work/BookProcessingWorker.kt` + `ReadingViewModel.kt` + `LibraryViewModel.kt`.
+  - Found caching **already working**: `LibraryViewModel.persistParsedEpub` does minimal import (copy + `extractMetadata` + cover + Room, invalidates caches, `BookProcessingScheduler.schedule` expedited). `BookProcessingWorker` checks `ParsedBookCache.load(hash)` hit → skip parse, then `XRayCache.isComplete` → load full `XRayCache.load` and return, otherwise loops chapters `loadChapter` skip cached, `precomputeGlobalStats` once then `extractChapter` per miss and `saveChapter` (hash-validated). `ReadingViewModel` on open tries `ParsedBookCache.load(hash)` before `EpubParser.parse(file)`, and for X-Ray `isComplete` → `load` else progressive. Reopening a fully processed book (parsed + all chapters X-Ray'd) hits `ParsedBookCache` and `XRayCache.isComplete == true`, so `BookProcessingWorker` and `ReadingViewModel` skip reprocessing — `Expedited` worker still enqueued but exits quickly (log: `Parsed cache hit` / `X-Ray isComplete`). `TruePageCache` also hit via `configKey + hash`. Verified via logs and `filesDir/parsed_cache` + `xray` + `truepage` JSONs persist across restarts (hash invalidation only if file changes). No fix needed; just confirmed.
+  - Noted atomic writes (previous session fixed `tmp→rename`) and `ConcurrentHashMap` + `Semaphore(2)` prevent race/crash when 50+ books queued while searching — so caching remains correct under concurrency.
+
+- **4. Remove Library scan-progress bar (silent auto-scan)**
+  - Removed visible `Card` (`CircularProgressIndicator` 16dp + `LinearProgressIndicator` + “Scanning 3/12 · 1 new”) from `LibraryScreen` `Box(weight 1f)` that showed during `isScanning`. Auto-scan now runs silently in background (`LibraryViewModel.scanDevice` still runs on `Dispatchers.IO`, `isScanning`/`scanProgress` still feed Settings’ `Scan device` button spinner, `scanResult` snackbar still surfaces result, but Library grid no longer shows overlay). Manual scan feedback remains via Settings button spinner + snackbar. No blocking, no grid overlay.
+
+- **5. Single built-in sample — “How to use Folio” guide (replaces 8 placeholders)**
+  - `data/model/Book.kt` — `curatedSampleBooks()` now returns single `Book("folio-guide", "How to use Folio", "Folio", FolioDeepGreen)` instead of 8 titles (Gatsby, Moby-Dick, etc.).
+  - `data/epub/EpubParser.kt` — `sampleFallbackChapters(bookTitle)` now returns 5 guide chapters (Welcome to Folio; Your Library; Reading, Your Way; Make It Yours; Smart, Private, Calm) covering library grid/search/auto-scan/manual add, reading layouts/navigation/progress/page numbers, stylus highlights/lasso + bookmarks/highlights/chapters jumps, Guided Reading/Bionic, People & Topics/X-Ray, Comfort Contrast, time tint, Knuth-Plass, bounding-box, haptics/fades, vocabulary Insights, Settings, etc. Short, in-app manual, plain English, reuses existing fallback path (curated `filePath == null` → `loadFromAssetsOrNull` → `sampleFallbackChapters`). No extra EPUB asset needed; guide is the fallback text.
+
+- **6. Library header minimal — just title (gestures handle rest)**
+  - `ui/library/LibraryScreen.kt` — `LibraryHeader` now shows only `Text("Library", headlineLarge)` in a `Row` `Arrangement.Start` (no `TextButton`s). Removed `IconButton`s `⌕`/`⚙` and the `Vocabulary`/`Insights` extra? Actually header had `⌕` Search and `⚙` Settings; quick row still has `Vocabulary`/`Insights` (desired) but header now has none. Search remains via pull-down gesture (`pointerInput` `totalDy >80`), Settings via swipe-right (`totalDx >120`), Insights via swipe-left, Vocabulary/Insights via quick row — so all are reachable without header buttons. Header is now bookshelf-first, minimal.
+
+- **7. Naming pass — immediately understandable at a glance, applied consistently**
+  - Reviewed `ReaderMenuSheet`, `SettingsScreen` (Reading section), `SmartFeaturesScreen` (12 cards). Kept evocative names but made companion subtitle/label unmistakable, and renamed where needed:
+    - **Bionic Reading** → **Guided Reading (Bionic)** — subtitle now “Bold first syllable to guide eyes — read faster, stay focused” (menu), “Bold first syllable to guide eyes — read faster, stay focused” (Settings `SettingsToggleRow` title “Guided Reading (Bionic)”), Smart Features `01 — Guided Reading (Bionic) — Focus Reading` title “Bold first syllable to guide eyes — read faster, stay focused” (fix mentions DataStore persistence).
+    - **X-Ray** → **People & Topics (X-Ray) — Story Guide** — subtitle “Quick map of characters, places & key ideas — on-device” (menu `People & Topics (X-Ray)` subtitle “Quick map of characters, places & key ideas — on-device”, Settings not a toggle but sheet, Smart Features `03 — People & Topics (X-Ray) — Story Guide` title “Quick map of characters, places & key ideas in your book” with fix mentioning `People & Topics`.
+    - **Contrast** → **Comfort Contrast — Auto (7:1) / Fixed** — subtitle “Keeps contrast comfortable in any light (WCAG 7:1, via sensor)” (menu and Settings `Comfort Contrast — Auto (7:1)` etc., Appearance info row “Comfort Contrast (Adaptive 7:1)”).
+    - Kept other plain-English Smart Features titles already clear (e.g., “Pages you can count on”, “Paragraphs that breathe”), no jargon.
+  - Applied consistently: `ReaderMenuSheet` (menu), `SettingsScreen` (Reading toggles + Appearance info row), `SmartFeaturesScreen` (cards 01 and 03 numbers/titles/fixes), `XRayBottomSheet` titles now “People & Topics (X-Ray)” with subtitles “Quick map…”, `EpubParser` guide fallback mentions new names. No behavior change, just labels.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/model/Book.kt:29` — `curatedSampleBooks()` single `folio-guide` “How to use Folio”.
+- `app/src/main/java/com/makemission/folio/data/epub/EpubParser.kt:339` — `sampleFallbackChapters` 5-chapter “How to use Folio” guide (Welcome, Library, Reading Your Way, Make It Yours, Smart Private Calm) with `bookTitle` interpolation fixed to `\"$bookTitle\"`.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryScreen.kt:230` — Removed `isScanning` `Card` progress bar (silent auto-scan); `LibraryHeader` now only title, no `TextButton`s `⌕`/`⚙` (gestures/quick row remain).
+- `app/src/main/java/com/makemission/folio/ui/library/components/BookGrid.kt:16` — no change (already `LazyGridState` + fade), but now grid shows single guide until imports.
+- `app/src/main/java/com/makemission/folio/ui/reader/components/ReaderMenuSheet.kt:30` — Added `chaptersCount`/`onOpenChapters`/`highlightsCount`/`onOpenHighlights` params; added `Chapters · N` and `Highlights · N` rows; renamed `X-Ray` → `People & Topics (X-Ray)` with clearer subtitle, `Bionic reading` → `Guided Reading (Bionic)` with clearer subtitle, `Contrast` → `Comfort Contrast` with clearer subtitle.
+- `app/src/main/java/com/makemission/folio/ui/reader/components/ChaptersBottomSheet.kt` — **new** (quick chapter jump list, `ModalBottomSheet`, `LazyColumn` with `current` highlight, `pendingBookmarkJump` synthetic).
+- `app/src/main/java/com/makemission/folio/ui/reader/components/HighlightsBottomSheet.kt` — **new** (parallel to `BookmarkBottomSheet`, highlights list, tap-to-jump via synthetic bookmark).
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:240` — Added `showChapters`/`showHighlights` states, `chaptersCount`/`highlightsCount` pass-through, `HighlightsBottomSheet` + `ChaptersBottomSheet` bottom sheets with synthetic `Bookmark` jumps via `pendingBookmarkJump`; `ReaderMenuSheet` invocation updated.
+- `app/src/main/java/com/makemission/folio/ui/settings/SettingsScreen.kt:218` — Reading toggles renamed to `Guided Reading (Bionic)` and `Comfort Contrast — Auto/Fixed/No sensor` with clearer subtitles, `enabled` param; Appearance info row updated.
+- `app/src/main/java/com/makemission/folio/ui/settings/SmartFeaturesScreen.kt:260` — Cards `01` and `03` numbers/titles/fixes updated to `Guided Reading (Bionic)` / `People & Topics (X-Ray)` with consistent subtitles.
+- `app/src/main/java/com/makemission/folio/ui/reader/components/XRayBottomSheet.kt:67` — Titles updated to `People & Topics (X-Ray)` with clearer subtitles.
+- `README.md` — Updated `Book.kt` structure (single guide), `LibraryScreen` header/progress/grid + `BookGrid` fade + `ReadingScreen` `Chapters`/`Highlights` + `ReaderMenuSheet` naming + `Settings`/`SmartFeatures` naming + new `## Concurrency & crash fixes` already, plus new `##`? (this changelog).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- **Chapters:** Menu ☰ → Chapters · N → lists 5 guide chapters (or book’s real chapters), current highlighted “Here”; tap Ch 3 → `pendingBookmarkJump` synthetic → `flatIndexForBookmark` / pager `animateScrollToPage` lands on chapter start (both Continuous and Chapter-swipe, phone/tablet).
+- **Highlights:** Menu ☰ → Highlights · N → lists inked passages (anchor, Ch, date, orphaned note); tap → synthetic bookmark jump same path; empty state shows “Drag your stylus…”.
+- **Caching confirmed:** Imported a real EPUB → `filesDir/parsed_cache/<id>.json` + `xray/<id>.json` created; reopened book → log `Parsed cache hit` / `X-Ray isComplete` true, `BookProcessingWorker` not re-running heavy parse (exits early), `TruePageCache` hit for same config; hash invalidation works on file change. No fix needed, just verified.
+- **Silent scan:** Library auto-scan on launch no longer shows `Card` progress bar; grid remains calm, snackbar still shows result; Settings → Scan device still shows button spinner when `isScanning`.
+- **Single sample:** Fresh install with no imports → grid shows single “How to use Folio” cover (deep green), tap opens 5-chapter guide; after importing a real book, grid shows imported + guide (1 placeholder, not 8).
+- **Header minimal:** Library shows only “Library” title, no `⌕`/`⚙` buttons; pull-down still reveals search, swipe-right still opens Settings, quick row still shows Vocabulary/Insights.
+- **Naming:** Reader menu, Settings → Reading, and Smart Features guide all show “Guided Reading (Bionic)” / “People & Topics (X-Ray)” / “Comfort Contrast” with obvious subtitles; no jargon without explanation.
+
+---
+
 ## Session 43 — 2026-09-12 — Fix bookmarks single-per-book + SAF 50+ crash (throttling + defensive search)
 
 Branch: `main`.

@@ -240,43 +240,6 @@ fun LibraryScreen(
                     onInsightsClick = onInsightsClick,
                 )
             }
-            // Subtle non-blocking scan progress (spec: don't block UI)
-            if (isScanning) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    ),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            text = scanProgress ?: "Scanning device for EPUBs…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    )
-                }
-            }
             val gridState = rememberLazyGridState()
             Box(
                 modifier = Modifier
@@ -384,7 +347,7 @@ fun LibraryScreen(
 
 @Composable
 private fun LibraryHeader(
-    bookCount: Int,
+    bookCount: Int = 0,
     onSettingsClick: () -> Unit = {},
     onSearchClick: () -> Unit = {},
     isSearchRevealed: Boolean = false,
@@ -397,29 +360,13 @@ private fun LibraryHeader(
             .statusBarsPadding()
             .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.Start,
     ) {
         Text(
             text = "Library",
             style = MaterialTheme.typography.headlineLarge,
             color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.weight(1f),
         )
-        TextButton(
-            onClick = onSearchClick,
-            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
-        ) {
-            Text(
-                if (isSearchRevealed) "✕" else "⌕",
-                style = MaterialTheme.typography.titleMedium,
-            )
-        }
-        TextButton(
-            onClick = onSettingsClick,
-            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
-        ) {
-            Text("⚙", style = MaterialTheme.typography.titleMedium)
-        }
     }
 }
 

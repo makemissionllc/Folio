@@ -206,6 +206,8 @@ private fun ReadingScreenContent(
     var chromeVisible by remember { mutableStateOf(true) }
     var showXRay by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
+    var showHighlights by remember { mutableStateOf(false) }
+    var showChapters by remember { mutableStateOf(false) }
     var showInBookSearch by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var lassoCapture by remember { mutableStateOf<LassoCapture?>(null) }
@@ -1024,6 +1026,10 @@ private fun ReadingScreenContent(
             },
             onOpenBookmarks = { showBookmarks = true },
             onToggleSearch = { showInBookSearch = !showInBookSearch },
+            chaptersCount = uiState.chapters.size,
+            onOpenChapters = { showChapters = true },
+            highlightsCount = highlights.size,
+            onOpenHighlights = { showHighlights = true },
             onDismiss = { showMenu = false },
         )
     }
@@ -1045,6 +1051,40 @@ private fun ReadingScreenContent(
             },
             onBookmarkDelete = onDeleteBookmark,
             onDismiss = { showBookmarks = false },
+        )
+    }
+    if (showHighlights) {
+        com.makemission.folio.ui.reader.components.HighlightsBottomSheet(
+            highlights = highlights,
+            chapters = uiState.chapters,
+            onHighlightClick = { hl ->
+                showHighlights = false
+                // Jump to highlight's chapter (paragraph 0, or first para if we had position)
+                val synthetic = com.makemission.folio.data.db.entity.Bookmark(
+                    bookId = uiState.bookId,
+                    chapterIndex = hl.chapterIndex,
+                    paragraphIndex = 0,
+                    previewText = hl.anchorText.take(120),
+                )
+                pendingBookmarkJump = synthetic
+            },
+            onDismiss = { showHighlights = false },
+        )
+    }
+    if (showChapters) {
+        com.makemission.folio.ui.reader.components.ChaptersBottomSheet(
+            chapters = uiState.chapters,
+            currentChapterIndex = currentBookmarkPos.first,
+            onChapterClick = { chIdx ->
+                showChapters = false
+                val synthetic = com.makemission.folio.data.db.entity.Bookmark(
+                    bookId = uiState.bookId,
+                    chapterIndex = chIdx,
+                    paragraphIndex = 0,
+                )
+                pendingBookmarkJump = synthetic
+            },
+            onDismiss = { showChapters = false },
         )
     }
 }

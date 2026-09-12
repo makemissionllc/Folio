@@ -216,8 +216,8 @@ fun SettingsScreen(
                     val adaptiveContrastEnabled by repo.adaptiveContrastEnabled.collectAsState(initial = false)
                     val hasSensor = remember { hasAmbientLightSensor(context) }
                     SettingsToggleRow(
-                        title = "Bionic reading",
-                        subtitle = "Bold first syllable",
+                        title = "Guided Reading (Bionic)",
+                        subtitle = "Bold first syllable to guide eyes — read faster, stay focused",
                         checked = bionicEnabled,
                         onCheckedChange = { checked ->
                             scope.launch { repo.setBionicEnabled(checked) }
@@ -225,8 +225,8 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     SettingsToggleRow(
-                        title = if (!hasSensor) "Contrast — No sensor" else if (adaptiveContrastEnabled) "Contrast — Auto (7:1)" else "Contrast — Fixed",
-                        subtitle = "Adaptive via light sensor",
+                        title = if (!hasSensor) "Comfort Contrast — No sensor" else if (adaptiveContrastEnabled) "Comfort Contrast — Auto (7:1)" else "Comfort Contrast — Fixed",
+                        subtitle = "Keeps contrast comfortable in any light (WCAG 7:1, via sensor)",
                         checked = adaptiveContrastEnabled && hasSensor,
                         enabled = hasSensor,
                         onCheckedChange = { checked ->
@@ -475,8 +475,8 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     SettingsInfoRow(
-                        title = "Adaptive contrast",
-                        subtitle = "Reader → Contrast Auto",
+                        title = "Comfort Contrast (Adaptive 7:1)",
+                        subtitle = "Reader → Comfort Contrast — Auto",
                     )
                 }
             }

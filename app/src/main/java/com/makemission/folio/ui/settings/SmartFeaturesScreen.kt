@@ -258,10 +258,10 @@ private fun FeatureBlock(
 @Composable
 private fun rememberFeatures(): List<SmartFeature> = listOf(
     SmartFeature(
-        number = "01 — Guided reading",
-        title = "Words that gently guide your eyes",
+        number = "01 — Guided Reading (Bionic) — Focus Reading",
+        title = "Bold first syllable to guide eyes — read faster, stay focused",
         problem = "Long lines can tire your eyes — it’s easy to slip, re-read the same bit, or lose pace without noticing.",
-        fix = "Folio softly emphasizes the first part of each word, giving your eyes a calm place to land as you sweep across the line. You can turn it on or off from the reading bar.",
+        fix = "Folio softly emphasizes the first part of each word (Guided/Bionic reading), giving your eyes a calm place to land as you sweep across the line. Turn it on/off from the reading menu (☰) or Settings → Reading — it persists across restarts.",
         why = "You keep momentum without effort. The page feels lighter, and you stay inside the thought instead of chasing the text."
     ),
     SmartFeature(
@@ -272,10 +272,10 @@ private fun rememberFeatures(): List<SmartFeature> = listOf(
         why = "You can decide — one more chapter or a pause — without guessing. The number feels human, not mechanical."
     ),
     SmartFeature(
-        number = "03 — Who’s who and what matters",
-        title = "A quiet guide to the people and ideas in your book",
+        number = "03 — People & Topics (X-Ray) — Story Guide",
+        title = "Quick map of characters, places & key ideas in your book",
         problem = "In a long story it’s easy to forget who someone is or why a word keeps appearing, and flicking backwards breaks flow.",
-        fix = "As you open a book, Folio reads it right here on your device and notes which names and ideas appear often in one chapter but rarely elsewhere. It gathers them into a small sheet you can open with a tap.",
+        fix = "As you open a book, Folio reads it right here on your device (X-Ray / People & Topics) and notes which names and ideas appear often in one chapter but rarely elsewhere. It gathers them into a small sheet you can open from the reading menu (☰) with a tap — on-device, no network.",
         why = "You get your bearings without leaving the page. The story stays continuous, and you don’t have to hunt."
     ),
     SmartFeature(

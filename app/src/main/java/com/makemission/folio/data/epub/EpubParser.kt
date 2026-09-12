@@ -336,60 +336,47 @@ object EpubParser {
 
     // ---- Fallback content (no file) ----
 
+    // Single built-in sample — "How to use Folio" guide (replaces 8 placeholder titles)
     fun sampleFallbackChapters(bookTitle: String): List<EpubChapter> = listOf(
         EpubChapter(
-            title = "Chapter 1 — Arrival",
+            title = "Welcome to Folio",
             paragraphs = listOf(
-                "The morning light fell across the Folio library in a warm, paper-coloured wash. " +
-                    "On the far wall the deep-green shelves held a careful, editorial grid — each " +
-                    "spine a quiet promise. The air smelled faintly of ink and cedar.",
-                "Mara set her satchel down and ran a finger along the nearest row. She was looking " +
-                    "for a single volume, a slim quarto bound in burgundy cloth. The catalogue said it " +
-                    "had arrived yesterday, but the library — like all good libraries — preferred to " +
-                    "make its guests look a little.",
-                "Outside, the city was already awake. Trams hummed and a delivery van reversed with " +
-                    "a soft, insistent beep. Inside, the room kept its own time, measured in page " +
-                    "turns and the amber tick of the reading lamp.",
-                "She found the book on the second shelf, exactly where she had not thought to look. " +
-                    "Its title was stamped in a heavy sans that caught the light. She lifted it and " +
-                    "felt the familiar, satisfying weight of paper.",
+                "Folio is a quiet, offline reader that feels like a well-made book. Everything lives on your device — your books, highlights, bookmarks, and vocabulary — with no cloud, no account, and no network. This short guide is your built-in sample: it shows how Folio works while you read it.",
+                "On phones Folio is a single, immersive column; on tablets in landscape it opens into a two-page spread with a book-spine gutter. Your place is remembered by paragraph, not just chapter, so reopening lands exactly where you left off.",
             ),
         ),
         EpubChapter(
-            title = "Chapter 2 — The Spread",
+            title = "Your Library",
             paragraphs = listOf(
-                "On a tablet the book opened into a spread — two pages facing one another like an " +
-                    "open codex. Mara turned it to landscape and the text reflowed, columns squaring " +
-                    "themselves with the care of a pressman. No widows, no orphans; the margins breathed.",
-                "The serif ran clean and tall, generous in its leading. On a phone the same chapter " +
-                    "fell into a single, immersive column, edge-to-edge, the Folio ground a deep " +
-                    "green that held the eye without glare. The amber rule at the top marked her place, " +
-                    "a thin, warm line.",
-                "She read on. Each paragraph followed the last with the patience of good typesetting — " +
-                    "micro-kerning eased and tightened by invisible hands, so the block sat square and " +
-                    "still. It was the kind of detail most readers never notice, which is precisely " +
-                    "why it matters.",
-                "Somewhere, deep in the app's quiet storage, the last line she had read was being " +
-                    "remembered — chapter, paragraph, the small, faithful coordinates of a bookmark " +
-                    "she would never have to set herself.",
-                "For \"$bookTitle,\" at least, the reading had begun.",
+                "The Library is an editorial grid of covers (2:3, 16dp rounded, memoized 440×660 with Coil). Pull down to reveal search — Folio looks only inside your own books, ranking highlights and bookmarks first, then titles and text. Your search never leaves the device.",
+                "Books find themselves: Folio can auto-scan Downloads, Documents, or a folder you choose via Storage Access Framework (SAF) — with hash and path dedup so nothing duplicates. You can also tap a book’s cover to open it, long-press for Remove / Info / Reset progress, or add one manually via Settings → Library → Add book manually (a quiet fallback, not a big button). If you open an EPUB from Files, email, or browser, Folio appears as a handler and imports with the same pipeline.",
+                "Swipe right anywhere on the grid to open Settings, swipe left to see Insights — your reading journal. Need more? The quick row shows Vocabulary due and an Insights teaser without turning the Library into a dashboard.",
             ),
         ),
         EpubChapter(
-            title = "Chapter 3 — Marginal Note",
+            title = "Reading, Your Way",
             paragraphs = listOf(
-                "Every good book eventually collects marginalia. Mara had once kept a notebook for the " +
-                    "words she looked up — strange, lovely words that arrived like strangers and stayed " +
-                    "like friends. The notebook was lost now, but the habit remained.",
-                "Folio, she had been told, kept its own, quieter ledger: where she paused, what she " +
-                    "returned to, how long a chapter held her. Not for a cloud, not for a model — for " +
-                    "the paper itself. The progress lived in a small local store, a Room of its own.",
-                "The system was, by design, boring. A table, a primary key, a timestamp. No network " +
-                    "call would ever carry the shape of her reading elsewhere. It was the most editorial " +
-                    "choice of all: privacy as craft.",
-                "She closed the volume, but not quite. A ribbon — amber, of course — held the place. " +
-                    "Tomorrow there would be more pages, more light, more of the patient, two-column " +
-                    "spread when she tilted the tablet. For now, the shelf waited.",
+                "Open any book to find a clean serif body (17/27) and heavy sans titles, squared-off paragraphs (Knuth-Plass micro-kerning, no orphans or widows), and true page numbers (Page X of Y) measured for your screen and cached per configuration.",
+                "At the top you’ll see only Back and a menu (☰). Tap the text to hide chrome for distraction-free reading; a thin amber progress lets you seek. If you prefer, keep the bar always visible via Settings → Reading → Always show progress bar. Volume keys turn pages, even one-handed.",
+                "Two navigation styles live under Settings → Reading and via in-reader AnimatedContent: Continuous (whole-book vertical scroll) and Chapter swipe (vertical within a chapter, horizontal swipe between chapters; tablet shows spreads). Folio remembers your choice.",
+                "Open the menu (☰) to jump quickly: Chapters lists every chapter for instant jumps; Bookmarks and Highlights list what you’ve saved (tap to jump); Search in book looks within this book only; People & Topics (X-Ray) maps characters and ideas; Guided Reading (Bionic) bolds the first syllable to guide scanning; Comfort Contrast (Adaptive 7:1) eases colors with ambient light. All toggles in the menu are the same ones in Settings → Reading, and they persist across restarts.",
+            ),
+        ),
+        EpubChapter(
+            title = "Make It Yours",
+            paragraphs = listOf(
+                "With an Apple Pencil or stylus, just draw — no toolbar. Folio inks with true Multiply in warm amber so text stays crisp, varying width with pressure and tilt. Close a loop to lasso: over an image it crops the diagram to full width (bounding-box detection, cached); over text it copies the words (on-device OCR) — both private, offline.",
+                "Bookmarks are not highlights: a bookmark just tucks your place (chapter + paragraph) with a 120-char preview, shown in a bottom sheet. You can keep many per book — distinct chapter/paragraph positions coexist; toggling the same spot removes only that exact bookmark (now enforced with a unique index on (bookId, chapterIndex, paragraphIndex)). Highlights, by contrast, store ink strokes plus an 80-char anchor and are reattached with LCS if a file is updated, so they don’t get lost.",
+                "Double-tap any word for a definition from the 12k offline WordNet guide (113 KB gz). Select a phrase and tap Explain for the same. Each new word can be saved for spaced repetition: Folio uses SM-2 on device, bringing words back just before you’d forget. Review when the Library badge says ‘N due.’",
+                "Everything you mark — highlights, bookmarks, vocabulary — feeds Insights, a quiet ledger (Shelf, Marginalia, Lexicon, Rhythm) that simply counts what already exists, with no extra tracking. No charts, just thoughtful numbers.",
+            ),
+        ),
+        EpubChapter(
+            title = "Smart, Private, Calm",
+            paragraphs = listOf(
+                "Folio’s help stays on device: X-Ray (TF-IDF per chapter, progressive and prioritized for the chapter you’re on), True Pages, line breaking, LCS re-anchoring, contrast (WCAG 7:1 via AdaptiveContrastEngine + AmbientLightSensor, throttled), evening warmth (TimeTintEngine, system clock, gradual), bounding-box diagrams, search, dictionary, and velocity-based time-left (Rolling-Weight EMA) — all without a network. Heavy work (full parse + X-Ray) runs in WorkManager chapter-by-chapter (semaphore 2 for 50+ imports) with atomic cache writes, so it never blocks your reading and doesn’t crash while you search.",
+                "Polish is editorial, not flashy: haptics tick only at chapter boundaries, scroll fades feather the top (36dp) and bottom (40dp) with a 3-stop gradient so text never hard-cuts (now reused for Library, Settings, Insights, Vocabulary), micro-animations stagger the grid and sheets, and navigation slides and Crossfades (360ms) feel premium. Dark palettes (Folio Green, OLED True Black, Warm Sepia, Cool Slate — Slate default) plus Light/Dark/Auto and evening warmth keep the page comfortable anywhere.",
+                "Try it: swipe, search, highlight, bookmark, open Chapters or Highlights from the menu, and pick a dark palette in Settings → Appearance. When you’re ready for your own books, use Auto-scan or Add book manually. For help, see Settings → Smart Features for a plain-English guide to the twelve quiet helpers. Happy reading — \"$bookTitle\" is just the start.",
             ),
         ),
     )

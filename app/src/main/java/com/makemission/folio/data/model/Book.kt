@@ -25,16 +25,9 @@ data class Book(
     val coverImagePath: String? = null,
 )
 
-/** Curated seed — shows the grid with editorial variety until real storage exists. */
+/** Single built-in sample — a short "How to use Folio" guide/manual (replaces 8 placeholder titles). */
 fun curatedSampleBooks(): List<Book> = listOf(
-    Book("1", "The Great Gatsby", "F. Scott Fitzgerald", FolioBurgundy),
-    Book("2", "Moby-Dick", "Herman Melville", FolioDeepGreen),
-    Book("3", "Pride and Prejudice", "Jane Austen", FolioBurgundyContainer),
-    Book("4", "Invisible Cities", "Italo Calvino", FolioDeepGreenContainer),
-    Book("5", "The Odysseys", "Homer", Color(0xFF7A3B2E)),
-    Book("6", "On Writing Well", "William Zinsser", Color(0xFF9A6B0A)),
-    Book("7", "Dune", "Frank Herbert", FolioDeepGreen),
-    Book("8", "Beloved", "Toni Morrison", FolioBurgundy),
+    Book("folio-guide", "How to use Folio", "Folio", FolioDeepGreen),
 )
 
 /** Palette fallback for books that don't carry an explicit cover color. */

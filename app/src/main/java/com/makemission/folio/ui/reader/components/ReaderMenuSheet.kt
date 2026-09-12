@@ -40,6 +40,10 @@ fun ReaderMenuSheet(
     onToggleBookmark: () -> Unit,
     onOpenBookmarks: () -> Unit,
     onToggleSearch: () -> Unit,
+    chaptersCount: Int = 0,
+    onOpenChapters: () -> Unit = {},
+    highlightsCount: Int = 0,
+    onOpenHighlights: () -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -70,37 +74,51 @@ fun ReaderMenuSheet(
                 actionLabel = "Open",
                 onClick = { onToggleSearch(); onDismiss() },
             )
+            // Chapters — quick jump (new)
+            MenuActionRow(
+                title = if (chaptersCount == 0) "Chapters" else "Chapters · $chaptersCount",
+                subtitle = "Jump directly to any chapter",
+                actionLabel = "Open",
+                onClick = { onOpenChapters(); onDismiss() },
+            )
+            // Highlights — quick-access list parallel to Bookmarks (new)
+            MenuActionRow(
+                title = if (highlightsCount == 0) "Highlights" else "Highlights · $highlightsCount",
+                subtitle = "Your inked passages — tap to jump",
+                actionLabel = "Open",
+                onClick = { onOpenHighlights(); onDismiss() },
+            )
             // Bookmarks
             MenuActionRow(
                 title = if (bookmarksCount == 0) "Bookmarks" else "Bookmarks · $bookmarksCount",
-                subtitle = "View and jump to saved positions",
+                subtitle = "Saved spots — tap to jump, distinct from highlights",
                 actionLabel = "Open",
                 onClick = { onOpenBookmarks(); onDismiss() },
             )
             MenuActionRow(
                 title = if (isCurrentBookmarked) "Remove bookmark here" else "Bookmark this page",
-                subtitle = "Marks current position (distinct from highlights)",
+                subtitle = "Marks current spot (chapter + paragraph)",
                 actionLabel = if (isCurrentBookmarked) "Remove" else "Add",
                 onClick = { onToggleBookmark(); onDismiss() },
             )
-            // X-Ray
+            // People & Topics — formerly X-Ray (Story Guide)
             MenuActionRow(
-                title = "X-Ray",
-                subtitle = "Characters & ideas in this book",
+                title = "People & Topics (X-Ray)",
+                subtitle = "Quick map of characters, places & key ideas — on-device",
                 actionLabel = "Open",
                 onClick = { onOpenXRay(); onDismiss() },
             )
-            // Bionic toggle
+            // Guided Reading — formerly Bionic Reading
             MenuToggleRow(
-                title = "Bionic reading",
-                subtitle = "Bold first syllable for faster scanning",
+                title = "Guided Reading (Bionic)",
+                subtitle = "Bold first syllable to guide eyes — read faster, stay focused",
                 checked = bionicEnabled,
                 onCheckedChange = { onToggleBionic() },
             )
             // Contrast toggle
             MenuToggleRow(
-                title = if (!hasSensor) "Contrast — No sensor" else if (contrastEnabled) "Contrast — Auto (7:1)" else "Contrast — Fixed",
-                subtitle = "Adaptive via light sensor",
+                title = if (!hasSensor) "Comfort Contrast — No sensor" else if (contrastEnabled) "Comfort Contrast — Auto (7:1)" else "Comfort Contrast — Fixed",
+                subtitle = " Keeps contrast comfortable in any light (WCAG 7:1, via sensor)",
                 checked = contrastEnabled && hasSensor,
                 enabled = hasSensor,
                 onCheckedChange = { if (hasSensor) onToggleContrast() },

@@ -65,7 +65,7 @@ fun XRayBottomSheet(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
             Text(
-                text = "X-Ray",
+                text = "People & Topics (X-Ray)",
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -77,7 +77,7 @@ fun XRayBottomSheet(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "${terms.size} distinctive terms · tap to see chapters",
+                text = "${terms.size} key people & ideas · tap to see where they appear",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -194,18 +194,18 @@ fun XRayBottomSheet(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
             Text(
-                text = "X-Ray",
+                text = "People & Topics (X-Ray)",
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = "${chapters.size} chapters · on-device TF-IDF",
+                text = "${chapters.size} chapters · quick character & topic map — on-device",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Distinctive terms per chapter · tap to see chapters",
+                text = "Who and what matters — tap any term to see where it appears",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
