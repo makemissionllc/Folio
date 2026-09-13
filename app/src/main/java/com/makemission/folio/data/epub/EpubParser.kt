@@ -48,7 +48,7 @@ object EpubParser {
                 // No OPF — treat every html/xhtml entry as a chapter (graceful degrade).
                 val filtered = entries.entries.filter { (name, _) -> isChapterName(name) }
                 val sorted = filtered.sortedBy { (name, _) -> name }
-                val fallback = sorted.mapNotNull { (name, bytes) -> parseChapterBytes(name, bytes) }
+                val fallback = sorted.mapIndexedNotNull { idx, (name, bytes) -> parseChapterBytes(name, bytes, preferredTitle = null, chapterIndex = idx) }
                 if (fallback.isEmpty()) return null
                 return EpubBook(
                     title = "Untitled EPUB",
@@ -78,16 +78,16 @@ object EpubParser {
             // Optional toc.ncx titles — map file name -> chapter title
             val tocTitles = buildTocTitleMap(entries)
 
-            val chapters = spineIds.mapNotNull { id ->
-                val href = manifest[id] ?: return@mapNotNull null
+            val chapters = spineIds.mapIndexedNotNull { idx, id ->
+                val href = manifest[id] ?: return@mapIndexedNotNull null
                 val resolved = resolveHref(opfDir, href).substringAfterLast('/')
                     .lowercase()
                 // Zip entries may be under different dirs — match by file name.
                 val entry = entries.entries.firstOrNull { (k, _) ->
                     k.substringAfterLast('/').lowercase() == resolved
-                } ?: return@mapNotNull null
+                } ?: return@mapIndexedNotNull null
                 val chapterTitle = tocTitles[resolved]
-                parseChapterBytes(entry.key, entry.value, preferredTitle = chapterTitle)
+                parseChapterBytes(entry.key, entry.value, preferredTitle = chapterTitle, chapterIndex = idx)
             }
 
             if (chapters.isEmpty()) {
@@ -166,28 +166,83 @@ object EpubParser {
         name.endsWith(".html", true) || name.endsWith(".htm", true) ||
             name.endsWith(".xhtml", true)
 
+    // Heuristic: does this title look like a raw filename left by a poor converter?
+    // e.g. "How_Successful_People_Think__Ch_split_010", "chapter_001.html", "OEBPS/Text/split_12.xhtml"
+    fun looksLikeFilename(title: String): Boolean {
+        if (title.isBlank()) return true
+        val lower = title.lowercase()
+        if ("_split_" in lower) return true
+        if ("__" in title) return true
+        if (title.contains('_') && !title.contains(' ') && title.length > 12) return true
+        if (title.count { it == '_' } >= 3) return true
+        if (lower.endsWith(".html") || lower.endsWith(".htm") || lower.endsWith(".xhtml") || lower.endsWith(".xml") || lower.endsWith(".opf") || lower.endsWith(".ncx")) return true
+        if (Regex(""".*\.(html?|xhtml|xml)(\#.*)?$""", RegexOption.IGNORE_CASE).matches(title.trim())) return true
+        // filename-like: contains underscore and no spaces, or looks like camel_snake
+        if (title.contains('_') && title.length > 15 && !title.contains(' ')) return true
+        return false
+    }
+
+    fun sanitizeChapterTitle(raw: String?, chapterIndex: Int): String {
+        val fallback = "Chapter ${chapterIndex + 1}"
+        if (raw.isNullOrBlank()) return fallback
+        val trimmed = raw.trim()
+        if (looksLikeFilename(trimmed)) return fallback
+        // Also guard against titles that are just numbers or file ids
+        if (trimmed.length > 60 && trimmed.contains('_')) return fallback
+        return trimmed
+    }
+
     private fun parseChapterBytes(
         entryName: String,
         bytes: ByteArray,
         preferredTitle: String? = null,
+        chapterIndex: Int = 0,
     ): EpubChapter? {
         val html = bytes.toString(StandardCharsets.UTF_8)
         val doc = Jsoup.parse(html, Parser.htmlParser())
-        // Strip scripts/styles
-        doc.select("script, style, nav, header, footer").remove()
+        // Strip scripts/styles and stray images left by poor converters (don't display unrelated leftover images mid-chapter)
+        doc.select("script, style, nav, header, footer, img, svg, picture, figure, figcaption, image").remove()
+        // Also strip elements whose class/id suggests cover or stray image
+        doc.select("[class*=cover], [id*=cover], [class*=image], [class*=fig]").forEach { el ->
+            // keep if it contains meaningful text, otherwise remove
+            if (el.text().trim().length < 10) el.remove()
+        }
 
-        // Paragraph-ish blocks
+        // Paragraph-ish blocks — also ignore blocks that are just image filenames
         val blocks = doc.select("p, h1, h2, h3, h4, h5, h6, li, blockquote")
             .mapNotNull { el ->
                 val t = el.text().trim()
-                if (t.isEmpty()) null else t
+                if (t.isEmpty()) return@mapNotNull null
+                // Filter stray image filenames that leaked as text (e.g. "image001.jpg", "cover.png")
+                if (Regex(""".*\.(jpg|jpeg|png|gif|webp|svg)$""", RegexOption.IGNORE_CASE).matches(t)) return@mapNotNull null
+                if (t.length < 3) return@mapNotNull null
+                t
             }
 
         if (blocks.isEmpty()) return null
 
-        val title = preferredTitle?.takeIf { it.isNotBlank() }
-            ?: doc.selectFirst("h1, h2, h3")?.text()?.trim()?.takeIf { it.isNotBlank() }
-            ?: entryName.substringAfterLast('/').substringBefore('.')
+        // Prefer actual heading text from HTML over filename; only use filename as last resort before Chapter N
+        val headingTitle = doc.selectFirst("h1")?.text()?.trim()?.takeIf { it.isNotBlank() && !looksLikeFilename(it) }
+            ?: doc.selectFirst("h2")?.text()?.trim()?.takeIf { it.isNotBlank() && !looksLikeFilename(it) }
+            ?: doc.selectFirst("title")?.text()?.trim()?.takeIf { it.isNotBlank() && !looksLikeFilename(it) }
+            ?: doc.selectFirst("h3, h4")?.text()?.trim()?.takeIf { it.isNotBlank() && !looksLikeFilename(it) }
+
+        val rawTitle = when {
+            !preferredTitle.isNullOrBlank() && !looksLikeFilename(preferredTitle) -> preferredTitle.trim()
+            headingTitle != null -> headingTitle
+            else -> null
+        }
+        val title = sanitizeChapterTitle(rawTitle, chapterIndex).let { cleaned ->
+            // If even heading was filename-like, sanitize will give Chapter N; that's intentional
+            cleaned
+        }.let { finalTitle ->
+            // If preferredTitle was filename-like but headingTitle fallback also failed, we already have Chapter N
+            // Apply sanitize again to handle entryName fallback case where no heading existed
+            if (finalTitle.startsWith("Chapter ")) finalTitle else sanitizeChapterTitle(finalTitle, chapterIndex)
+        }.let { candidate ->
+            // If candidate is still filename-like (edge), force Chapter N instead of raw entryName
+            if (looksLikeFilename(candidate)) "Chapter ${chapterIndex + 1}" else candidate
+        }
 
         // First block duplicates the title — drop it.
         val paragraphs = if (blocks.firstOrNull()?.equals(title, ignoreCase = true) == true) {
@@ -195,7 +250,9 @@ object EpubParser {
         } else blocks
 
         if (paragraphs.isEmpty()) return null
-        return EpubChapter(title = title, paragraphs = paragraphs)
+        // Final guard: if title still looks like filename (e.g. from cache), replace
+        val safeTitle = if (looksLikeFilename(title)) "Chapter ${chapterIndex + 1}" else title
+        return EpubChapter(title = safeTitle, paragraphs = paragraphs)
     }
 
     /** Parse from a [File] on private storage. */

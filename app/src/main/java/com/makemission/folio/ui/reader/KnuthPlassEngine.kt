@@ -115,7 +115,10 @@ fun rememberKnuthAdjustments(
     chapters: List<EpubParser.EpubChapter>,
     isTabletLandscape: Boolean,
     bionicEnabled: Boolean,
-    // Pass TruePageInfo? Not needed directly, but we compute same dims.
+    readingFont: com.makemission.folio.ui.reader.FolioReadingFont = com.makemission.folio.ui.reader.FolioReadingFont.DEFAULT,
+    fontSize: com.makemission.folio.ui.reader.FolioFontSize = com.makemission.folio.ui.reader.FolioFontSize.NORMAL,
+    lineSpacing: com.makemission.folio.ui.reader.FolioLineSpacing = com.makemission.folio.ui.reader.FolioLineSpacing.NORMAL,
+    margin: com.makemission.folio.ui.reader.FolioMargin = com.makemission.folio.ui.reader.FolioMargin.NORMAL,
 ): Map<String, KnuthAdjustment> {
     val textMeasurer = rememberTextMeasurer()
     val configuration = LocalConfiguration.current
@@ -138,16 +141,19 @@ fun rememberKnuthAdjustments(
     return remember(
         screenWidthDp, screenHeightDp, orientation,
         fontScale, densityValue, bionicEnabled, isTabletLandscape, chaptersKey,
+        readingFont, fontSize, lineSpacing, margin,
     ) {
         if (chapters.isEmpty()) return@remember emptyMap()
 
-        // Mirror TruePageEngine's virtual canvas dimensions
+        // Mirror TruePageEngine's virtual canvas dimensions — respects user margin
         val availableWidthPx = with(density) {
             val wDp = if (isTabletLandscape) {
-                val totalH = 12.dp * 2 + 14.dp * 4 + 1.dp
+                val outer = margin.tabletHorizontal() * 2
+                val inner = margin.tabletHorizontal() * 4
+                val totalH = outer + inner + 1.dp
                 ((screenWidthDp.dp - totalH) / 2).coerceAtLeast(120.dp)
             } else {
-                (screenWidthDp.dp - 40.dp).coerceAtLeast(120.dp)
+                (screenWidthDp.dp - margin.horizontalDp * 2).coerceAtLeast(120.dp)
             }
             wDp.toPx().toInt().coerceAtLeast(100)
         }
@@ -156,7 +162,12 @@ fun rememberKnuthAdjustments(
         }
         val perScreenHeightPx = if (isTabletLandscape) availableHeightPx * 2 else availableHeightPx
 
-        val bodyStyle = if (isTabletLandscape) typography.bodyMedium else typography.bodyLarge
+        val baseBody = if (isTabletLandscape) typography.bodyMedium else typography.bodyLarge
+        val bodyStyle = baseBody.copy(
+            fontFamily = readingFont.family,
+            fontSize = baseBody.fontSize * fontSize.scale,
+            lineHeight = baseBody.lineHeight * fontSize.scale * lineSpacing.factor,
+        )
         val lineHeightPx = with(density) { bodyStyle.lineHeight.toPx().toInt().coerceAtLeast(20) }
         val linesPerPage = (perScreenHeightPx / lineHeightPx).coerceAtLeast(12)
         val baseLetterSpacing = bodyStyle.letterSpacing

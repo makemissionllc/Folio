@@ -7,6 +7,12 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.documentfile.provider.DocumentFile
+import com.makemission.folio.ui.reader.FolioFontSize
+import com.makemission.folio.ui.reader.FolioHighlightColor
+import com.makemission.folio.ui.reader.FolioHighlightStyle
+import com.makemission.folio.ui.reader.FolioLineSpacing
+import com.makemission.folio.ui.reader.FolioMargin
+import com.makemission.folio.ui.reader.FolioReadingFont
 import com.makemission.folio.ui.reader.ReadingNavigationMode
 import com.makemission.folio.ui.theme.FolioPalette
 import com.makemission.folio.ui.theme.ThemeMode
@@ -34,6 +40,12 @@ class SettingsRepository(private val context: Context) {
         private val KEY_BOOKS_FOLDER_URI = stringPreferencesKey("books_folder_uri")
         private val KEY_BIONIC_ENABLED = booleanPreferencesKey("bionic_enabled")
         private val KEY_ADAPTIVE_CONTRAST_ENABLED = booleanPreferencesKey("adaptive_contrast_enabled")
+        private val KEY_READING_FONT = stringPreferencesKey("reading_font")
+        private val KEY_READING_FONT_SIZE = stringPreferencesKey("reading_font_size")
+        private val KEY_READING_LINE_SPACING = stringPreferencesKey("reading_line_spacing")
+        private val KEY_READING_MARGIN = stringPreferencesKey("reading_margin")
+        private val KEY_HIGHLIGHT_COLOR = stringPreferencesKey("highlight_color")
+        private val KEY_HIGHLIGHT_STYLE = stringPreferencesKey("highlight_style")
 
         @Volatile
         private var INSTANCE: SettingsRepository? = null
@@ -167,6 +179,55 @@ class SettingsRepository(private val context: Context) {
         context.folioSettingsDataStore.edit { prefs ->
             prefs[KEY_ADAPTIVE_CONTRAST_ENABLED] = value
         }
+    }
+
+    // — Reading typography (Kindle/Apple Books–comparable, persisted) —
+    val readingFont: Flow<FolioReadingFont> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            FolioReadingFont.fromKey(prefs[KEY_READING_FONT])
+        }
+    suspend fun setReadingFont(font: FolioReadingFont) {
+        context.folioSettingsDataStore.edit { prefs -> prefs[KEY_READING_FONT] = font.name }
+    }
+
+    val readingFontSize: Flow<FolioFontSize> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            FolioFontSize.fromKey(prefs[KEY_READING_FONT_SIZE])
+        }
+    suspend fun setReadingFontSize(size: FolioFontSize) {
+        context.folioSettingsDataStore.edit { prefs -> prefs[KEY_READING_FONT_SIZE] = size.name }
+    }
+
+    val readingLineSpacing: Flow<FolioLineSpacing> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            FolioLineSpacing.fromKey(prefs[KEY_READING_LINE_SPACING])
+        }
+    suspend fun setReadingLineSpacing(spacing: FolioLineSpacing) {
+        context.folioSettingsDataStore.edit { prefs -> prefs[KEY_READING_LINE_SPACING] = spacing.name }
+    }
+
+    val readingMargin: Flow<FolioMargin> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            FolioMargin.fromKey(prefs[KEY_READING_MARGIN])
+        }
+    suspend fun setReadingMargin(margin: FolioMargin) {
+        context.folioSettingsDataStore.edit { prefs -> prefs[KEY_READING_MARGIN] = margin.name }
+    }
+
+    val highlightColor: Flow<FolioHighlightColor> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            FolioHighlightColor.fromKey(prefs[KEY_HIGHLIGHT_COLOR])
+        }
+    suspend fun setHighlightColor(color: FolioHighlightColor) {
+        context.folioSettingsDataStore.edit { prefs -> prefs[KEY_HIGHLIGHT_COLOR] = color.name }
+    }
+
+    val highlightStyle: Flow<FolioHighlightStyle> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            FolioHighlightStyle.fromKey(prefs[KEY_HIGHLIGHT_STYLE])
+        }
+    suspend fun setHighlightStyle(style: FolioHighlightStyle) {
+        context.folioSettingsDataStore.edit { prefs -> prefs[KEY_HIGHLIGHT_STYLE] = style.name }
     }
 
     fun getFolderDisplayName(uriString: String?): String? {

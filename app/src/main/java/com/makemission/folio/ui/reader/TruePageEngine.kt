@@ -60,6 +60,10 @@ fun rememberTruePageState(
     bionicEnabled: Boolean,
     bookId: String? = null,
     fileHash: String? = null,
+    readingFont: com.makemission.folio.ui.reader.FolioReadingFont = com.makemission.folio.ui.reader.FolioReadingFont.DEFAULT,
+    fontSize: com.makemission.folio.ui.reader.FolioFontSize = com.makemission.folio.ui.reader.FolioFontSize.NORMAL,
+    lineSpacing: com.makemission.folio.ui.reader.FolioLineSpacing = com.makemission.folio.ui.reader.FolioLineSpacing.NORMAL,
+    margin: com.makemission.folio.ui.reader.FolioMargin = com.makemission.folio.ui.reader.FolioMargin.NORMAL,
 ): TruePageInfo {
     val textMeasurer = rememberTextMeasurer()
     val configuration = LocalConfiguration.current
@@ -83,14 +87,15 @@ fun rememberTruePageState(
     }
 
     val context = LocalContext.current
-    val configKey = remember(screenWidthDp, screenHeightDp, orientation, fontScale, densityValue, bionicEnabled, isTabletLandscape, chaptersKey) {
-        TruePageCache.configKey(screenWidthDp, screenHeightDp, orientation, fontScale, densityValue, bionicEnabled, isTabletLandscape, chaptersKey)
+    val configKey = remember(screenWidthDp, screenHeightDp, orientation, fontScale, densityValue, bionicEnabled, isTabletLandscape, chaptersKey, readingFont, fontSize, lineSpacing, margin) {
+        TruePageCache.configKey(screenWidthDp, screenHeightDp, orientation, fontScale, densityValue, bionicEnabled, isTabletLandscape, chaptersKey) + "_${readingFont.name}_${fontSize.name}_${lineSpacing.name}_${margin.name}"
     }
 
     return remember(
         screenWidthDp, screenHeightDp, orientation,
         fontScale, densityValue, bionicEnabled,
         isTabletLandscape, chaptersKey, configKey, bookId, fileHash,
+        readingFont, fontSize, lineSpacing, margin,
     ) {
         if (chapters.isEmpty()) {
             return@remember TruePageInfo(totalPages = 1, pageForFlatIndex = { 1 })
@@ -118,14 +123,16 @@ fun rememberTruePageState(
         }
 
         // ---- Available dimensions (virtual canvas) ----
-        // Horizontal: phone 20dp each side, tablet: 12dp outer + 14dp inner per column + 1dp gutter
+        // Horizontal: respects user-selected margin (Kindle/Apple Books–like). Phone uses margin.horizontalDp*2,
+        // tablet outer 12dp -> margin.tabletHorizontal outer, inner 14dp -> margin.tabletHorizontal.
         val availableWidthPx: Int = with(density) {
             val widthDp = if (isTabletLandscape) {
-                // (screenWidth - 12*2 - 14*4 -1) /2
-                val totalH = 12.dp * 2 + 14.dp * 4 + 1.dp
+                val outer = margin.tabletHorizontal() * 2
+                val inner = margin.tabletHorizontal() * 4
+                val totalH = outer + inner + 1.dp
                 ((screenWidthDp.dp - totalH) / 2).coerceAtLeast(120.dp)
             } else {
-                (screenWidthDp.dp - 40.dp).coerceAtLeast(120.dp)
+                (screenWidthDp.dp - margin.horizontalDp * 2).coerceAtLeast(120.dp)
             }
             widthDp.toPx().toInt().coerceAtLeast(100)
         }
@@ -137,9 +144,17 @@ fun rememberTruePageState(
         }
         val perScreenHeightPx = if (isTabletLandscape) availableHeightPx * 2 else availableHeightPx
 
-        // Styles matching ReadingScreen content
-        val bodyStyle = if (isTabletLandscape) typography.bodyMedium else typography.bodyLarge
-        val titleStyle = if (isTabletLandscape) typography.titleMedium else typography.headlineSmall
+        // Styles matching ReadingScreen content — now with user typography (font/size/spacing) like Kindle/Apple Books
+        val baseBody = if (isTabletLandscape) typography.bodyMedium else typography.bodyLarge
+        val baseTitle = if (isTabletLandscape) typography.titleMedium else typography.headlineSmall
+        val bodyStyle = baseBody.copy(
+            fontFamily = readingFont.family,
+            fontSize = baseBody.fontSize * fontSize.scale,
+            lineHeight = baseBody.lineHeight * fontSize.scale * lineSpacing.factor,
+        )
+        val titleStyle = baseTitle.copy(
+            fontFamily = readingFont.family,
+        )
 
         // Fixed non-text heights
         val diagramHeightPx = with(density) { 172.dp.toPx().toInt() } // 140 + 16*2

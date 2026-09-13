@@ -74,7 +74,11 @@ object ParsedBookCache {
             val chapters = mutableListOf<EpubParser.EpubChapter>()
             for (i in 0 until chaptersArr.length()) {
                 val chObj = chaptersArr.getJSONObject(i)
-                val chTitle = chObj.optString("title", "Chapter")
+                val rawTitle = chObj.optString("title", "Chapter")
+                // Lightweight heuristic: clean raw filename titles even from existing cached parses
+                val chTitle = if (EpubParser.looksLikeFilename(rawTitle)) {
+                    EpubParser.sanitizeChapterTitle(null, i)
+                } else rawTitle
                 val parasArr = chObj.optJSONArray("paragraphs") ?: JSONArray()
                 val paras = mutableListOf<String>()
                 for (j in 0 until parasArr.length()) paras.add(parasArr.getString(j))

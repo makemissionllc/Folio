@@ -38,7 +38,9 @@ data class Highlight(
     val anchorText: String = "",
     /** True if anchor could not be relocated after file change — left orphaned. */
     val isOrphaned: Boolean = false,
-    /** ARGB int, e.g. FolioAmber (#F7B538). */
+    /** ARGB int, e.g. FolioAmber (#F7B538). Now supports multiple user-selectable colors. */
     val color: Int,
+    /** Highlight style — FILL (Multiply fill, default) or UNDERLINE, persisted per highlight. */
+    val style: String = "FILL",
     val createdAt: Long = System.currentTimeMillis(),
 )

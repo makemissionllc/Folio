@@ -50,6 +50,7 @@ fun HighlightOverlay(
     onLassoFinished: (normalizedPoints: List<Offset>, bounds: Rect) -> Unit,
     modifier: Modifier = Modifier,
     highlightColor: Color = FolioAmber,
+    highlightStyle: String = "FILL",
 ) {
     var currentPoints by remember { mutableStateOf<List<StylusPoint>?>(null) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
@@ -62,6 +63,7 @@ fun HighlightOverlay(
         val pressures: List<Float>,
         val tilts: List<Float>,
         val color: Color,
+        val style: String,
     )
     val decodedHighlights = remember(highlights) {
         highlights.mapNotNull { hl ->
@@ -70,7 +72,8 @@ fun HighlightOverlay(
             val pressures = decodeFloats(hl.pressuresData)
             val tilts = decodeFloats(hl.tiltsData)
             val col = try { Color(hl.color) } catch (_: Exception) { highlightColor }
-            DecodedHighlight(norm, pressures, tilts, col)
+            val st = hl.style.takeIf { it.isNotBlank() } ?: "FILL"
+            DecodedHighlight(norm, pressures, tilts, col, st)
         }
     }
 
@@ -130,17 +133,23 @@ fun HighlightOverlay(
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val baseWidthPx = 28.dp.toPx()
+            val underlineWidthPx = 4.dp.toPx()
 
-            fun drawVariable(pts: List<Offset>, pressures: List<Float>, tilts: List<Float>, color: Color) {
+            fun drawVariable(pts: List<Offset>, pressures: List<Float>, tilts: List<Float>, color: Color, style: String = "FILL") {
                 if (pts.size < 2) return
+                val isUnderline = style == "UNDERLINE"
                 for (i in 0 until pts.size - 1) {
                     val pa = if (pressures.size == pts.size) (pressures[i] + pressures[i + 1]) / 2f else 0.7f
                     val ta = if (tilts.size == pts.size) (tilts[i] + tilts[i + 1]) / 2f else 0f
                     val pressureFactor = 0.55f + pa * 0.9f
                     val tiltFactor = 1f + (ta / (PI / 2).toFloat()) * 0.35f
-                    val width = baseWidthPx * pressureFactor * tiltFactor
+                    val width = if (isUnderline) {
+                        (underlineWidthPx * (0.8f + pa * 0.4f)).coerceAtLeast(3.dp.toPx())
+                    } else {
+                        baseWidthPx * pressureFactor * tiltFactor
+                    }
                     drawLine(
-                        color = color.copy(alpha = 0.52f),
+                        color = color.copy(alpha = if (isUnderline) 0.88f else 0.52f),
                         start = pts[i],
                         end = pts[i + 1],
                         strokeWidth = width,
@@ -150,17 +159,18 @@ fun HighlightOverlay(
                 }
             }
 
-            fun drawFixed(pts: List<Offset>, color: Color) {
+            fun drawFixed(pts: List<Offset>, color: Color, style: String = "FILL") {
                 if (pts.size < 2) return
+                val isUnderline = style == "UNDERLINE"
                 val path = androidx.compose.ui.graphics.Path().apply {
                     moveTo(pts[0].x, pts[0].y)
                     for (i in 1 until pts.size) lineTo(pts[i].x, pts[i].y)
                 }
                 drawPath(
                     path = path,
-                    color = color.copy(alpha = 0.52f),
+                    color = color.copy(alpha = if (isUnderline) 0.88f else 0.52f),
                     style = androidx.compose.ui.graphics.drawscope.Stroke(
-                        width = baseWidthPx,
+                        width = if (isUnderline) underlineWidthPx else baseWidthPx,
                         cap = StrokeCap.Round,
                         join = androidx.compose.ui.graphics.StrokeJoin.Round,
                     ),
@@ -172,18 +182,18 @@ fun HighlightOverlay(
             for (dh in decodedHighlights) {
                 val pts = dh.norm.map { Offset(it.x * size.width, it.y * size.height) }
                 if (dh.pressures.size == pts.size && dh.tilts.size == pts.size && dh.pressures.isNotEmpty()) {
-                    drawVariable(pts, dh.pressures, dh.tilts, dh.color)
+                    drawVariable(pts, dh.pressures, dh.tilts, dh.color, dh.style)
                 } else {
-                    drawFixed(pts, dh.color)
+                    drawFixed(pts, dh.color, dh.style)
                 }
             }
 
-            // In-progress stroke (pixel coords).
+            // In-progress stroke (pixel coords) — uses current highlightColor/style
             currentPoints?.let { pts ->
                 val offs = pts.map { it.offset }
                 val pressures = pts.map { it.pressure }
                 val tilts = pts.map { it.tilt }
-                drawVariable(offs, pressures, tilts, highlightColor)
+                drawVariable(offs, pressures, tilts, highlightColor, highlightStyle)
             }
         }
     }
@@ -196,6 +206,7 @@ fun HighlightOverlay(
     onStylusStrokeFinished: (normalizedPoints: List<Offset>) -> Unit,
     modifier: Modifier = Modifier,
     highlightColor: Color = FolioAmber,
+    highlightStyle: String = "FILL",
 ) {
     HighlightOverlay(
         highlights = highlights,
@@ -203,6 +214,7 @@ fun HighlightOverlay(
         onLassoFinished = { _, _ -> },
         modifier = modifier,
         highlightColor = highlightColor,
+        highlightStyle = highlightStyle,
     )
 }
 

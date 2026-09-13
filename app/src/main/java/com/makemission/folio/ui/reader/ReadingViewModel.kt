@@ -386,6 +386,7 @@ class ReadingViewModel(
         chapterIndex: Int = 0,
         anchorText: String = "",
         color: Color = Color(0xFFF7B538),
+        style: String = "FILL",
     ) {
         if (normalizedPoints.size < 2) return
         val anchor = if (anchorText.isNotBlank()) anchorText
@@ -402,6 +403,7 @@ class ReadingViewModel(
                         anchorText = anchor.take(LcsAnchor.ANCHOR_SNIPPET_LEN),
                         isOrphaned = false,
                         color = color.toArgb(),
+                        style = style,
                     ),
                 )
             } catch (e: Exception) {
@@ -414,7 +416,8 @@ class ReadingViewModel(
         normalizedPoints: List<Offset>,
         chapterIndex: Int = 0,
         color: Color = Color(0xFFF7B538),
-    ) = addHighlight(normalizedPoints, emptyList(), emptyList(), chapterIndex, "", color)
+        style: String = "FILL",
+    ) = addHighlight(normalizedPoints, emptyList(), emptyList(), chapterIndex, "", color, style)
 
     /** Also store anchor when available — preferred overload for §5. */
     fun addHighlightWithAnchor(
@@ -424,7 +427,8 @@ class ReadingViewModel(
         chapterIndex: Int,
         anchorText: String,
         color: Color = Color(0xFFF7B538),
-    ) = addHighlight(normalizedPoints, pressures, tilts, chapterIndex, anchorText, color)
+        style: String = "FILL",
+    ) = addHighlight(normalizedPoints, pressures, tilts, chapterIndex, anchorText, color, style)
 
     fun clearHighlights() {
         viewModelScope.launch {

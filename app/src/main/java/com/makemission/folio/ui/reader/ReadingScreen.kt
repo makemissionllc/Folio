@@ -105,6 +105,12 @@ import com.makemission.folio.ui.theme.TimeTintEngine
 import com.makemission.folio.ui.theme.hasAmbientLightSensor
 import com.makemission.folio.ui.theme.rememberAmbientLightLux
 import com.makemission.folio.ui.theme.rememberTimeWarmth
+import com.makemission.folio.ui.reader.FolioFontSize
+import com.makemission.folio.ui.reader.FolioHighlightColor
+import com.makemission.folio.ui.reader.FolioHighlightStyle
+import com.makemission.folio.ui.reader.FolioLineSpacing
+import com.makemission.folio.ui.reader.FolioMargin
+import com.makemission.folio.ui.reader.FolioReadingFont
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -114,6 +120,33 @@ private data class LassoCapture(
     val points: List<Offset>,
     val bounds: Rect,
 )
+
+// Reading typography helpers — Kindle/Apple Books-like, persisted via DataStore.
+// Compute scaled body/title styles the same way TruePage/Knuth virtual canvas does,
+// so pagination and orphan control stay in sync with what the user sees.
+@Composable
+private fun readingBodyStyle(
+    isTablet: Boolean,
+    readingFont: FolioReadingFont,
+    fontSize: FolioFontSize,
+    lineSpacing: FolioLineSpacing,
+): androidx.compose.ui.text.TextStyle {
+    val base = if (isTablet) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge
+    return base.copy(
+        fontFamily = readingFont.family,
+        fontSize = base.fontSize * fontSize.scale,
+        lineHeight = base.lineHeight * fontSize.scale * lineSpacing.factor,
+    )
+}
+
+@Composable
+private fun readingTitleStyle(
+    isTablet: Boolean,
+    readingFont: FolioReadingFont,
+): androidx.compose.ui.text.TextStyle {
+    val base = if (isTablet) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall
+    return base.copy(fontFamily = readingFont.family)
+}
 
 /**
  * Core reading screen — native EPUB rendering, serif typography, adaptive layout,
@@ -148,6 +181,9 @@ fun ReadingScreen(
     val inBookQuery by viewModel.inBookQuery.collectAsState()
     val inBookResults by viewModel.inBookResults.collectAsState()
     val isInBookSearching by viewModel.isInBookSearching.collectAsState()
+    // Highlight appearance prefs for new highlights (kindle-like)
+    val highlightColorOuter by com.makemission.folio.data.settings.SettingsRepository.get(context).highlightColor.collectAsState(initial = FolioHighlightColor.AMBER)
+    val highlightStyleOuter by com.makemission.folio.data.settings.SettingsRepository.get(context).highlightStyle.collectAsState(initial = FolioHighlightStyle.FILL)
 
     ReadingScreenContent(
         uiState = uiState,
@@ -158,10 +194,10 @@ fun ReadingScreen(
         onBack = onBack,
         onSaveProgress = viewModel::saveProgress,
         onAddHighlight = { pts, pressures, tilts, ch ->
-            viewModel.addHighlight(pts, pressures, tilts, ch)
+            viewModel.addHighlight(pts, pressures, tilts, ch, color = highlightColorOuter.color, style = highlightStyleOuter.name)
         },
         onAddHighlightWithAnchor = { pts, pressures, tilts, ch, anchor ->
-            viewModel.addHighlight(pts, pressures, tilts, ch, anchorText = anchor)
+            viewModel.addHighlight(pts, pressures, tilts, ch, anchorText = anchor, color = highlightColorOuter.color, style = highlightStyleOuter.name)
         },
         onTrackVocabulary = viewModel::trackVocabulary,
         onToggleBookmark = viewModel::toggleBookmark,
@@ -255,6 +291,16 @@ private fun ReadingScreenContent(
     // Same keys are used in Settings → Reading so toggling from either place stays consistent.
     val bionicEnabled by settingsRepo.bionicEnabled.collectAsState(initial = false)
     val adaptiveEnabled by settingsRepo.adaptiveContrastEnabled.collectAsState(initial = false)
+    // Reading typography customization (Kindle/Apple Books–comparable) — font, size, spacing, margins, highlight appearance.
+    // Adapted from reference DisplayOptions/AnnotationColors ideas: multiple font choices, size/spacing/margin sliders,
+    // multiple highlight colors + underline vs fill. Persisted via SettingsRepository/DataStore, applied to
+    // existing rendering (body TextStyle + TruePage virtual canvas + Knuth) the same way bionic/fontScale changes trigger recompute.
+    val readingFont by settingsRepo.readingFont.collectAsState(initial = FolioReadingFont.DEFAULT)
+    val readingFontSize by settingsRepo.readingFontSize.collectAsState(initial = FolioFontSize.NORMAL)
+    val readingLineSpacing by settingsRepo.readingLineSpacing.collectAsState(initial = FolioLineSpacing.NORMAL)
+    val readingMargin by settingsRepo.readingMargin.collectAsState(initial = FolioMargin.NORMAL)
+    val highlightColorPref by settingsRepo.highlightColor.collectAsState(initial = FolioHighlightColor.AMBER)
+    val highlightStylePref by settingsRepo.highlightStyle.collectAsState(initial = FolioHighlightStyle.FILL)
 
     // --- Chapter swipe pager states (only used when navigationMode == CHAPTER_SWIPE) ---
     // Phone: one page per chapter, vertical LazyColumn within each chapter
@@ -981,6 +1027,12 @@ private fun ReadingScreenContent(
                                     onJumpConsumed = { pendingBookmarkJump = null },
                                     bookId = uiState.bookId,
                                     fileHash = uiState.fileHash,
+                                    readingFont = readingFont,
+                                    fontSize = readingFontSize,
+                                    lineSpacing = readingLineSpacing,
+                                    margin = readingMargin,
+                                    highlightColor = highlightColorPref.color,
+                                    highlightStyle = highlightStylePref.name,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             } else {
@@ -993,7 +1045,7 @@ private fun ReadingScreenContent(
                                     highlights = highlights,
                                     onToggleChrome = { chromeVisible = !chromeVisible },
                                     onSaveProgress = onSaveProgress,
-                                    onAddHighlight = onAddHighlight,
+                                    onAddHighlight = { pts, pressures, tilts, ch -> onAddHighlight(pts, pressures, tilts, ch) },
                                     onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
                                     onWordDoubleTap = onWordDoubleTap,
                                     readingText = readingText,
@@ -1005,6 +1057,12 @@ private fun ReadingScreenContent(
                                     onJumpConsumed = { pendingBookmarkJump = null },
                                     bookId = uiState.bookId,
                                     fileHash = uiState.fileHash,
+                                    readingFont = readingFont,
+                                    fontSize = readingFontSize,
+                                    lineSpacing = readingLineSpacing,
+                                    margin = readingMargin,
+                                    highlightColor = highlightColorPref.color,
+                                    highlightStyle = highlightStylePref.name,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -1031,6 +1089,12 @@ private fun ReadingScreenContent(
                                     onPrioritizeXRay = onPrioritizeXRay,
                                     bookId = uiState.bookId,
                                     fileHash = uiState.fileHash,
+                                    readingFont = readingFont,
+                                    fontSize = readingFontSize,
+                                    lineSpacing = readingLineSpacing,
+                                    margin = readingMargin,
+                                    highlightColor = highlightColorPref.color,
+                                    highlightStyle = highlightStylePref.name,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             } else {
@@ -1047,12 +1111,18 @@ private fun ReadingScreenContent(
                                     chromeVisible = chromeVisible,
                                     onToggleChrome = { chromeVisible = !chromeVisible },
                                     onSaveProgress = onSaveProgress,
-                                    onAddHighlight = onAddHighlight,
+                                    onAddHighlight = { pts, pressures, tilts, ch -> onAddHighlight(pts, pressures, tilts, ch) },
                                     onLasso = { pts, bounds -> lassoCapture = LassoCapture(pts, bounds) },
                                     onWordDoubleTap = onWordDoubleTap,
                                     onPrioritizeXRay = onPrioritizeXRay,
                                     bookId = uiState.bookId,
                                     fileHash = uiState.fileHash,
+                                    readingFont = readingFont,
+                                    fontSize = readingFontSize,
+                                    lineSpacing = readingLineSpacing,
+                                    margin = readingMargin,
+                                    highlightColor = highlightColorPref.color,
+                                    highlightStyle = highlightStylePref.name,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -1086,6 +1156,18 @@ private fun ReadingScreenContent(
             onOpenChapters = { showChapters = true },
             highlightsCount = highlights.size,
             onOpenHighlights = { showHighlights = true },
+            readingFont = readingFont,
+            onSelectReadingFont = { f -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { settingsRepo.setReadingFont(f) } },
+            fontSize = readingFontSize,
+            onSelectFontSize = { s -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { settingsRepo.setReadingFontSize(s) } },
+            lineSpacing = readingLineSpacing,
+            onSelectLineSpacing = { l -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { settingsRepo.setReadingLineSpacing(l) } },
+            margin = readingMargin,
+            onSelectMargin = { m -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { settingsRepo.setReadingMargin(m) } },
+            highlightColor = highlightColorPref,
+            onSelectHighlightColor = { c -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { settingsRepo.setHighlightColor(c) } },
+            highlightStyle = highlightStylePref,
+            onSelectHighlightStyle = { s -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { settingsRepo.setHighlightStyle(s) } },
             onDismiss = { showMenu = false },
         )
     }
@@ -1241,6 +1323,12 @@ private fun SingleColumnReadingContent(
     onJumpConsumed: () -> Unit = {},
     bookId: String? = null,
     fileHash: String? = null,
+    readingFont: FolioReadingFont = FolioReadingFont.DEFAULT,
+    fontSize: FolioFontSize = FolioFontSize.NORMAL,
+    lineSpacing: FolioLineSpacing = FolioLineSpacing.NORMAL,
+    margin: FolioMargin = FolioMargin.NORMAL,
+    highlightColor: Color = FolioHighlightColor.AMBER.color,
+    highlightStyle: String = "FILL",
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -1260,13 +1348,17 @@ private fun SingleColumnReadingContent(
         onJumpConsumed()
     }
 
-    // True-Page Calculation Engine (§5) — virtual canvas, cached on rotate/font + disk (hash-validated)
+    // True-Page Calculation Engine (§5) — virtual canvas, cached on rotate/font + disk (hash-validated) — now includes typography/margin
     val truePageInfo = rememberTruePageState(
         chapters = chapters,
         isTabletLandscape = false,
         bionicEnabled = bionicEnabled,
         bookId = bookId,
         fileHash = fileHash,
+        readingFont = readingFont,
+        fontSize = fontSize,
+        lineSpacing = lineSpacing,
+        margin = margin,
     )
     // Current page updates on scroll but totalPages stays cached
     val currentPage by remember {
@@ -1277,6 +1369,10 @@ private fun SingleColumnReadingContent(
         chapters = chapters,
         isTabletLandscape = false,
         bionicEnabled = bionicEnabled,
+        readingFont = readingFont,
+        fontSize = fontSize,
+        lineSpacing = lineSpacing,
+        margin = margin,
     )
 
     val progress by remember {
@@ -1354,12 +1450,15 @@ private fun SingleColumnReadingContent(
         }
     }
 
+    val bodyStyle = readingBodyStyle(isTablet = false, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing)
+    val titleStyle = readingTitleStyle(isTablet = false, readingFont = readingFont)
+
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = margin.horizontalDp)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -1375,7 +1474,7 @@ private fun SingleColumnReadingContent(
                 item(key = "chapter-title-$chapterIndex") {
                     Text(
                         text = chapter.title,
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = titleStyle,
                         color = readingText,
                         modifier = Modifier
                             .padding(top = 28.dp, bottom = 12.dp)
@@ -1395,7 +1494,7 @@ private fun SingleColumnReadingContent(
                         remember(paragraph) { BionicReading.toBionicAnnotated(paragraph, BionicReading.boldSpan()) }
                     } else null
                     val knuth = knuthAdjustments["c${chapterIndex}-p${paraIndex}"]
-                    val baseStyle = MaterialTheme.typography.bodyLarge
+                    val baseStyle = bodyStyle
                     val knuthStyle = if (knuth != null) {
                         val ls = if (baseStyle.letterSpacing.isSp) (baseStyle.letterSpacing.value + knuth.letterSpacingDelta.value).sp else knuth.letterSpacingDelta
                         baseStyle.copy(
@@ -1480,6 +1579,8 @@ private fun SingleColumnReadingContent(
             },
             onLassoFinished = { pts, bounds -> onLasso(pts, bounds) },
             modifier = Modifier.fillMaxSize(),
+            highlightColor = highlightColor,
+            highlightStyle = highlightStyle,
         )
 
         // Top/bottom scroll fade (iOS-like) — subtle gradient so text doesn't hard-cutoff; respects immersive toggle
@@ -1576,6 +1677,12 @@ private fun TwoColumnReadingContent(
     onJumpConsumed: () -> Unit = {},
     bookId: String? = null,
     fileHash: String? = null,
+    readingFont: FolioReadingFont = FolioReadingFont.DEFAULT,
+    fontSize: FolioFontSize = FolioFontSize.NORMAL,
+    lineSpacing: FolioLineSpacing = FolioLineSpacing.NORMAL,
+    margin: FolioMargin = FolioMargin.NORMAL,
+    highlightColor: Color = FolioHighlightColor.AMBER.color,
+    highlightStyle: String = "FILL",
     modifier: Modifier = Modifier,
 ) {
     val mid = (chapters.size + 1) / 2
@@ -1614,20 +1721,28 @@ private fun TwoColumnReadingContent(
             (first.toFloat() / (total - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
         }
     }
-    // Knuth-Plass Orphan/Widow control (§5) — tablet spread
+    // Knuth-Plass Orphan/Widow control (§5) — tablet spread — now with typography
     val knuthAdjustments = rememberKnuthAdjustments(
         chapters = chapters,
         isTabletLandscape = true,
         bionicEnabled = bionicEnabled,
+        readingFont = readingFont,
+        fontSize = fontSize,
+        lineSpacing = lineSpacing,
+        margin = margin,
     )
 
-    // True-Page Calculation Engine (§5) — tablet spread: physical page turns (perScreen *2)
+    // True-Page Calculation Engine (§5) — tablet spread: physical page turns (perScreen *2) — typography-aware
     val truePageInfo = rememberTruePageState(
         chapters = chapters,
         isTabletLandscape = true,
         bionicEnabled = bionicEnabled,
         bookId = bookId,
         fileHash = fileHash,
+        readingFont = readingFont,
+        fontSize = fontSize,
+        lineSpacing = lineSpacing,
+        margin = margin,
     )
     // Tablet spread shows 2 columns per physical page, but totalPages already
     // reflects physical turns. Current page tracks earliest visible spread.
@@ -1753,6 +1868,9 @@ private fun TwoColumnReadingContent(
         }
     }
 
+    val bodyStyle = readingBodyStyle(isTablet = true, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing)
+    val titleStyle = readingTitleStyle(isTablet = true, readingFont = readingFont)
+
     Box(modifier = modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
@@ -1770,7 +1888,7 @@ private fun TwoColumnReadingContent(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .padding(horizontal = margin.tabletHorizontal(), vertical = 8.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 56.dp),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
@@ -1778,7 +1896,7 @@ private fun TwoColumnReadingContent(
                     item(key = "L-title-$chapterIndex") {
                         Text(
                             text = chapter.title,
-                            style = MaterialTheme.typography.titleMedium,
+                            style = titleStyle,
                             color = readingText,
                             modifier = Modifier
                                 .padding(top = 20.dp, bottom = 10.dp)
@@ -1793,7 +1911,7 @@ private fun TwoColumnReadingContent(
                         var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
                         val annotated = if (bionicEnabled) remember(p) { BionicReading.toBionicAnnotated(p, BionicReading.boldSpan()) } else null
                         val knuth = knuthAdjustments["c${chapterIndex}-p${paraIndex}"]
-                        val baseStyleLeft = MaterialTheme.typography.bodyMedium
+                        val baseStyleLeft = bodyStyle
                         val leftStyle = if (knuth != null) {
                             val lsL = if (baseStyleLeft.letterSpacing.isSp) (baseStyleLeft.letterSpacing.value + knuth.letterSpacingDelta.value).sp else knuth.letterSpacingDelta
                             baseStyleLeft.copy(
@@ -1903,7 +2021,7 @@ private fun TwoColumnReadingContent(
                         item(key = "R-title-$chapterIndex") {
                             Text(
                                 text = chapter.title,
-                                style = MaterialTheme.typography.titleMedium,
+                                style = titleStyle,
                                 color = readingText,
                                 modifier = Modifier
                                     .padding(top = 20.dp, bottom = 10.dp)
@@ -1919,7 +2037,7 @@ private fun TwoColumnReadingContent(
                             val annotated = if (bionicEnabled) remember(p) { BionicReading.toBionicAnnotated(p, BionicReading.boldSpan()) } else null
                             val globalCIdx = mid + chapterIndex
                             val knuthR = knuthAdjustments["c${globalCIdx}-p${paraIndex}"]
-                            val baseStyleR = MaterialTheme.typography.bodyMedium
+                            val baseStyleR = bodyStyle
                             val rightStyle = if (knuthR != null) {
                                 val lsR = if (baseStyleR.letterSpacing.isSp) (baseStyleR.letterSpacing.value + knuthR.letterSpacingDelta.value).sp else knuthR.letterSpacingDelta
                                 baseStyleR.copy(
@@ -1991,6 +2109,8 @@ private fun TwoColumnReadingContent(
             },
             onLassoFinished = { pts, bounds -> onLasso(pts, bounds) },
             modifier = Modifier.fillMaxSize(),
+            highlightColor = highlightColor,
+            highlightStyle = highlightStyle,
         )
 
         // Tablet scroll fades — cover both columns, respect chrome
@@ -2087,6 +2207,12 @@ private fun ChapterSwipePhoneContent(
     onPrioritizeXRay: (Int) -> Unit,
     bookId: String? = null,
     fileHash: String? = null,
+    readingFont: FolioReadingFont = FolioReadingFont.DEFAULT,
+    fontSize: FolioFontSize = FolioFontSize.NORMAL,
+    lineSpacing: FolioLineSpacing = FolioLineSpacing.NORMAL,
+    margin: FolioMargin = FolioMargin.NORMAL,
+    highlightColor: Color = FolioHighlightColor.AMBER.color,
+    highlightStyle: String = "FILL",
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -2138,8 +2264,8 @@ private fun ChapterSwipePhoneContent(
     }
 
     // True-Page (whole-book, disk-cached) — pageFor uses global flat
-    val truePageInfo = rememberTruePageState(chapters = chapters, isTabletLandscape = false, bionicEnabled = bionicEnabled, bookId = bookId, fileHash = fileHash)
-    val knuthAdjustments = rememberKnuthAdjustments(chapters = chapters, isTabletLandscape = false, bionicEnabled = bionicEnabled)
+    val truePageInfo = rememberTruePageState(chapters = chapters, isTabletLandscape = false, bionicEnabled = bionicEnabled, bookId = bookId, fileHash = fileHash, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing, margin = margin)
+    val knuthAdjustments = rememberKnuthAdjustments(chapters = chapters, isTabletLandscape = false, bionicEnabled = bionicEnabled, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing, margin = margin)
     // Progress + time remaining based on global flat (current chapter offset + within)
     val currentFlatOffset = remember(chapters, currentPage) {
         var off = 0
@@ -2192,6 +2318,9 @@ private fun ChapterSwipePhoneContent(
         }
     }
 
+    val bodyStyle = readingBodyStyle(isTablet = false, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing)
+    val titleStyle = readingTitleStyle(isTablet = false, readingFont = readingFont)
+
     Box(modifier = modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
@@ -2205,18 +2334,18 @@ private fun ChapterSwipePhoneContent(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 20.dp)
+                        .padding(horizontal = margin.horizontalDp)
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onToggleChrome),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 8.dp, bottom = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp),
                 ) {
                     item(key = "swipe-title-$page") {
-                        Text(text = chapter.title, style = MaterialTheme.typography.headlineSmall, color = readingText, modifier = Modifier.padding(top = 28.dp, bottom = 12.dp))
+                        Text(text = chapter.title, style = titleStyle, color = readingText, modifier = Modifier.padding(top = 28.dp, bottom = 12.dp))
                     }
                     itemsIndexed(chapter.paragraphs, key = { idx, _ -> "swipe-c${page}-p$idx" }) { paraIdx, paragraph ->
                         var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
                         val annotated = if (bionicEnabled) remember(paragraph) { BionicReading.toBionicAnnotated(paragraph, BionicReading.boldSpan()) } else null
                         val knuth = knuthAdjustments["c${page}-p${paraIdx}"]
-                        val baseStyle = MaterialTheme.typography.bodyLarge
+                        val baseStyle = bodyStyle
                         val style = if (knuth != null) {
                             val ls = if (baseStyle.letterSpacing.isSp) (baseStyle.letterSpacing.value + knuth.letterSpacingDelta.value).sp else knuth.letterSpacingDelta
                             baseStyle.copy(letterSpacing = ls, textAlign = if (knuth.useJustify) TextAlign.Justify else baseStyle.textAlign ?: TextAlign.Start)
@@ -2253,6 +2382,8 @@ private fun ChapterSwipePhoneContent(
                     onStylusStrokeFinished = { pts, pressures, tilts -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onAddHighlight(pts, pressures, tilts, page) },
                     onLassoFinished = { pts, bounds -> onLasso(pts, bounds) },
                     modifier = Modifier.fillMaxSize(),
+                    highlightColor = highlightColor,
+                    highlightStyle = highlightStyle,
                 )
                 // Scroll fades
                 val canUp by remember { derivedStateOf { listState.canScrollBackward } }
@@ -2311,6 +2442,12 @@ private fun TwoColumnChapterSwipeContent(
     onPrioritizeXRay: (Int) -> Unit,
     bookId: String? = null,
     fileHash: String? = null,
+    readingFont: FolioReadingFont = FolioReadingFont.DEFAULT,
+    fontSize: FolioFontSize = FolioFontSize.NORMAL,
+    lineSpacing: FolioLineSpacing = FolioLineSpacing.NORMAL,
+    margin: FolioMargin = FolioMargin.NORMAL,
+    highlightColor: Color = FolioHighlightColor.AMBER.color,
+    highlightStyle: String = "FILL",
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -2351,8 +2488,8 @@ private fun TwoColumnChapterSwipeContent(
         onDispose { ReaderPageTurnHandler.onVolumeKey = null }
     }
 
-    val truePageInfo = rememberTruePageState(chapters = chapters, isTabletLandscape = true, bionicEnabled = bionicEnabled, bookId = bookId, fileHash = fileHash)
-    val knuthAdjustments = rememberKnuthAdjustments(chapters = chapters, isTabletLandscape = true, bionicEnabled = bionicEnabled)
+    val truePageInfo = rememberTruePageState(chapters = chapters, isTabletLandscape = true, bionicEnabled = bionicEnabled, bookId = bookId, fileHash = fileHash, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing, margin = margin)
+    val knuthAdjustments = rememberKnuthAdjustments(chapters = chapters, isTabletLandscape = true, bionicEnabled = bionicEnabled, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing, margin = margin)
     val totalFlats = remember(chapters) { chapters.indices.sumOf { idx -> 1 + chapters[idx].paragraphs.size + (if (idx == 0) 1 else 0) + 1 }.coerceAtLeast(1) }
     val currentFlatOffset = remember(chapters, page) {
         var off = 0
@@ -2398,6 +2535,9 @@ private fun TwoColumnChapterSwipeContent(
         }
     }
 
+    val bodyStyle = readingBodyStyle(isTablet = true, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing)
+    val titleStyle = readingTitleStyle(isTablet = true, readingFont = readingFont)
+
     Box(modifier = modifier.fillMaxSize()) {
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize(), beyondViewportPageCount = 1) { p ->
             val lIdx = p * 2
@@ -2408,13 +2548,13 @@ private fun TwoColumnChapterSwipeContent(
                 // Left column
                 if (leftChapter != null) {
                     val lState = leftStates[p]
-                    LazyColumn(state = lState, modifier = Modifier.weight(1f).fillMaxHeight().padding(horizontal = 14.dp, vertical = 8.dp)) {
-                        item(key = "swipe-L-title-$lIdx") { Text(text = leftChapter.title, style = MaterialTheme.typography.titleMedium, color = readingText, modifier = Modifier.padding(top = 20.dp, bottom = 10.dp)) }
+                    LazyColumn(state = lState, modifier = Modifier.weight(1f).fillMaxHeight().padding(horizontal = margin.tabletHorizontal(), vertical = 8.dp)) {
+                        item(key = "swipe-L-title-$lIdx") { Text(text = leftChapter.title, style = titleStyle, color = readingText, modifier = Modifier.padding(top = 20.dp, bottom = 10.dp)) }
                         itemsIndexed(leftChapter.paragraphs, key = { idx, _ -> "swipe-L-c${lIdx}-p$idx" }) { paraIdx, paragraph ->
                             var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
                             val annotated = if (bionicEnabled) remember(paragraph) { BionicReading.toBionicAnnotated(paragraph, BionicReading.boldSpan()) } else null
                             val knuth = knuthAdjustments["c${lIdx}-p${paraIdx}"]
-                            val base = MaterialTheme.typography.bodyMedium
+                            val base = bodyStyle
                             val style = if (knuth != null) {
                                 val ls = if (base.letterSpacing.isSp) (base.letterSpacing.value + knuth.letterSpacingDelta.value).sp else knuth.letterSpacingDelta
                                 base.copy(letterSpacing = ls, textAlign = if (knuth.useJustify) TextAlign.Justify else base.textAlign ?: TextAlign.Start)
@@ -2441,8 +2581,8 @@ private fun TwoColumnChapterSwipeContent(
                 Box(modifier = Modifier.width(1.dp).fillMaxHeight().padding(vertical = 16.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)))
                 if (rightChapter != null) {
                     val rState = rightStates[p]
-                    LazyColumn(state = rState, modifier = Modifier.weight(1f).fillMaxHeight().padding(horizontal = 14.dp, vertical = 8.dp)) {
-                        item(key = "swipe-R-title-$rIdx") { Text(text = rightChapter.title, style = MaterialTheme.typography.titleMedium, color = readingText, modifier = Modifier.padding(top = 20.dp, bottom = 10.dp)) }
+                    LazyColumn(state = rState, modifier = Modifier.weight(1f).fillMaxHeight().padding(horizontal = margin.tabletHorizontal(), vertical = 8.dp)) {
+                        item(key = "swipe-R-title-$rIdx") { Text(text = rightChapter.title, style = titleStyle, color = readingText, modifier = Modifier.padding(top = 20.dp, bottom = 10.dp)) }
                         itemsIndexed(rightChapter.paragraphs, key = { idx, _ -> "swipe-R-c${rIdx}-p$idx" }) { paraIdx, paragraph ->
                             var layoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
                             val annotated = if (bionicEnabled) remember(paragraph) { BionicReading.toBionicAnnotated(paragraph, BionicReading.boldSpan()) } else null
@@ -2477,7 +2617,7 @@ private fun TwoColumnChapterSwipeContent(
             if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             val ch = leftIdx
             onAddHighlight(pts, pressures, tilts, ch)
-        }, onLassoFinished = { pts, bounds -> onLasso(pts, bounds) }, modifier = Modifier.fillMaxSize())
+        }, onLassoFinished = { pts, bounds -> onLasso(pts, bounds) }, modifier = Modifier.fillMaxSize(), highlightColor = highlightColor, highlightStyle = highlightStyle)
         val leftCanUp by remember { derivedStateOf { leftStates.getOrNull(page)?.canScrollBackward == true } }
         val leftCanDown by remember { derivedStateOf { leftStates.getOrNull(page)?.canScrollForward == true } }
         com.makemission.folio.ui.reader.components.TopReadingFade(backgroundColor = readingBackground, visible = leftCanUp, modifier = Modifier.align(Alignment.TopCenter))

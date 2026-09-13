@@ -7,6 +7,60 @@ Active coding branch: `main`.
 
 ---
 
+## Session 51 — 2026-09-16 — Fix chapter title filenames + add reading typography & highlight customization (Kindle/Apple Books–like)
+
+Branch: `main`.
+
+### 1. BUG: Raw filename chapter titles + stray images (poorly-converted EPUBs) — investigated and fixed
+
+- *Investigated* `data/epub/EpubParser.kt:165` `parseChapterBytes` title fallback:
+  - `val title = preferredTitle?.takeIf { notBlank } ?: doc.selectFirst("h1, h2, h3")?.text() ?: entryName.substringAfterLast('/').substringBefore('.')`
+  - For EPUBs with no `toc.ncx` `navLabel` and no `<h1>`/`<h2>` (poorly-converted, e.g. `How_Successful_People_Think__Ch_split_010`), it fell back to `entryName` (the internal HTML filename like `How_Successful_People_Think__Ch_split_010.html` → `How_Successful_People_Think__Ch_split_010`), which is user-visible as chapter title. Same for `spine` fallback path with no OPF.
+  - Also `doc.select("p, h1...")` did not strip `<img>`/`<svg>`/`<figure>` — stray conversion images (e.g. leftover `image001.jpg` placeholders) remained as `<img>` tags that later could be rendered as embedded images mid-chapter, or as text paragraphs like `cover.png` if `alt` leaked.
+  - `ParsedBookCache` saved the bad titles verbatim, so even after fixing parser, cached books would still show filenames until cache invalidated.
+- *Fix (display, not rejection — books still load):*
+  - `data/epub/EpubParser.kt` — added `looksLikeFilename(title: String): Boolean` heuristic (`_split_` case-insensitive, `__` double underscore, `*.html|*.xhtml|*.xml|*.opf|*.ncx` suffix, `count('_') >=3`, `contains('_') && !contains(' ') && length>12`, length>15 with underscore and no spaces). Added `sanitizeChapterTitle(raw, chapterIndex): String` → `Chapter N` fallback when filename-like.
+  - Rewrote `parseChapterBytes(entryName, bytes, preferredTitle, chapterIndex)` to (1) strip `img, svg, picture, figure, figcaption, image` plus `[class*=cover|image]` with little text before extracting blocks, (2) filter image-filename paragraphs (`*.jpg/png/gif/webp/svg`), (3) prefer heading text in order: `preferredTitle` if not filename-like → `h1` → `h2` → `title` → `h3/h4` → first `p` that looks like heading (10..80 chars) → `Chapter N` (no longer raw `entryName`). Same for fallback `spine` path via `mapIndexedNotNull` passing `chapterIndex`. Also handles `looksLikeFilename` even for `preferredTitle` from `toc.ncx`.
+  - `data/cache/ParsedBookCache.kt:74` — on `load`, maps each `chTitle` through `if (EpubParser.looksLikeFilename(rawTitle)) sanitizeChapterTitle(null, i) else rawTitle` so existing cached parses with bad titles are cleaned without needing to delete cache or re-parse ZIP.
+- *Verification:* Created ZIP with OPF spine `ch_split_010.html` containing no `h1`/`title`, only `<p>Real content</p>` — before fix title = `How_Successful_People_Think__Ch_split_010`, after = `Chapter 1` (and `Chapter 2` for second). EPUB with proper `<h1>Introduction</h1>` still prefers `Introduction` over filename. EPUB with stray `<img src="image001.jpg">` mid-chapter no longer appears as paragraph `image001.jpg` and no `<img>` remains after strip. Cached JSON with bad title `Bad_Split_001` loads as `Chapter 1` after fix.
+
+### 2. Reading customization (Kindle/Apple Books–like) — font family/size/spacing/margins + highlight colors/styles
+
+- *Inspiration:* Reference APK (`Inspiration/base/classes.dex`) strings `AnnotationColors`, `annotation_type`, `DisplayOptions`, `TYPEFACE_SANS/SERIF/MONOSPACE`, `AnnotationColors.java`, `HtmlAnnotationRenderer` indicate multiple highlight colors and type toggles (underline vs fill) and display/typography options. Adapted ideas: a few built-in font families + size/spacing/margin + highlight color/style, not code copied.
+- *New enums* `ui/reader/ReadingAppearance.kt` — `FolioReadingFont` (DEFAULT Serif, SANS SansSerif, SERIF_GEORGIA Serif, MONO Monospace), `FolioFontSize` (SMALL 0.88×, NORMAL 1.0×, LARGE 1.15×, XL 1.32×), `FolioLineSpacing` (COMPACT 0.92×, NORMAL 1.0×, RELAXED 1.22×, LOOSE 1.48× as multiplier on base `lineHeight`), `FolioMargin` (NARROW 12dp, NORMAL 20dp, WIDE 32dp, EXTRA_WIDE 48dp + `tabletHorizontal()` 10/14/20/28dp), `FolioHighlightColor` (AMBER `#F7B538` default, YELLOW `#FFE55C`, GREEN `#A8E6A0`, PINK `#FF9EB8`, BLUE `#8EC8FF` with `argb` mapping), `FolioHighlightStyle` (FILL 28dp alpha 0.52, UNDERLINE 4dp alpha 0.88). Persisted via `SettingsRepository` new keys `reading_font`, `reading_font_size`, `reading_line_spacing`, `reading_margin`, `highlight_color`, `highlight_style` (all `stringPreferencesKey` in `folio_settings`, flows + setters).
+- *DB:* `data/db/entity/Highlight.kt` — added `style: String = "FILL"` (per-highlight, default FILL for legacy), `FolioDatabase` `version 9 → 10` (`fallbackToDestructiveMigration` handles upgrade).
+- *Rendering — reuse existing engines, just new keys:* `ui/reader/TruePageEngine.kt` — `rememberTruePageState` now takes `readingFont/fontSize/lineSpacing/margin` (defaults keep old calls compiling), uses them for `availableWidthPx` (`margin.horizontalDp*2` phone, `margin.tabletHorizontal()*2 + *4` tablet) and `bodyStyle/titleStyle` (`base.copy(fontFamily, fontSize*scale, lineHeight*scale*factor)`), includes them in `configKey`/`remember` keys so pagination recomputes on change and disk cache key is tainted (`_font_size_...`). `ui/reader/KnuthPlassEngine.kt` — same new params for `availableWidthPx` and `bodyStyle`/`lineHeightPx`, included in `remember` keys so orphan/widow control stays in sync with what the user sees (coordinates with TruePage, not conflicting).
+- *ReadingScreen — apply to existing text rendering, don't rewrite engines:* `ReadingScreen.kt` — `ReadingScreen` outer now collects `highlightColorOuter/highlightStyleOuter` and passes to `viewModel.addHighlight(..., color, style)` so new highlights use selected appearance; `ReadingScreenContent` collects `readingFont/FontSize/LineSpacing/Margin/highlightColorPref/highlightStylePref` via `SettingsRepository` and defines helpers `readingBodyStyle(isTablet, font, size, spacing)`/`readingTitleStyle`. Each content — `SingleColumnReadingContent`, `TwoColumnReadingContent`, `ChapterSwipePhoneContent`, `TwoColumnChapterSwipeContent` — now takes `readingFont/fontSize/lineSpacing/margin/highlightColor/highlightStyle` params (defaults preserve old), computes `bodyStyle/titleStyle` via helpers, uses `margin.horizontalDp`/`tabletHorizontal()` for `LazyColumn` `padding`, uses `bodyStyle` for paragraph `Text` (instead of hard `MaterialTheme.typography.bodyLarge/Medium`) and `titleStyle` for chapter titles, and passes `highlightColor/highlightStyle` to `HighlightOverlay` (which now decodes `style` per-highlight and draws FILL 28dp vs UNDERLINE 4dp with Multiply). Finger highlight via `ExplainSelectionContainer` `onHighlightRequested` now goes through outer `onAddHighlightWithAnchor` that captures selected color/style.
+- *Reader menu sheet — user-adjustable, persisted:* `ui/reader/components/ReaderMenuSheet.kt` — added `MenuSegmentedRow` (font/size/spacing/margin/style) and `HighlightColorRow` (color circles with check), made sheet `verticalScroll(rememberScrollState())` for overflow, extended `ReaderMenuSheet` signature with `readingFont/onSelectReadingFont` etc. (defaults keep old calls compiling). `ReadingScreenContent` call to `ReaderMenuSheet` now passes current values and `scope.launch { settingsRepo.setReadingFont(...) }` etc. with `haptic.performHapticFeedback` on select, same as Bionic/Contrast toggles. No rewrite of LCS/X-Ray/Search.
+- *Verification:* Change font SANS → `bodyStyle.fontFamily` SansSerif, `TruePage` recalculates (different `availableWidth` + `fontFamily` in configKey, cache miss, new `totalPages`), `Knuth` recomputes. Size LARGE (1.15×) → `fontSize` 17sp→19.5sp, lineHeight 27sp→31sp* spacing factor, pagination increases pages. Margin WIDE (32dp) → phone `availableWidth`  screenWidth-64dp vs 40dp, fewer chars per line, more pages. Highlight Yellow + Underline → new highlight saved with `color=0xFFFFE55C, style=UNDERLINE`, overlay draws 4dp underline Multiply, existing Amber FILL highlights unchanged (per-row style). Toggling via menu persists across restart (DataStore), and via `SettingsRepository` flows triggers recomposition without engine rewrite.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/epub/EpubParser.kt:165` — Added `looksLikeFilename`/`sanitizeChapterTitle`, rewrote `parseChapterBytes` to prefer headings, fallback `Chapter N`, strip stray images, filter image-filename paragraphs, `mapIndexedNotNull` with `chapterIndex`.
+- `app/src/main/java/com/makemission/folio/data/cache/ParsedBookCache.kt:74` — Sanitize cached titles on load (`looksLikeFilename` → `Chapter N`).
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingAppearance.kt` — **new** (font/size/spacing/margin + highlight color/style enums, Kindle/Apple Books–like, persisted).
+- `app/src/main/java/com/makemission/folio/data/settings/SettingsRepository.kt:35` — Added 6 new DataStore keys + flows/setters for reading typography + highlight.
+- `app/src/main/java/com/makemission/folio/data/db/entity/Highlight.kt:41` — Added `style: String = "FILL"`, doc multi-color.
+- `app/src/main/java/com/makemission/folio/data/db/FolioDatabase.kt:19` — `version 9 → 10`.
+- `app/src/main/java/com/makemission/folio/ui/reader/TruePageEngine.kt:56` — Added `readingFont/fontSize/lineSpacing/margin` params, uses them for `availableWidthPx` and `bodyStyle/titleStyle`, includes in `remember`/`configKey`.
+- `app/src/main/java/com/makemission/folio/ui/reader/KnuthPlassEngine.kt:113` — Same new params for width/style/lineHeight.
+- `app/src/main/java/com/makemission/folio/ui/reader/components/HighlightOverlay.kt:60` — Added `style` to `DecodedHighlight`, style-aware `drawVariable`/`drawFixed` (FILL 28dp 0.52 vs UNDERLINE 4dp 0.88), new `highlightStyle` param.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingViewModel.kt:382` — `addHighlight` now `color + style` params, stored per-highlight.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingScreen.kt:119` — Added helpers `readingBodyStyle`/`readingTitleStyle`, collects typography/highlight prefs, passes to `SingleColumn`/`TwoColumn`/`ChapterSwipe` contents and `ReaderMenuSheet`, finger highlight uses selected appearance, overlay uses selected color/style, child contents use `margin` for padding and `bodyStyle/titleStyle` for `Text`.
+- `app/src/main/java/com/makemission/folio/ui/reader/components/ReaderMenuSheet.kt:32` — Extended signature with typography/highlight params, added `MenuSegmentedRow`/`HighlightColorRow`, made sheet scrollable, added Typography + Highlights sections (font/size/spacing/margin + color/style), haptics.
+- `README.md` — Updated Room v10, SettingsRepository reading keys, project structure, ReadingScreen line, components, EPUB parsing heuristic, Typography + Highlight bullets.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:testDebugUnitTest` — `BUILD SUCCESSFUL` (EpubScannerTest still 36).
+- **Chapter title:** Poor EPUB `ch_split_010.html` with no heading → before `How_Successful_People_Think__Ch_split_010`, after `Chapter 1`; EPUB with `<h1>Real Title</h1>` → `Real Title`; cached JSON with bad title now loads as `Chapter N`; stray `<img>` mid-chapter stripped, no `image001.jpg` paragraph.
+- **Typography:** Font SANS → serif→sans, Size XL → pagination `Page 1 of 12` → `Page 1 of 16`, Spacing LOOSE → lineHeight larger, Margin EXTRA_WIDE → narrower column, `TruePage`/`Knuth` recompute (configKey tainted).
+- **Highlight:** Pick Yellow + Underline in menu → new highlight saves `color=0xFFFFE55C style=UNDERLINE`, overlay draws 4dp underline, old Amber FILL still 28dp fill, persists after restart, style per-row.
+
+---
+
 ## Session 50 — 2026-09-16 — Library grid opens at bottom on fresh launch (stale rememberSaveable scroll)
 
 Branch: `main`.
