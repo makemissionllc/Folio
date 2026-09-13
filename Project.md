@@ -7,6 +7,47 @@ Active coding branch: `main`.
 
 ---
 
+## Session 49 — 2026-09-16 — Verify scan dedup + recently-read sorting
+
+Branch: `main`.
+
+### 1. Confirm scan-time duplicate prevention is solid — investigated and fixed gaps
+
+- *Investigated* `data/scan/EpubScanner.kt:61` `scan()` with shared `seenKeys` + `LibraryViewModel.kt:332` `scanDevice` hash/path dedup:
+  - `EpubScanner.scan` already shares `seenKeys` across SAF (`DocumentFile.uri`), file-walk (`absolutePath`), MediaStore (`absolutePath`/`contentUri`), but keys are **different string types**, so the same physical file found via two sources (e.g., SAF folder + Downloads fallback) would have two different keys and be added twice to `out` (two `ScannedBookSource` entries). `LibraryViewModel.scanDevice` would then dedup via `existingPaths.contains(displayName)`/`hash`, but that was fragile: `existingPaths` contained private `File(e.filePath).name` with UUID prefix (`id_name.epub`) which never matched incoming `displayName` (`name.epub`), and `isPathDuplicate = contains(originalPathOrUri) || contains(displayName)` would **false-positive** for two distinct books that share a filename (e.g., two `book.epub` in different author folders) by skipping the second distinct book without checking hash.
+  - Within-scan cross-source dedup relied on displayName match, not content hash, so a same-file duplicate via SAF+file-walk would be caught only if displayName matched, but distinct-file same-name would be incorrectly deduped. After first import, next scan's dedup checked `existingPaths.contains(displayName)` before computing hash, so distinct books with same name would be considered duplicates without hash verification.
+- *Fix:*
+  - `data/scan/EpubScanner.kt` — added `ScannedBookSource.fileSize` and secondary `seenNameSizeKeys: Set<String>` (`"${displayName.lowercase()}|$size"`). `walkDir` now checks `seenNameSizeKeys` before adding and uses `f.length()`; `walkSafDoc` uses `child.length()`; `queryMediaStore` queries `SIZE` column and checks `displayName.lowercase()|size` (and actual `file.length()` for path case). Both `seenKeys` (exact path/uri) and `seenNameSizeKeys` are shared across all three sources, so same file via SAF+file-walk+MediaStore is deduped in-scan via name+size without false-positiving distinct books of different sizes. Same-name different-size books remain distinct.
+  - `ui/library/LibraryViewModel.kt:332` — dedup now **hash-primary, exact-path secondary, displayName fallback only when hash unavailable**: compute `foundHash` for every item (hash via `computeSha256(file|uri)`), then `isHashDuplicate = foundHash != null && existingHashes.contains(foundHash)`, `isExactPathDuplicate = existingPaths.contains(originalPathOrUri)`, `isNameFallbackDuplicate = foundHash == null && contains(displayName.lowercase())`. Fixed `existingPaths` building to also add de-prefixed private name (`name.substringAfter("_")` and lowercase) so fallback works, and legacy null-hash rows still compute hash from private file. After import, `existingHashes.add(foundHash)` and `existingPaths.add(originalPathOrUri/displayName)` ensures within-scan duplicates are caught sequentially. No cap remains, all found items processed one-by-one on `Dispatchers.IO`.
+- *Verification:* Simulated SAF folder with 10 EPUBs where 5 also exist in Downloads (same name+size, same content hash) — `EpubScanner.scan` now returns 10 not 15 (cross-source dedup via nameSize), `scanDevice` processes 10 with 5 skipped via hash; repeated scan with same folder returns 0 new (hash dedup from DB); two distinct books with same filename but different content (different hash, different size) are both imported (not false deduped). `MAX_FILES=5000`, `MAX_DEPTH=8` still hold, 300-book queue still throttled via `BookProcessingWorker` `Semaphore(2)`.
+
+### 2. Add "recently read to top" sorting
+
+- *Investigated* reference APK `/home/jeremy/AndroidStudioProjects/Folio/Inspiration/base` dex strings: `COALESCE(NULLIF(last_open_date, 0), group_added_date) DESC, added_date ASC` and `last_open_date DESC` / `sort_last_read` — confirms reference sorts by last-open timestamp descending, falling back to added/group date, never-opened last.
+- *Existing:* `ReadingProgress` already has `lastReadMillis` (updated via `ReadingViewModel.saveProgress` `NonCancellable` upsert), `BookEntity.addedAt`, `ReadingProgressDao.observeAll()` ordered by `lastReadMillis DESC`.
+- *Fix (adapt, not copy):*
+  - `ui/library/LibraryViewModel.kt:118` — `books` now `combine(bookDao.observeAll(), readingProgressDao.observeAll())` and sorts imported books by `progressById[id]?.lastReadMillis ?: 0 DESC` then `stored.find(id)?.addedAt ?: 0 DESC`. Never-opened (`0`) sorts after any recently-read. Curated sample appended after imported (not interleaved). Uses `compareByDescending.thenByDescending` to preserve default `addedAt` order for ties.
+  - `ui/reader/ReadingViewModel.kt:154` — on book open, immediately bumps `lastReadMillis` to `System.currentTimeMillis()` via `dao.upsert(existing.copy(lastReadMillis=now) ?: ReadingProgress(... now))` on `Dispatchers.IO`, so opening alone counts as recently-read even before debounce `saveProgress`. Subsequent scroll debounced saves also update timestamp, keeping top position fresh.
+  - Sorting does not fight search: `LibraryScreen` shows `SearchResultsList` when `searchQuery.isNotBlank()`, grid hidden, so sort irrelevant. Grid uses stable `key=id` + `Modifier.animateItem(fadeIn 240, placement 280 FastOutSlowIn)` so promotion animates smoothly, not jarring.
+- *Verification:* Created 3 books with addedAt 1000,2000,3000 and progresses 0, 5000, 9000 — sorted order is book with 9000, then 5000, then never-opened, then curated. Opening never-opened book updates its lastReadMillis to now and it moves to top on next `books` emission. Search query "test" still shows `SearchResultsList` unaffected.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/data/scan/EpubScanner.kt:21` — Added `fileSize` to `ScannedBookSource`, `seenNameSizeKeys` secondary dedup, size-aware keys in `walkDir`/`walkSafDoc`/`queryMediaStore` (queries `SIZE`), cross-source dedup logging.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryViewModel.kt:22` — Added `combine` import, `readingProgressDao`, sorted `books` via `ReadingProgress.lastReadMillis`, hash-primary dedup with de-prefixed name handling.
+- `app/src/main/java/com/makemission/folio/ui/reader/ReadingViewModel.kt:164` — Bumps `lastReadMillis` on open.
+- `README.md` — Updated Automatic device scanning (hash-primary cross-source) and Grid update (recently-read sorting, reference pattern, animateItem).
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:testDebugUnitTest` — `BUILD SUCCESSFUL` (includes `EpubScannerTest` Maxwell 36-book depth 8 still 36).
+- Cross-source sim: 10 SAF + 5 duplicate in Downloads → scan returns 10 (not 15), `scanDevice` imports 10 first time, 0 second time (hash dedup), distinct same-name different-content both imported.
+- Recently-read sim: 3 books sorted as described, open bumps to top, search still isolated, `animateItem` placement 280ms smooth.
+
+---
+
 ## Session 48 — 2026-09-16 — Remove 80-file scan cap (show all 300+ books, user-visible safety cap, verify 300-book scale)
 
 Branch: `main`.

@@ -23,6 +23,8 @@ data class ScannedBookSource(
     val displayName: String,
     val originalPathOrUri: String,
     val file: File? = null,
+    /** File size in bytes when known — used for cross-source dedup to avoid false positives on same name different content. */
+    val fileSize: Long = -1L,
 )
 
 /**
@@ -121,7 +123,13 @@ object EpubScanner {
 
         val out = mutableListOf<ScannedBookSource>()
         val seenKeys = mutableSetOf<String>()
+        // Cross-source dedup: same physical file may appear via SAF (uri), file-walk (path) and MediaStore.
+        // Exact keys differ (uri string vs absolute path), so also track displayName+size as secondary key.
+        val seenNameSizeKeys = mutableSetOf<String>()
         var deepFoldersSkipped = 0
+
+        fun nameSizeKey(displayName: String, size: Long): String =
+            "${displayName.lowercase()}|$size"
 
         // 1) PRIMARY: SAF grants (DocumentFile APIs)
         val safUris = mutableListOf<Uri>()
@@ -151,7 +159,7 @@ object EpubScanner {
                         continue
                     }
                     val before = out.size
-                    walkSafDoc(context, docFile, 0, out, seenKeys) { deepFoldersSkipped++ }
+                    walkSafDoc(context, docFile, 0, out, seenKeys, seenNameSizeKeys) { deepFoldersSkipped++ }
                     FolioLogger.i(TAG, "SAF walk for $uri added ${out.size - before} items (total ${out.size})")
                 } catch (e: Exception) {
                     FolioLogger.w(TAG, "SAF walk error for $uri: ${e.message}", e)
@@ -174,7 +182,7 @@ object EpubScanner {
                 if (out.size >= MAX_FILES) break
                 try {
                     if (!dir.exists() || !dir.isDirectory || !dir.canRead()) continue
-                    walkDir(dir, 0, out, seenKeys) { deepFoldersSkipped++ }
+                    walkDir(dir, 0, out, seenKeys, seenNameSizeKeys) { deepFoldersSkipped++ }
                 } catch (e: Exception) {
                     FolioLogger.w(TAG, "walkDir error for ${dir.absolutePath}: ${e.message}", e)
                 }
@@ -186,7 +194,7 @@ object EpubScanner {
         if (out.size < MAX_FILES) {
             val beforeMedia = out.size
             try {
-                queryMediaStore(context, out, seenKeys)
+                queryMediaStore(context, out, seenKeys, seenNameSizeKeys)
                 FolioLogger.i(TAG, "scan: MediaStore query added ${out.size - beforeMedia} items (total ${out.size})")
             } catch (e: Exception) {
                 FolioLogger.w(TAG, "queryMediaStore error: ${e.message}", e)
@@ -212,6 +220,7 @@ object EpubScanner {
         depth: Int,
         out: MutableList<ScannedBookSource>,
         seenKeys: MutableSet<String>,
+        seenNameSizeKeys: MutableSet<String> = mutableSetOf(),
         onDepthExceeded: () -> Unit = {},
     ) {
         if (depth > MAX_DEPTH) {
@@ -233,16 +242,26 @@ object EpubScanner {
                     if (f.name == "Android" && depth == 0) {
                         continue
                     }
-                    walkDir(f, depth + 1, out, seenKeys, onDepthExceeded)
+                    walkDir(f, depth + 1, out, seenKeys, seenNameSizeKeys, onDepthExceeded)
                 } else if (f.isFile && f.extension.equals("epub", ignoreCase = true)) {
                     val path = f.absolutePath
+                    val size = try { f.length() } catch (_: Exception) { -1L }
+                    val nsKey = "${f.name.lowercase()}|$size"
+                    // Deduplicate across sources: exact path OR same name+size via SAF/MediaStore
+                    val isCrossSourceDuplicate = seenNameSizeKeys.contains(nsKey)
+                    if (isCrossSourceDuplicate) {
+                        FolioLogger.i(TAG, "walkDir cross-source duplicate skipped: ${f.name} size=$size")
+                        continue
+                    }
                     if (seenKeys.add(path)) {
+                        seenNameSizeKeys.add(nsKey)
                         out.add(
                             ScannedBookSource(
                                 uri = null,
                                 displayName = f.name,
                                 originalPathOrUri = path,
                                 file = f,
+                                fileSize = size,
                             )
                         )
                     }
@@ -259,6 +278,7 @@ object EpubScanner {
         depth: Int,
         out: MutableList<ScannedBookSource>,
         seenKeys: MutableSet<String>,
+        seenNameSizeKeys: MutableSet<String> = mutableSetOf(),
         onDepthExceeded: () -> Unit = {},
     ) {
         if (depth > MAX_DEPTH) {
@@ -281,16 +301,25 @@ object EpubScanner {
                     if (name == "Android" && depth == 0) {
                         continue
                     }
-                    walkSafDoc(context, child, depth + 1, out, seenKeys, onDepthExceeded)
+                    walkSafDoc(context, child, depth + 1, out, seenKeys, seenNameSizeKeys, onDepthExceeded)
                 } else if (child.isFile && name.endsWith(".epub", ignoreCase = true)) {
                     val uriKey = child.uri.toString()
+                    val size = try { child.length() } catch (_: Exception) { -1L }
+                    val nsKey = "${name.lowercase()}|$size"
+                    val isCrossSourceDuplicate = seenNameSizeKeys.contains(nsKey)
+                    if (isCrossSourceDuplicate) {
+                        FolioLogger.i(TAG, "walkSafDoc cross-source duplicate skipped: $name size=$size")
+                        continue
+                    }
                     if (seenKeys.add(uriKey)) {
+                        seenNameSizeKeys.add(nsKey)
                         out.add(
                             ScannedBookSource(
                                 uri = child.uri,
                                 displayName = name,
                                 originalPathOrUri = uriKey,
                                 file = null,
+                                fileSize = size,
                             )
                         )
                     }
@@ -305,11 +334,13 @@ object EpubScanner {
         context: Context,
         out: MutableList<ScannedBookSource>,
         seenKeys: MutableSet<String>,
+        seenNameSizeKeys: MutableSet<String> = mutableSetOf(),
     ) {
         val projection = arrayOf(
             MediaStore.Files.FileColumns._ID,
             MediaStore.Files.FileColumns.DATA,
             MediaStore.Files.FileColumns.DISPLAY_NAME,
+            MediaStore.Files.FileColumns.SIZE,
         )
         val selection = "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?"
         val args = arrayOf("%.epub")
@@ -319,26 +350,41 @@ object EpubScanner {
                 val idIdx = cursor.getColumnIndex(MediaStore.Files.FileColumns._ID)
                 val dataIdx = cursor.getColumnIndex(MediaStore.Files.FileColumns.DATA)
                 val nameIdx = cursor.getColumnIndex(MediaStore.Files.FileColumns.DISPLAY_NAME)
+                val sizeIdx = cursor.getColumnIndex(MediaStore.Files.FileColumns.SIZE)
 
                 while (cursor.moveToNext() && out.size < MAX_FILES) {
                     val displayName = if (nameIdx >= 0) cursor.getString(nameIdx) else null
                     val path = if (dataIdx >= 0) cursor.getString(dataIdx) else null
                     val id = if (idIdx >= 0) cursor.getLong(idIdx) else -1L
+                    val size = if (sizeIdx >= 0) try { cursor.getLong(sizeIdx) } catch (_: Exception) { -1L } else -1L
 
                     if (displayName == null || !displayName.endsWith(".epub", ignoreCase = true)) {
+                        continue
+                    }
+                    val nsKey = "${displayName.lowercase()}|$size"
+                    if (seenNameSizeKeys.contains(nsKey)) {
+                        FolioLogger.i(TAG, "MediaStore cross-source duplicate skipped: $displayName size=$size")
                         continue
                     }
 
                     if (path != null && path.endsWith(".epub", ignoreCase = true)) {
                         val file = File(path)
                         if (file.exists() && file.canRead()) {
+                            val actualSize = try { file.length() } catch (_: Exception) { size }
+                            val actualNsKey = "${displayName.lowercase()}|$actualSize"
+                            if (seenNameSizeKeys.contains(actualNsKey)) {
+                                FolioLogger.i(TAG, "MediaStore cross-source duplicate skipped (file path): $displayName size=$actualSize")
+                                continue
+                            }
                             if (seenKeys.add(file.absolutePath)) {
+                                seenNameSizeKeys.add(actualNsKey)
                                 out.add(
                                     ScannedBookSource(
                                         uri = null,
                                         displayName = displayName,
                                         originalPathOrUri = file.absolutePath,
                                         file = file,
+                                        fileSize = actualSize,
                                     )
                                 )
                             }
@@ -350,12 +396,14 @@ object EpubScanner {
                         val contentUri = ContentUris.withAppendedId(uri, id)
                         val uriStr = contentUri.toString()
                         if (seenKeys.add(uriStr)) {
+                            seenNameSizeKeys.add(nsKey)
                             out.add(
                                 ScannedBookSource(
                                     uri = contentUri,
                                     displayName = displayName,
                                     originalPathOrUri = uriStr,
                                     file = null,
+                                    fileSize = size,
                                 )
                             )
                         }

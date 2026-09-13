@@ -161,6 +161,23 @@ class ReadingViewModel(
                 fileHash = fileHash,
             )
 
+            // Recently-read sorting (§6): bump lastReadMillis on open so Library sorts this book to top.
+            // This ensures opening alone counts as "recently read" even if user doesn't scroll far.
+            try {
+                withContext(Dispatchers.IO) {
+                    val now = System.currentTimeMillis()
+                    val existing = try { dao.get(bookId) } catch (_: Exception) { null }
+                    val toSave = if (existing != null) {
+                        existing.copy(lastReadMillis = now)
+                    } else {
+                        ReadingProgress(bookId = bookId, chapterIndex = chapterIdx, paragraphIndex = paraIdx, lastReadMillis = now)
+                    }
+                    dao.upsert(toSave)
+                }
+            } catch (e: Exception) {
+                FolioLogger.w("Reading", "Failed to bump lastRead on open for $bookId: ${e.message}", e)
+            }
+
             // X-Ray (§5): chapter-level progressive — prioritize current chapter, then next, then rest
             launchProgressiveXRay(app, bookId, chapters, fileHash, chapterIdx)
 

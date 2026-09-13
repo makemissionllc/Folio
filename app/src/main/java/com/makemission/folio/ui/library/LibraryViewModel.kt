@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.firstOrNull
@@ -115,22 +116,35 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         _searchResults.value = emptyList()
     }
 
-    /** Imported books + curated samples so the grid is never empty before first import. */
-    val books: StateFlow<List<Book>> = bookDao.observeAll()
-        .map { stored ->
-            val imported = stored.map { e ->
-                Book(
-                    id = e.id,
-                    title = e.title,
-                    author = e.author,
-                    coverColor = pickCoverColor(e.id),
-                    filePath = e.filePath,
-                    coverImagePath = e.coverImagePath,
-                )
-            }
-            imported + curatedSampleBooks()
-        }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, curatedSampleBooks())
+    /** Imported books + curated samples so the grid is never empty before first import.
+     * Sorted recently-read first: most recently opened (ReadingProgress.lastReadMillis) at top,
+     * then the rest by addedAt DESC (current default). Never-opened after any recently-read.
+     * Adapted from reference app's COALESCE(NULLIF(last_open_date,0),group_added_date) DESC pattern.
+     */
+    private val readingProgressDao = db.readingProgressDao()
+    val books: StateFlow<List<Book>> = combine(
+        bookDao.observeAll(),
+        readingProgressDao.observeAll()
+    ) { stored, progresses ->
+        val progressById = progresses.associateBy { it.bookId }
+        val imported = stored.map { e ->
+            Book(
+                id = e.id,
+                title = e.title,
+                author = e.author,
+                coverColor = pickCoverColor(e.id),
+                filePath = e.filePath,
+                coverImagePath = e.coverImagePath,
+            )
+        }.sortedWith(
+            compareByDescending<Book> { progressById[it.id]?.lastReadMillis ?: 0L }
+                .thenByDescending { stored.find { s -> s.id == it.id }?.addedAt ?: 0L }
+        )
+        // Keep curated sample at end — it has no progress and should not displace real books
+        val curated = curatedSampleBooks()
+        // If user has no real books, show curated; otherwise curated after imported
+        if (imported.isEmpty()) curated else imported + curated
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, curatedSampleBooks())
 
     private fun pickCoverColor(id: String): androidx.compose.ui.graphics.Color {
         val idx = (id.hashCode() and Int.MAX_VALUE) % FolioCoverPalette.size
@@ -317,13 +331,20 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 // Load existing for deduplication (hash + path)
                 val existing = withContext(Dispatchers.IO) { try { bookDao.getAll() } catch (_: Exception) { emptyList() } }
                 // Build existing hash set (compute missing legacy hashes lazily)
+                // Hash is primary (content), exact path is secondary, displayName only as fallback when hash unavailable.
                 val existingHashes = mutableSetOf<String>()
                 val existingPaths = mutableSetOf<String>()
                 for (e in existing) {
                     e.fileHash?.let { existingHashes.add(it) }
                     e.importedFromPath?.let { existingPaths.add(it) }
-                    // Also add filename fallback
-                    try { existingPaths.add(File(e.filePath).name) } catch (_: Exception) {}
+                    // Also add de-prefixed private filename (books/<id>_<name> -> <name>) for fallback
+                    try {
+                        val name = File(e.filePath).name
+                        existingPaths.add(name)
+                        val dePrefixed = if ("_" in name) name.substringAfter("_") else name
+                        existingPaths.add(dePrefixed)
+                        existingPaths.add(dePrefixed.lowercase())
+                    } catch (_: Exception) {}
                     // Legacy rows with null hash: compute from private file for accurate dedup
                     if (e.fileHash == null) {
                         try {
@@ -339,21 +360,18 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 var skipped = 0
                 for ((idx, item) in found.withIndex()) {
                     _scanProgress.value = "Scanning ${idx + 1}/${found.size} · ${imported} new"
-                    // --- Deduplication: path / name / hash ---
-                    val isPathDuplicate = existingPaths.contains(item.originalPathOrUri) ||
-                            existingPaths.contains(item.displayName)
-
-                    val foundHash = if (!isPathDuplicate) {
-                        withContext(Dispatchers.IO) {
-                            item.file?.let { computeSha256(it) } ?: item.uri?.let { computeSha256(context, it) }
-                        }
-                    } else null
-
-                    val isDuplicate = when {
-                        isPathDuplicate -> true
-                        foundHash != null && existingHashes.contains(foundHash) -> true
-                        else -> false
+                    // --- Deduplication: hash primary, exact path secondary, displayName fallback ---
+                    // Compute hash first (content-accurate, handles same file via SAF vs file-walk vs MediaStore)
+                    val foundHash = withContext(Dispatchers.IO) {
+                        item.file?.let { computeSha256(it) } ?: item.uri?.let { computeSha256(context, it) }
                     }
+                    val isHashDuplicate = foundHash != null && existingHashes.contains(foundHash)
+                    val isExactPathDuplicate = existingPaths.contains(item.originalPathOrUri)
+                    // DisplayName fallback only when hash unavailable (e.g., read failed) — avoids false positive for distinct books same name
+                    val isNameFallbackDuplicate = foundHash == null && (
+                        existingPaths.contains(item.displayName) || existingPaths.contains(item.displayName.lowercase())
+                    )
+                    val isDuplicate = isHashDuplicate || isExactPathDuplicate || isNameFallbackDuplicate
                     if (isDuplicate) {
                         skipped++
                         continue
