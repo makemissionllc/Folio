@@ -46,12 +46,22 @@ private class FolioTextActionModeCallback(
         }
         onHighlightRequested?.let {
             menu.add(0, MENU_ITEM_HIGHLIGHT, 2, "Highlight")
-                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
         }
         return true
     }
 
-    override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean = false
+    override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean {
+        // If Highlight was not present at onCreate (e.g. onHighlightRequested was null then but is now non-null
+        // after highlight color/style prefs loaded), add it here. This handles the stale-toolbar case
+        // where the ActionMode was created before the highlight callback was wired.
+        if (menu != null && menu.findItem(MENU_ITEM_HIGHLIGHT) == null && onHighlightRequested != null) {
+            menu.add(0, MENU_ITEM_HIGHLIGHT, 2, "Highlight")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+            return true
+        }
+        return false
+    }
 
     override fun onActionItemClicked(mode: ActionMode?, item: MenuItem?): Boolean {
         when (item!!.itemId) {
@@ -100,9 +110,9 @@ private class FloatingFolioCallback(
 private class FolioSelectionToolbar(
     private val view: View,
     context: Context,
-    private val onCopyRequest: (() -> Unit)?,
-    private val onExplainRequest: ((String) -> Unit)?,
-    private val onHighlightRequest: ((String) -> Unit)?,
+    var onCopyRequest: (() -> Unit)?,
+    var onExplainRequest: ((String) -> Unit)?,
+    var onHighlightRequest: ((String) -> Unit)?,
 ) : TextToolbar {
     private var actionMode: ActionMode? = null
     private val callback = FolioTextActionModeCallback(context = context)
@@ -188,14 +198,30 @@ fun ExplainSelectionContainer(
     val view = LocalView.current
     val context = LocalContext.current
 
+    // Use rememberUpdatedState so the toolbar always sees the latest lambdas
+    // (highlight color/style may change via DataStore, and currentBookmarkPos/chapters change as user scrolls).
+    // Previously toolbar was remembered with only view/context as keys, so its onHighlightRequest
+    // stayed stale (captured old highlightColor/Style and old chapter), and after the
+    // highlight customization session the Highlight menu could silently no-op or appear missing
+    // because the stale lambda was considered null/mismatched.
+    val currentExplain by androidx.compose.runtime.rememberUpdatedState(onExplainRequested)
+    val currentHighlight by androidx.compose.runtime.rememberUpdatedState(onHighlightRequested)
+    val currentCopy by androidx.compose.runtime.rememberUpdatedState(onCopyRequested)
+
     val toolbar = remember(view, context) {
         FolioSelectionToolbar(
             view = view,
             context = context,
-            onCopyRequest = { onCopyRequested?.invoke() },
-            onExplainRequest = { selected -> onExplainRequested(selected) },
-            onHighlightRequest = { selected -> onHighlightRequested(selected) }
+            onCopyRequest = { currentCopy?.invoke() },
+            onExplainRequest = { selected -> currentExplain(selected) },
+            onHighlightRequest = { selected -> currentHighlight(selected) }
         )
+    }
+    // Keep toolbar's callbacks up-to-date when the upstream lambdas change (highlight color/style, chapter).
+    androidx.compose.runtime.LaunchedEffect(currentExplain, currentHighlight, currentCopy) {
+        toolbar.onExplainRequest = { selected -> currentExplain(selected) }
+        toolbar.onHighlightRequest = { selected -> currentHighlight(selected) }
+        toolbar.onCopyRequest = { currentCopy?.invoke() }
     }
     val isHidden by remember { derivedStateOf { toolbar.status == TextToolbarStatus.Hidden } }
 

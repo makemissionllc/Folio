@@ -196,8 +196,8 @@ fun ReadingScreen(
         onAddHighlight = { pts, pressures, tilts, ch ->
             viewModel.addHighlight(pts, pressures, tilts, ch, color = highlightColorOuter.color, style = highlightStyleOuter.name)
         },
-        onAddHighlightWithAnchor = { pts, pressures, tilts, ch, anchor ->
-            viewModel.addHighlight(pts, pressures, tilts, ch, anchorText = anchor, color = highlightColorOuter.color, style = highlightStyleOuter.name)
+        onAddHighlightWithAnchor = { pts, pressures, tilts, ch, anchor, color, style ->
+            viewModel.addHighlight(pts, pressures, tilts, ch, anchorText = anchor, color = color, style = style)
         },
         onTrackVocabulary = viewModel::trackVocabulary,
         onToggleBookmark = viewModel::toggleBookmark,
@@ -225,7 +225,7 @@ private fun ReadingScreenContent(
     onBack: () -> Unit,
     onSaveProgress: (Int, Int) -> Unit,
     onAddHighlight: (List<Offset>, List<Float>, List<Float>, Int) -> Unit,
-    onAddHighlightWithAnchor: (List<Offset>, List<Float>, List<Float>, Int, String) -> Unit = { _, _, _, _, _ -> },
+    onAddHighlightWithAnchor: (List<Offset>, List<Float>, List<Float>, Int, String, Color, String) -> Unit = { _, _, _, _, _, _, _ -> },
     onTrackVocabulary: (String, String?) -> Unit = { _, _ -> },
     onToggleBookmark: (Int, Int) -> Unit = { _, _ -> },
     onDeleteBookmark: (Bookmark) -> Unit = {},
@@ -990,7 +990,7 @@ private fun ReadingScreenContent(
                             val dummyPoints = listOf(Offset(0.08f, 0.5f), Offset(0.92f, 0.5f))
                             val dummyPressures = listOf(0.7f, 0.7f)
                             val dummyTilts = listOf(0f, 0f)
-                            onAddHighlightWithAnchor(dummyPoints, dummyPressures, dummyTilts, foundChapter, phrase)
+                            onAddHighlightWithAnchor(dummyPoints, dummyPressures, dummyTilts, foundChapter, phrase, highlightColorPref.color, highlightStylePref.name)
                         }
                     }
                 ) {
