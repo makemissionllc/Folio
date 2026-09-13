@@ -7,6 +7,42 @@ Active coding branch: `main`.
 
 ---
 
+## Session 50 — 2026-09-16 — Library grid opens at bottom on fresh launch (stale rememberSaveable scroll)
+
+Branch: `main`.
+
+### Root cause (investigated before patching)
+
+- *Investigated* `ui/library/LibraryScreen.kt:150` `val gridState = rememberLazyGridState()` + `ui/library/components/BookGrid.kt:26` `LazyVerticalGrid(state = state)` + `ui/library/LibraryViewModel.kt:124` `books` combine sorted by `lastReadMillis`:
+  - `rememberLazyGridState()` is implemented as `rememberSaveable(saver = LazyGridState.Saver)` — it persists `firstVisibleItemIndex`/`firstVisibleItemScrollOffset` via `SavedStateHandle` / `Bundle` across process death and Navigation backstack. `NavHost` keeps the Library destination's `SavedState` in its `NavBackStackEntry`.
+  - Before Session 49, `books` was `bookDao.observeAll()` ordered `addedAt DESC` — order was stable across launches, so restoring index 12 still pointed near same place (12th newest). After Session 49, `books` is `combine(bookDao, readingProgressDao)` sorted by `lastReadMillis DESC` — order changes on **every launch** (the book just opened bumps to 0). Restoring yesterday's `firstVisibleItemIndex = 12` now points at a different slice of the resort; if the user had scrolled near the bottom (e.g. index 24 in a 30-book grid), the restored index 24 with the new sort (recently-read book now at 0, pushing the old top books down) leaves the viewport anchored near the bottom instead of the top. Visual result: fresh launch opens at bottom.
+  - Second hypothesis — "state simply isn't reset on fresh launch" — is also true: no code ever called `scrollToItem(0)` on launch, so the stale Saveable value was never cleared.
+- *Confirmed* via code: `App` process death → new `LibraryViewModel` instance → `books` Flow re-emits with new sort (recently-read on top) → `LibraryScreen` composition creates `gridState` via `rememberSaveable` which `Saver` restores old Bundle `firstVisibleItemIndex=18` → grid opens at 18 (near bottom), not 0. In-session navigation (Library → Settings → back) correctly restores position via same Saveable, but fresh launch should not.
+- *Requirement:* fresh process launch must start at top (`index 0`), but in-session navigation (Settings/Insights → back, config change) must preserve scroll. A plain `remember { LazyGridState() }` (not Saveable) would reset on every navigation (Library disposed → recomposed → loses position), violating the second half. So we need Saveable for in-session, but a one-time reset on fresh launch.
+
+### Fixed
+
+- `ui/library/LibraryViewModel.kt:149` — Added `var hasHandledInitialGridScroll: Boolean = false` + `fun markInitialGridScrollHandled()`. The flag lives in the `ViewModel` (which survives config change and NavBackStack retention for the Library entry, but is **reset on process death** when a new ViewModel is created). So it is `false` exactly once per fresh process, then `true` for the rest of the session.
+- `ui/library/LibraryScreen.kt:149` — Kept `val gridState = rememberLazyGridState()` (still Saveable for Settings→back and rotation), but added `LaunchedEffect(Unit)` that checks `!viewModel.hasHandledInitialGridScroll`, then `gridState.scrollToItem(0,0)` (in `try/catch`) and marks handled. On fresh launch: Saveable restores stale index 18, then this effect immediately overrides to 0 post-frame — grid opens at top, stale bundle cleared to 0 for next Saveable write. On in-session return from Settings: `LaunchedEffect(Unit)` reruns after recomposition but flag is already `true`, so no scroll — Saveable correctly restores the position the user left (e.g. index 5) and keeps it. Rotation: ViewModel survives, flag stays `true`, Saveable restores 5 → preserved.
+- No change to `BookGrid` — it remains `state = gridState`, `key=id`, `animateItem(placement 280ms)` so resort still animates smoothly.
+
+### Changed
+
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryViewModel.kt:149` — Added `hasHandledInitialGridScroll` flag + `markInitialGridScrollHandled()` with doc.
+- `app/src/main/java/com/makemission/folio/ui/library/LibraryScreen.kt:149` — Wrapped `rememberLazyGridState()` with `LaunchedEffect(Unit)` one-time `scrollToItem(0,0)` gated by ViewModel flag, with comment explaining Saveable vs fresh-launch reset.
+- `README.md` — Updated `LibraryScreen.kt` structure line and `Grid update` bullet to document fresh-launch scroll-to-top.
+- `Project.md` — this changelog entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL`.
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:testDebugUnitTest` — `BUILD SUCCESSFUL`.
+- **Fresh launch:** Simulated process death (Bundle with `firstVisibleItemIndex=18` saved) + new ViewModel (`hasHandledInitialGridScroll=false`) + new sort (recently-read promotion) → `gridState` initially 18 from Saveable, then `LaunchedEffect` scrolls to 0 → grid top visible, newly read book at 0 immediately visible without scrolling. Second launch without kill: flag `true` → no scroll, stays at 0 unless user scrolled.
+- **In-session navigation:** Library scroll to index 6 → navigate to Settings → popBackStack → Library recomposed with `hasHandledInitialGridScroll=true` → Saveable restores index 6, `LaunchedEffect` does not scroll → position preserved. Same for Insights.
+- **Rotation:** While at index 6, rotate → ViewModel survives (`true`), `rememberSaveable` restores 6 → preserved, no jump to top.
+
+---
+
 ## Session 49 — 2026-09-16 — Verify scan dedup + recently-read sorting
 
 Branch: `main`.

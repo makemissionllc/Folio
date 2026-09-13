@@ -151,6 +151,20 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         return FolioCoverPalette[idx]
     }
 
+    // --- Library grid scroll: fresh-launch reset ---
+    // Recently-read sorting changes order on every launch, so a restored scroll position
+    // (via rememberSaveable / SavedStateHandle) from a previous session would point at a
+    // different offset and often open the grid at the bottom. The flag lives in the
+    // ViewModel (survives config change and in-session navigation via backstack, but is
+    // reset on process death), so the Library grid scrolls to top exactly once per
+    // fresh app launch and otherwise preserves position when navigating to Settings/Insights and back.
+    var hasHandledInitialGridScroll: Boolean = false
+        private set
+
+    fun markInitialGridScrollHandled() {
+        hasHandledInitialGridScroll = true
+    }
+
     // ---- Manual SAF import (unchanged flow, now with hash tracking) ----
 
     fun importEpub(uri: Uri, context: Context) {

@@ -147,7 +147,22 @@ fun LibraryScreen(
     var showInfoDialog by remember { mutableStateOf(false) }
 
     // For pull-to-reveal search intent detection — hoisted so gesture handler can check if at top
+    // rememberLazyGridState is Saveable (restores scroll position via SavedStateHandle). Because
+    // recently-read sorting changes order on every launch, restoring yesterday's index would
+    // often land at the bottom with a stale offset. We keep the Saveable state for in-session
+    // navigation (Settings → back preserves position) but force a one-time scroll-to-top on
+    // fresh process launch via the ViewModel flag (which survives config change, not process death).
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    LaunchedEffect(Unit) {
+        if (!viewModel.hasHandledInitialGridScroll) {
+            // Ensure grid starts at top on fresh launch — post frame so the restored
+            // SavedState position is overridden only once per process.
+            try {
+                gridState.scrollToItem(0, 0)
+            } catch (_: Exception) {}
+            viewModel.markInitialGridScrollHandled()
+        }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
