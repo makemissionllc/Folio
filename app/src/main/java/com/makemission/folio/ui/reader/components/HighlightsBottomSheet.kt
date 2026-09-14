@@ -80,13 +80,13 @@ fun HighlightsBottomSheet(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = "Drag your stylus across the text to highlight.",
+                        text = "Draw with a stylus — or long-press text and tap Highlight — to add your first mark.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Your highlights are anchored with nearby text, so they stay with the right sentence.",
+                        text = "Your highlights are anchored with nearby text, so they stay with the right sentence. Pick color and style in the reading menu (☰).",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                     )

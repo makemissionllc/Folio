@@ -84,7 +84,7 @@ fun SmartFeaturesScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            text = "Twelve quiet helpers — each solves one small, real annoyance of reading on a screen.",
+                            text = "Fifteen quiet helpers — each solves one small, real annoyance of reading on a screen.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                         )
@@ -189,7 +189,7 @@ private fun SmartFeaturesHero(modifier: Modifier = Modifier) {
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = "Twelve small, careful ideas that make long reading feel effortless — all calculated here, not in the cloud.",
+                    text = "Fifteen small, careful ideas that make long reading feel effortless — all calculated here, not in the cloud.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -340,5 +340,26 @@ private fun rememberFeatures(): List<SmartFeature> = listOf(
         problem = "Leaving the page to look up a word pulls you out of the sentence and often needs a connection.",
         fix = "Double-tap any word — or select a few words and tap ‘Explain’ — and a small card shows the meaning, right by your finger. Everything comes from a compact word list kept on your device, so it works offline, and the word can be saved for gentle practice later.",
         why = "You understand the sentence without losing your place, and new words have a chance to stay with you."
+    ),
+    SmartFeature(
+        number = "13 — Your type, your margins",
+        title = "The page set exactly how you like it",
+        problem = "One fixed font and margin never suits every book — a dense history wants tighter lines, a poem wants air, and eyes differ in the evening.",
+        fix = "From the reading menu (☰) open Typography and choose font (Serif Default, Sans, Literary Serif, Monospace), size (Small to XL), line spacing (Compact to Loose), and margins (Narrow to Extra Wide). Folio re-measures true pages and line breaking as you change them — all saved on-device and restored next time.",
+        why = "The book feels made for you, not for a generic screen. Change it mid-chapter if you wish; the text stays cared-for."
+    ),
+    SmartFeature(
+        number = "14 — Ink in your colors",
+        title = "Stylus or finger — highlight in five colors, Fill or Underline",
+        problem = "Sometimes you have a stylus, sometimes only a finger, and not every thought deserves the same heavy mark.",
+        fix = "Draw with a stylus for instant Multiply ink (pressure and tilt, Fill 28dp or Underline 4dp), or long-press a phrase and tap Highlight in the toolbar — both use the same palette you pick in the reading menu (Amber, Yellow, Green, Pink, Blue) and the same Fill or Underline style, kept per-highlight and re-anchored if the file changes.",
+        why = "Your marks stay consistent and readable in any light, whether you sketched with a pen or tapped with a finger."
+    ),
+    SmartFeature(
+        number = "15 — Jump anywhere",
+        title = "Chapters and marks a tap away",
+        problem = "Flipping through a long book to find a chapter or a passage you inked breaks flow, and remembering paragraph numbers is not human.",
+        fix = "From the reading menu (☰) open Chapters for every chapter title (tap to land on that chapter), or Highlights and Bookmarks for your saved spots — Highlights shows inked passages with style and color, Bookmarks shows tucked places with a preview, both tap-to-jump and working in Continuous and Chapter-swipe (phone one column, tablet spreads) without guessing.",
+        why = "You move like a reader with tabs, not like a scroller with a scroll bar — directly to the place you meant."
     ),
 )

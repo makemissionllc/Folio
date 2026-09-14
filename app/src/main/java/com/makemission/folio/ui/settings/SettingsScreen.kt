@@ -262,9 +262,9 @@ fun SettingsScreen(
                         subtitle = when {
                             folderDisplayName != null -> "Searches $folderDisplayName (SAF)"
                             hasPermission -> "Downloads & Documents"
-                            else -> "Needs permission or folder grant"
+                            else -> "Needs permission or folder grant — pick a folder below"
                         },
-                        checked = autoScanEnabled && hasPermission,
+                        checked = autoScanEnabled,
                         onCheckedChange = { checked ->
                             if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             scope.launch { repo.setAutoScanEnabled(checked) }

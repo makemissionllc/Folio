@@ -261,7 +261,7 @@ private fun OnboardingPageStylus(modifier: Modifier = Modifier) {
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "Zero-friction stylus highlighting with true-ink Multiply, pressure & tilt physics, and lasso extraction for diagrams or text — instantly, without menus.",
+            text = "Stylus draws instantly with true-ink Multiply, pressure & tilt, and five colors (Fill or Underline) — or long-press with a finger and tap Highlight. Lasso a diagram to expand it, or copy words, all offline.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -286,7 +286,7 @@ private fun OnboardingPageSmart(modifier: Modifier = Modifier) {
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "Bionic reading, X-Ray, True-Page, Knuth-Plass, SM-2 vocabulary and colorimetric contrast — all deterministic algorithms, no cloud, private by design.",
+            text = "Guided Reading (Bionic), People & Topics (X-Ray), True Pages, Vocabulary (SM-2), Comfort Contrast, Evening warmth, search and dictionary — typography, colors and navigation your way — all on-device, private by design.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -334,7 +334,7 @@ private fun OnboardingPagePrivacy(
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 PermissionRow(
                     title = "Files & storage",
-                    subtitle = "Find EPUBs automatically on your device (for auto-scanning). Without this, use + to import manually.",
+                    subtitle = "Find EPUBs automatically on your device (for auto-scanning). Without this, use Settings → Library → Add book manually or choose a folder via SAF.",
                     granted = storageGranted,
                     requested = storageRequested,
                     onRequest = onRequestStorage,
@@ -348,7 +348,7 @@ private fun OnboardingPagePrivacy(
                 )
                 if (storageRequested && !storageGranted) {
                     Text(
-                        text = "Storage permission denied — you can still import books manually with the + button.",
+                        text = "Storage permission denied — you can still import books manually via Settings → Library → Add book manually or pick a folder via SAF.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

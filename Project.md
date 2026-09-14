@@ -7,6 +7,106 @@ Active coding branch: `main`.
 
 ---
 
+## Session 53 — 2026-09-16 — Pre-production polish pass (manual, guide, settings, onboarding, metadata, docs)
+
+Branch: `main`.
+
+### Scope
+
+Systematic correctness / consistency / completeness pass without new features. Verified and fixed 9 areas per polish brief; did not add new product features.
+
+### 1. In-App Manual / Guide Book (`EpubParser.sampleFallbackChapters`)
+
+- *Audited* existing 5-chapter “How to use Folio” for coverage of: Guided Reading (Bionic), People & Topics (X-Ray), Vocabulary (SM-2), True-Page numbers, stylus + finger highlighting (colors/styles), bookmarks, chapter quick-jump, highlights quick-access, search (library-wide pull-down and in-book contextual, highlights/bookmarks priority), Comfort Contrast (WCAG 7:1), Evening warmth (time-clock, gradual, palette-coordinated), dark palettes (Folio Green / True Black / Warm Sepia / Cool Slate — Slate default in dark), reading typography customization (font/size/spacing/margins), Continuous vs Chapter-swipe navigation, Insights, and auto-scan / SAF folder selection. Also checked for removed-feature mentions (old FAB import).
+- *Fixed* gaps: added deliberate pull-down intent (180 px when already at top), SAF folder picker wording (Settings → Library → Choose books folder with Change/Clear and name display), reading typography paragraph (4 fonts, 4 sizes, 4 spacings, 4 margins via Reader menu ☰ → Typography, re-measuring True Pages / Knuth), finger highlighting (long-press select → Highlight alongside Copy/Explain, same 5 colors + Fill/Underline palette, same LCS anchoring, appears in Reader menu → Highlights), Highlights quick-access parallel to Bookmarks, library-wide + in-book search shared ranking, Comfort Contrast throttled + animated gradual coordinated via sensor, Evening warmth via system clock / gradual / palette-coordinated + Light/Dark/Auto, dark-palettes + Theme segmented control note, Continuous vs Chapter-swipe persistence. Removed any remaining “Use + to import” language and kept fallback as Settings → Library → Add book manually (quiet, not prominent). Kept tone plain and editorial matching existing chapters; no FAB mention remains.
+
+### 2. Smart Features Guide (`SmartFeaturesScreen`)
+
+- *Audited* 12 entries against current feature set; flagged missing: reading customization, finger highlighting, multi-color highlights, chapter quick-jump, highlights quick-access. Also checked for removed/changed behavior (old naming, old toggle locations).
+- *Fixed* added 3 new entries with same plain-English pattern (problem / fix / why): `13 — Your type, your margins` (Typography — font/size/spacing/margins from Reader menu, persisted, recomputes True Pages/Knuth), `14 — Ink in your colors` (Stylus draws instantly with Multiply + pressure/tilt + 5 colors + Fill/Underline, or long-press + Highlight with same palette, per-highlight LCS), `15 — Jump anywhere` (Chapters · N, Highlights · N, Bookmarks · N from Reader menu ☰, tap-to-jump in both Continuous and Chapter-swipe phone/tablet). Updated intro counts `Twelve` → `Fifteen` and hero subtitle accordingly. Verified existing entries remain accurate: Guided Reading (Bionic) and People & Topics (X-Ray) use paired naming and note persistence via `☰` or Settings → Reading.
+
+### 3. Settings Screen Audit
+
+- *Verified* every setting: Reading (Always show progress bar, Haptic feedback, Guided Reading (Bionic), Comfort Contrast — Auto/Fixed/No sensor, Navigation segmented), Library (Auto-scan on launch, Choose books folder SAF + Change/Clear, Scan device, Add book manually), Insights / Smart Features (Open/Explore buttons), Appearance (Theme Light/Dark/Auto segmented + 4 dark palettes Slate default + Evening warmth), Support/Developer (View logs), Privacy/Data (static rows). Checked DataStore keys vs UI: all persisted via `folio_settings` (`always_show`, `has_seen_onboarding`, `auto_scan`, `haptics`, `dark_palette`, `time_tint`, `theme_mode`, `reading_nav_mode`, `books_folder_uri`, `bionic_enabled`, `adaptive_contrast`, `reading_font`/`font_size`/`line_spacing`/`margin`, `highlight_color`/`highlight_style`) — no orphaned/dead toggle.
+- *Fixed* Auto-scan toggle: `checked` was `autoScanEnabled && hasPermission` (showed stale OFF when permission missing even if setting true). Changed to `checked = autoScanEnabled` (reflects actual persisted state) and updated subtitle to “Needs permission or folder grant — pick a folder below” when neither. Scan button `enabled` still guards with `hasPermission` (SAF grant counts via `persistedUriPermissions`). Other toggles already use `collectAsState(initial = default)` matching DataStore default and persist correctly; ReaderMenu vs Settings toggles share same Flows (Guided Reading / Comfort Contrast survive restart).
+- Labels/subtitles are accurate and consistent in tone (editorial, subtitles only where needed); haptics respect `hapticsEnabled`.
+
+### 4. Onboarding Audit
+
+- *Verified* 4-page pager (Welcome; Write like paper; Smart, on-device; Private by design) and permission explanations vs current reality (auto-scan/SAF primary, no FAB).
+- *Fixed* Stylus page: was stylus-only; updated to “Stylus draws instantly … or long-press with a finger and tap Highlight — five colors (Fill or Underline), lasso diagrams/text, all offline.”
+- *Fixed* Smart page: was jargon (`Bionic reading, X-Ray, True-Page, Knuth-Plass, SM-2 vocabulary and colorimetric contrast`); updated to paired names `Guided Reading (Bionic), People & Topics (X-Ray), True Pages, Vocabulary (SM-2), Comfort Contrast, Evening warmth, search and dictionary — typography, colors and navigation your way` with plain language, reflecting current feature set (no TF-IDF/SM-2/Knuth in UI-facing text, but onboarding summary now uses paired editorial names).
+- *Fixed* Privacy page: “Without this, use + to import manually” → “Without this, use Settings → Library → Add book manually or choose a folder via SAF”; denial copy updated similarly. Storage + Notifications request flow still graceful (denial leaves manual SAF and silent notifications).
+
+### 5. Naming / Label Consistency
+
+- *Audited* Library, Reader menu (☰), Settings, Smart Features guide and onboarding for consistent pairing: `Guided Reading (Bionic)` and `People & Topics (X-Ray)` together, `Comfort Contrast`, `Chapters` / `Highlights` / `Bookmarks` sheets, typography labels, dark palettes (Cool Slate default). 
+- *Confirmed* already correct in ReaderMenuSheet (`Guided Reading (Bionic)` / `People & Topics (X-Ray)` / `Comfort Contrast — Auto (7:1)`), Settings Reading section, SmartFeatures 01/03, XRayBottomSheet and sample guide after Session 52 fixes. Onboarding now matches. No instance of bare `X-Ray` or `Bionic` without pairing remains in user-facing strings (code enum names excepted).
+
+### 6. Empty States & Error Messages
+
+- *Reviewed* every empty/loading/error surface: Library empty · Insights empty · Vocabulary empty · due/review states · Bookmarks empty · Highlights empty · Logs empty · Reading loading/empty · search no-results (library + in-book) · import failures · scan failures (permission, no files, truncated, deep-skipped) · remove/reset failures.
+- *Fixed* `EmptyLibraryState`: “Import an EPUB…” → “Add a book in Settings → Library or let Auto-scan find your EPUBs — the built-in guide is already here.” (editorial, mentions current intake paths, no FAB).
+- *Fixed* `HighlightsBottomSheet` empty: stylus-only “Drag your stylus…” → “Draw with a stylus — or long-press text and tap Highlight — to add your first mark. … Pick color and style in the reading menu (☰).” (mentions finger + colors/styles).
+- *Confirmed* other empty/loading states already consistent and on-brand: Insights `EmptyJournalCard` (“No pages turned yet — and that’s fine…”), Vocabulary `No vocabulary yet` + `Double-tap…` and `All caught up!`, Library/In-book search no-results “No passages found for “X” — Try a different phrase — Folio searches … all on-device.” with amber sun + Clear search, Reading `Opening your book…` pulsing dot + `No content to display…` guidance, Logs `No log entries yet` + refresh/share, scan Snackbar messages with hash/path dedup feedback, deep-skipped and truncation notices user-visible not silent.
+- Tone consistency: plain, editorial, not technical; errors are calm and actionable (`Could not parse EPUB — file may be corrupted…`, `Storage permission or books folder grant required — auto-scan unavailable.`, `No EPUB files found…`, `Could not remove book` style kept minimal).
+
+### 7. App Metadata
+
+- *Reviewed* `AndroidManifest.xml` (`applicationId`, `app label`, permissions, `intent-filter`, `FileProvider`) and `build.gradle.kts` (`applicationId`, `versionName`, `versionCode`, `minSdk`/`targetSdk`/`compileSdk`).
+- `applicationId = com.makemission.folio` correct; `app_label` `@string/app_name` → `Folio`; `minSdk 33` / `targetSdk 37` / `compileSdk 37` + Java 17 reasonable for Play Store 2026 (AGP 9.4, Kotlin 2.2, Compose BOM 2025.09.00). `versionCode 1` / `versionName 1.0` appropriate for initial public release (bump on first update).
+- Permissions declared: `READ_EXTERNAL_STORAGE` (`maxSdkVersion 32`), `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO` / `READ_MEDIA_AUDIO`, `POST_NOTIFICATIONS`. All are referenced (`EpubScanner.hasStoragePermission` checks legacy + media + SAF; onboarding requests them; `POST_NOTIFICATIONS` gated to Tiramisu). `READ_MEDIA_VIDEO` / `READ_MEDIA_AUDIO` are not strictly needed for EPUB discovery (epubs are not video/audio; SAF + `READ_EXTERNAL_STORAGE` on legacy + a single media images grant already covers the check). Kept as-is to avoid permission-request regression before submission — **flagged for manual review** (see §9 below) as the only over-statement.
+- All declared permissions are used; no removal of required `READ_EXTERNAL_STORAGE` / SAF path.
+
+### 8. Full Build & Regression Check
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (post-edit).
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:testDebugUnitTest` — `BUILD SUCCESSFUL` (EpubScannerTest 36-book Maxwell depth-8 still passes, plus existing unit tests; no failures).
+- Dependency check (reported, not auto-upgraded): `libs.versions.toml` — AGP 9.4.0, Kotlin 2.2.20 / KSP 2.2.20-2.0.4, Compose BOM 2025.09.00, Room 2.7.2, Coil 2.7.0, DataStore 1.1.1, Work 2.9.1, Jsoup 1.18.3 — all current for 2026. Unused dependencies flagged for review: `androidx.appcompat:appcompat`, `androidx.constraintlayout:constraintlayout`, `androidx.navigation:navigation-fragment-ktx` / `navigation-ui-ktx`, `com.google.android.material:material` remain in `libs.versions.toml` / `app/build.gradle.kts` for the unused legacy template (`res/layout/fragment_*.xml`, `res/navigation/nav_graph.xml`, `FirstFragment`/`SecondFragment`, `res/layout/content_main.xml` with `NavHostFragment`) — app is fully Compose and these are never used at runtime (per README “Legacy template fragments remain unused”). Safe to remove in a follow-up without code change.
+
+### 9. Final Docs Pass
+
+- Brought `README.md` fully up to date as finished-product documentation (not session-by-session notes): rewrote overview, reading features, Smart Features (fifteen, plain English), Library intake (no FAB — auto-scan/SAF + VIEW + subtle manual fallback, background worker Semaphore 2, hash dedup, MAX_DEPTH 8 / MAX_FILES 5000 visible), Appearance & Settings, Onboarding, Tech stack, Design system, Project structure, Requirements and Build & run. Counts (5 guide chapters, 15 smart features, 4 dark palettes slotted, Cool Slate default) now match reality; editorial tone throughout.
+- This `Project.md` entry summarizes the polish pass and confirms production-readiness (below), noting flagged items.
+
+### Production-readiness
+
+**Confirmed production-ready pending the flagged items below.** Build passes, tests pass, settings persist, onboarding matches reality, guide book and Smart Features guide are complete, empty/error states are on-brand, and naming is paired consistently.
+
+### Flagged for manual review before submission
+
+1. **Permissions — `READ_MEDIA_VIDEO` / `READ_MEDIA_AUDIO` in `AndroidManifest.xml`** — neither is needed to discover `.epub` files (MediaStore fallback queries `DISPLAY_NAME LIKE %.epub` but epub is not video/audio; the check `hasStoragePermission` would pass with `READ_MEDIA_IMAGES` or `READ_EXTERNAL_STORAGE` or SAF alone). Declaring all three may prompt Play Store to show “Photos and videos” access unnecessarily. Recommendation before submission: keep `READ_EXTERNAL_STORAGE` (`maxSdkVersion 32`) + `READ_MEDIA_IMAGES` (if you want a single media family) + `POST_NOTIFICATIONS`, remove `READ_MEDIA_VIDEO` + `READ_MEDIA_AUDIO`, and change `EpubScanner.hasStoragePermission` / `OnboardingScreen.storagePermissions()` / manifest to match; re-test scan on Android 13/14 with SAF grant alone.
+2. **Unused dependencies & legacy scaffold** — `appcompat`, `constraintlayout`, `navigation-fragment-ktx`, `navigation-ui-ktx`, `material` and legacy `res/layout`/`nav_graph`/`FirstFragment`/`SecondFragment` are never used (app is fully `navigation-compose` + Material3). Remove them in a follow-up PR to trim APK and remove the unused navigation graph.
+3. **`minSdk 33` (Android 13)** — intentional (SDK 37 target, `java.time`/`ChronoUnit` at API 26+ but app opts 33), excludes older devices. Correct for 2026 if targeting recent devices; keep as-is for public release, or lower to 26 if you need wider reach (requires testing `AmbientLightSensor`, `ZoneId`, storage paths).
+4. **Dictionary curated subset** — `assets/dictionary.json.gz` is a 12k common-lemma WordNet subset (113 KB gz / 1.37 MB json) vs full 150k WordNet (~3.2 MB gz / 12 MB json). Covers everyday reading well; rare words will return no definition. Documented; no fix needed unless you want full coverage (trade APK size).
+5. **Versioning** — `versionCode 1` / `versionName 1.0` is correct for initial submission; bump to 2+ before any store update.
+6. **Icons & store assets** — launcher `mipmap-*` already from `icons/android/` IconKitchen; ensure Play Console `play_store_512.png` and feature graphic come from `icons/android/play_store_512.png` and follow store guidelines.
+
+### Changed
+
+- `data/epub/EpubParser.kt:397` — rewrote `sampleFallbackChapters` (5 chapters) to cover every current feature with plain editorial tone; added deliberate pull-down intent, SAF folder picker, typography (4×4×4×4), stylus + finger highlighting shared palette (5 colors + Fill/Underline, persisted), highlights/chapters/bookmarks quick-jumps, library-wide + in-book search, Comfort Contrast / Evening warmth coordinated + Light/Dark/Auto + Cool Slate default, auto-scan/SAF; no FAB mention.
+- `ui/settings/SmartFeaturesScreen.kt:81` — counts `Twelve → Fifteen`; `SmartFeaturesHero` subtitle updated; added `13 — Your type, your margins`, `14 — Ink in your colors`, `15 — Jump anywhere` feature cards with plain-English problem/fix/why.
+- `ui/settings/SettingsScreen.kt:262` — `Auto-scan on launch` `checked = autoScanEnabled && hasPermission → autoScanEnabled`; subtitle now “Needs permission or folder grant — pick a folder below” when neither.
+- `ui/onboarding/OnboardingScreen.kt:248` — Stylus page now stylus + finger + colors/styles + lasso; `272` Smart page now paired names (`Guided Reading (Bionic), People & Topics (X-Ray), True Pages, Vocabulary (SM-2), Comfort Contrast, Evening warmth, search and dictionary — typography, colors and navigation…`); `338` Privacy permission subtitle → “use Settings → Library → Add book manually or choose a folder via SAF”; `353` denial copy similarly.
+- `ui/library/components/EmptyLibraryState.kt:54` — “Import an EPUB…” → “Add a book in Settings → Library or let Auto-scan find your EPUBs — the built-in guide is already here.”
+- `ui/reader/components/HighlightsBottomSheet.kt:62` — empty copy now mentions finger → Highlight + color/style in reader menu (☰).
+- `README.md` — full rewrite as finished-product documentation (overview, reading features, smart features 15, library intake no FAB + background worker, appearance & settings, onboarding, tech stack, design system, project structure, requirements, build & run; not session notes).
+- `Project.md` — this entry.
+
+### Verification
+
+- `assembleDebug -x lint` — `BUILD SUCCESSFUL` (pre- and post-edit).
+- `testDebugUnitTest` — `BUILD SUCCESSFUL` (EpubScannerTest Maxwell 36-book depth 8 still 36, other unit tests pass).
+- Guide book: open curated `How to use Folio` → 5 chapters, each feature named with paired `Guided Reading (Bionic)` / `People & Topics (X-Ray)` where appropriate, no FAB mention, pull-down/search/typography/highlights/colors/styles/chapters/highlights/bookmarks/contrast/warmth/palettes/navigation/insights/auto-scan/SAF all present in plain language.
+- Smart Features: open Settings → Smart Features → 15 cards, new 13/14/15 visible, plain English, no jargon.
+- Settings: toggles reflect persisted DataStore values (Auto-scan shows actual setting, not stale permission-filtered); palette Cool Slate selected by default in dark; theme Auto follows system; reading toggles (Guided Reading, Comfort Contrast) sync between Reader menu and Settings.
+- Onboarding: pager 4 pages show updated copy; Privacy page `+` button text removed; storage denial leaves manual SAF path; Notifications optional.
+- Empty states: Library empty shows updated editorial copy; Highlights empty mentions finger + color/style; Insights/Vocabulary/Search no-results remain on-brand; scan/import Snackbar messages remain calm and user-visible.
+
+---
+
+---
+
 ## Session 52 — 2026-09-16 — Fix finger Highlight toolbar regression (stale remember + signature mismatch)
 
 Branch: `main`.

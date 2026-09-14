@@ -51,7 +51,7 @@ fun EmptyLibraryState(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Import an EPUB to start your\ncurated Folio collection.",
+            text = "Add a book in Settings → Library\nor let Auto-scan find your EPUBs —\nthe built-in guide is already here.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
