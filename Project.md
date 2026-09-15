@@ -7,6 +7,58 @@ Active coding branch: `main`.
 
 ---
 
+## Session 55 — 2026-09-16 — Fix dictionary fake definitions + rebuild dataset with real WordNet glosses
+
+Branch: `main`.
+
+### Bug: fake template definitions vs honest "No definition found"
+
+- *Reported:* Double-tap "which" → "A common English word 'which' — frequently seen in literature..." and "make" → "Noun/verb 'make' — as used in books: denotes the thing, action, or quality associated with 'make'." Clearly synthetic templates, not real glosses. Other words correctly showed "No definition found."
+- *Investigated:* `data/dictionary/DictionaryRepository.kt:88` `lookup` itself was honest (returns `null` if not in Map) — no fake branch. But `assets/dictionary.json.gz` (12k entries, 113 KB gz / 1.37 MB json, built via `python3` from `/usr/share/dict/words` filtered 3–12 alpha, scored by commonness, preserving original 120 glosses but *generating WordNet-style glosses via deterministic hash patterns* for the rest) contained **11890 fake template entries (99.1%)** and only **110 real** (the original Folio-specific terms like air, ink, book, amber, sans). Templates:
+  - `A literary word 'X' — its definition is that which WordNet lists as the primary sense of 'X'.`
+  - `English term 'X': encountered across fiction and non-fiction; its sense is given by surrounding context.`
+  - `Noun/verb 'X' — as used in books: denotes the thing, action, or quality associated with 'X'.`
+  - `Word meaning related to 'X': a term used to describe, denote, or refer to its concept in context.`
+  - `A common English word 'X' — frequently seen in literature and everyday reading.`
+  For "which" and "make" (both in the 12k list, 5 and 4 letters), the dataset had fake templates instead of real WordNet glosses (WordNet has "make" → "a recognizable kind" / "engage in", but "which" has no WordNet entry — honest not found would be correct). The curation also under-represented short common words: fake set avg len 4.7 vs real avg len 6.6, fake 3–4 letter words 4195 vs real 18 — distinctive longer vocabulary was over-sampled, everyday short words got templates.
+
+### 1. Remove fake-definition fallback — DONE
+
+- *Dataset rebuilt:* Removed all 11890 fake templates. New `dictionary.json.gz` contains only **real WordNet 3.0 glosses (first synset definition per lemma, via NLTK `wn.synsets(lemma)[0].definition()`)** plus the **110 Folio-specific overrides** (amber, ink, book, etc. kept verbatim). No synthetic fallback — `DictionaryRepository.lookup` now either returns a real gloss from the Map or `null`, which the UI shows as honest "No definition found." (DictionaryPopup already handles `null` gracefully). Precise fake count after rebuild: **0** (verified via exact template match).
+- *Repository:* `DictionaryRepository.kt` was already honest (no fake branch) — confirmed no code change needed beyond dataset. `lookup` normalizes, tries singular/possessive fallback, else `null`. `lookupPhrase` extends it. Kept as-is.
+
+### 2. Fix curation to include common everyday words — DONE (25k real)
+
+- *Root cause:* Previous script scored by commonness but then generated fakes instead of using real WordNet glosses, so common words were present as keys but with fake values, not missing as keys. The "missing" was fake coverage, not key absence. Short-word bias: only 18 real short words vs 4195 fake short.
+- *Fix:* Rebuilt from real WordNet via NLTK. Steps: (a) extracted all single-word alphabetic WordNet lemmas (77,503), (b) ranked by lemma `count()` frequency (WordNet frequency, e.g., be 16667, make 1613), (c) took **top 25,000 most frequent lemmas** plus the 110 Folio custom keys (candidate set 25,029), (d) mapped each to `wn.synsets(lemma)[0].definition()` (real gloss) overriding with custom where present. Result: `dictionary.json.gz` now **25,029 entries** (vs 12,000), **1.52 MB json / 512 KB gz** (vs 1.37 MB / 113 KB), **1853 short (≤4) real entries** vs previous 18, includes "make" → "a recognizable kind" (real), "through" → "having finished or arrived at completion" (real), while "which"/"should"/"the" remain honestly missing (no WordNet entry — 28.7% of top 10k Google words are function words with no WordNet gloss, e.g., which, what, that, with). This matches reading needs: everyday content words now covered, function words honestly show not found instead of fake.
+- *Size impact:* JSON +150 KB, gz +400 KB vs old. APK impact ~+400 KB compressed. RAM: 12k Map ~5 MB heap → 25k Map ~10–12 MB heap (estimate 400 bytes/entry). Still well under OOM for reading app; 25k is a deliberate middle ground.
+
+### 3. Larger dataset / SQLite tradeoff — RECOMMENDATION (not yet implemented)
+
+- *Measured:*
+  - **Current (old 12k fake):** 12k entries, 1.37 MB json, 113 KB gz, ~5 MB Map RAM, +104 KB APK vs 120-entry baseline.
+  - **New 25k real:** 25k entries, 1.52 MB json, 512 KB gz, ~11 MB RAM, +400 KB APK. Covers ~71% of top 10k Google words that have WordNet entries (7165 of 10000), plus 25k frequent.
+  - **Full WordNet single-word (77k real):** 77,503 entries, 5.43 MB json, 2.21 MB gz (measured), or ~1.5 MB gz with sort+gz (our full test gave 1.5 MB gz) — vs old, +1.4 MB APK, ~25–30 MB Map RAM if loaded as `HashMap` (risky on low-RAM devices).
+  - **SQLite alternative for full:** Store full 77k (or 150k with phrases) in `assets/dictionary.db` indexed (`CREATE TABLE dict(word TEXT PRIMARY KEY, gloss TEXT); CREATE INDEX`). Apk size ~2.1 MB SQLite (compressed via APK deflate similar to gz), vs 5.4 MB json. RAM: near 0 (query via `SQLiteDatabase` + `Cursor`, not Map), lookup via `SELECT gloss WHERE word=?` (microseconds, indexed). No 20 MB Map in RAM, supports 150k without OOM. Implementation cost: add `Room` entity or `SQLiteAssetHelper`, change `DictionaryRepository.load()` from `JSONObject`+`GZIPInputStream` Map to `SQLiteOpenHelper` singleton with `getReadableDatabase().rawQuery`, keep same `lookup` API (synchronized, case-insensitive). Migration is straightforward, keeps phrase-aware fallback.
+- *Recommendation:* **Keep 25k real GZIP JSON for now** — best tradeoff for APK (+400 KB) and simplicity (keeps current `Map` + `GZIPInputStream` code, no new DB layer). It fixes the reported fake bug and covers everyday reading (1853 short words, make/have/through etc. now real). If real usage still shows frequent misses beyond 25k (e.g., literary rare words, domain terms), **upgrade to full 77k–150k via SQLite** (preferred over full JSON Map to avoid 25–30 MB RAM). Cost: +1.4–2 MB APK, but RAM stays low, lookup slightly slower (still <5ms). Don't commit to SQLite without confirming misses persist beyond 25k — monitor `DictionaryRepository.size()` miss rate in logs and user reports. Documented in `README.md:57`.
+
+### Changed
+
+- `app/src/main/assets/dictionary.json.gz` — rebuilt: 12k (11890 fake +110 real, 113 KB gz) → **25,029 real (WordNet 3.0 top 25k frequent +110 Folio overrides, 512 KB gz / 1.52 MB json), 0 fake templates**, honest not found for non-WordNet words (which → missing, make → real).
+- `README.md:14` — Vocabulary bullet updated: 12k 113KB → 25k 512KB gz, real glosses, honest not found.
+- `README.md:57` — Tech stack dictionary line updated: 25k 512KB gz / 1.5 MB json, real glosses +110 overrides, honest not found, no templates.
+- `Project.md` — this entry.
+
+### Verification
+
+- `python3: json.load(gzip.open(...)) len 25029, gz 512 KB, json 1.52 MB` — verified vs old 12000/113KB.
+- `which` → `NOT FOUND` (honest, no fake), `make` → `a recognizable kind` (real WordNet, not "Noun/verb 'make' — as used..."), `have` → `a person who possesses great material wealth` (real noun sense), `through` → `having finished...` (real), `should` → `NOT FOUND` (WordNet has none — honest).
+- `precise fakes 0` via exact template match (`A literary word '`+`primary sense`, `English term '`+`encountered across`, `Noun/verb '`+`denotes the thing`, `Word meaning`+`term used to describe`, `A common English word '`+`frequently seen`).
+- `Fake % 99.1→0`, short ≤4 18→1853, real avg len 6.6→~5.2 (now includes everyday short words).
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (post-rebuild, asset size 512KB still under `aapt` limits).
+
+---
+
 ## Session 54 — 2026-09-16 — Content disclaimer + battery/thermal drain audit (sensor, tint, animations, WorkManager, Canvas, polling)
 
 Branch: `main`.

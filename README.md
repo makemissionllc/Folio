@@ -11,7 +11,7 @@ Jetpack Compose–first. Offline and private by design: every book, highlight, b
 - **Navigation** — `CONTINUOUS` (whole-book vertical scroll) and `CHAPTER_SWIPE` (vertical within a chapter, horizontal swipe between chapters; tablet shows spreads). Persisted via DataStore and switchable from Settings → Reading or the reader menu with `AnimatedContent` transitions.
 - **Built-in guide** — the curated sample book “How to use Folio” (5 chapters: Welcome to Folio; Your Library; Reading, Your Way; Make It Yours; Smart, Private, Calm) covers every current feature in plain editorial language.
 - **Insights** — a quiet ledger that aggregates existing Room tables (Shelf, Marginalia, Lexicon, Rhythm) with streaks and last-read, no extra tracking. Empty state is encouraging and on-brand.
-- **Vocabulary** — double-tap a word (or select → Explain) for a definition from the offline 12k WordNet subset (113 KB gz) and schedule it with on-device SM-2. Review from Insights → Lexicon.
+- **Vocabulary** — double-tap a word (or select → Explain) for a definition from the offline 25k WordNet subset (512 KB gz, real glosses — no fake templates, honest "No definition found" for missing words) and schedule it with on-device SM-2. Review from Insights → Lexicon.
 
 ## Reading features
 
@@ -54,7 +54,7 @@ First-launch pager (Welcome; Write like paper — stylus + finger + colors/style
 - Room 2.7.2 (`room-runtime`, `room-ktx`, KSP `room-compiler`) for books, progress, highlights (color + style `FILL`/`UNDERLINE`), bookmarks (unique `(bookId, chapterIndex, paragraphIndex)`), vocabulary (v10 — `fallbackToDestructiveMigration`)
 - DataStore Preferences 1.1.1 for user settings (alwaysShowProgressBar, `hasSeenOnboarding`, `autoScanEnabled`, `booksFolderUri`, `hapticsEnabled`, `darkPalette` default Cool Slate, `themeMode` Light/Dark/Auto default Auto, `timeTintEnabled`, `bionicEnabled`, `adaptiveContrastEnabled`, `readingFont`/`readingFontSize`/`readingLineSpacing`/`readingMargin`/`highlightColor`/`highlightStyle`)
 - Coil 2.7.0 for cover images (downsampled 440×660, mem/disk cache, crossfade); Jsoup 1.18.3 for EPUB; WorkManager 2.9.1 for background X-Ray + parsed cache; DocumentFile 1.0.1 for SAF; `androidx.datastore:datastore-preferences` + `WorkManager` + `DocumentFile`
-- Offline dictionary `assets/dictionary.json.gz` (12k WordNet-derived, 113 KB gz); on-device search `SearchRepository` (phrase search, highlights/bookmarks ranked first, `ConcurrentHashMap` + per-book isolation, skips still-processing books)
+- Offline dictionary `assets/dictionary.json.gz` (25k WordNet-derived, 512 KB gz / 1.5 MB json, real WordNet glosses + 110 Folio-specific overrides; honest "No definition found" for words without a WordNet entry — no synthetic templates); on-device search `SearchRepository` (phrase search, highlights/bookmarks ranked first, `ConcurrentHashMap` + per-book isolation, skips still-processing books)
 - Debug logging `FolioLogger` + `FolioApp` (`filesDir/logs/folio.log`, 256 KB rolling, half-trim, no network, `UncaughtExceptionHandler`; `LogsScreen` via `FileProvider`)
 
 ## Design system
