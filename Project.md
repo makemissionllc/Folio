@@ -7,6 +7,81 @@ Active coding branch: `main`.
 
 ---
 
+## Session 56 — 2026-09-16 — Text-attached highlighting (precise glyph-aligned, reflow-safe) + phone finger-highlight fix
+
+Branch: `main`.
+
+### Why phone finger-highlighting felt broken — investigated before patching
+
+- *Current highlight storage is smudge-like:* `Highlight` stored only as normalized `pointsData` (freeform ink stroke 0..1 viewport coords) + `anchorText` snippet, not as character offsets. Rendering was via `HighlightOverlay`'s full-screen `Canvas` drawing `drawLine` with `BlendMode.Multiply` at normalized coordinates. On reflow (font size/margin change, different device width, bionic on/off) the stroke stays at the same viewport position but text reflows elsewhere → highlight looks like a smudge detached from words. Finger highlights used `onHighlightRequested(selectedString)` → searched for chapter containing string, then created **dummyPoints `listOf(Offset(0.08f,0.5f), Offset(0.92f,0.5f))`** (fixed horizontal line at middle of screen) — not tied to glyphs at all. So finger highlights always rendered as a generic mid-screen stroke, never on the actual selected words.
+
+- *Gesture conflict on phone:* `SingleColumnReadingContent` (and `ChapterSwipePhoneContent`/`TwoColumn*`) wrapped `LazyColumn` with `.clickable(interactionSource, onClick = onToggleChrome)` to hide/show chrome on tap. `clickable` consumes pointer input at the LazyColumn level, competing with `SelectionContainer`'s long-press detection for text selection. Result on phone (no stylus, predominantly finger): long-press to select often failed to initiate selection or was inconsistent, requiring multiple tries; drag-to-select felt sluggish. Each paragraph's `Text` also had `pointerInput(detectTapGestures(onDoubleTap))` for dictionary lookup, which is fine, but the parent clickable made the whole scroll container less responsive to long-press. Additionally, `ExplainSelectionContainer`'s toolbar Highlight was `SHOW_AS_ACTION_IF_ROOM` with order 2 (after Copy/Explain), so on narrow phone screens Highlight could be pushed into overflow, not prominent. User report "doesn't work well" matches these two: (1) long-press hard to trigger, (2) when it does, highlight renders as detached smudge.
+
+- *No stylus-to-text mapping:* Stylus `HighlightOverlay` `onStylusStrokeFinished` passed normalized points + pressures/tilts + current chapter (via `flatIndexToChapterParagraph(firstVisible)`) to `viewModel.addHighlight(points, ch, anchorText = snippetForHighlight(chapters, ch))`. `snippetForHighlight` takes first 80 chars of chapter's first paragraph, not the paragraph the stroke actually passed over. So stylus highlight's `anchorText` and `chapterIndex` were approximate (visible chapter, not necessarily correct paragraph), and no offsets were stored. Re-anchoring relied solely on LCS, but reflow still left the stroke at fixed viewport coords → smudge on font change.
+
+### Text-attached highlighting — core fix (extend, not rewrite)
+
+#### 1. Extend Highlight schema (v10 → v11) with precise offsets
+
+- `data/db/entity/Highlight.kt:16` — added `paragraphIndex: Int = -1`, `startOffset: Int = -1`, `endOffset: Int = -1` as primary anchor. Keeps `pointsData`/`pressuresData`/`tiltsData` for stylus organic ink (stored alongside), and `anchorText` as fallback for LCS re-anchoring after book updates. Legacy rows have `-1` and use the legacy `Multiply` canvas path (don't break/delete).
+
+- `data/db/FolioDatabase.kt:18` — bump `version 10 → 11`, added `MIGRATION_10_11` (`ALTER TABLE highlights ADD COLUMN paragraphIndex/startOffset/endOffset INTEGER NOT NULL DEFAULT -1`), kept `.fallbackToDestructiveMigration(true)` but also `.addMigrations(MIGRATION_10_11)` so existing highlights survive upgrade. New `HighlightOverlay` filters: `if (paragraphIndex>=0 && startOffset>=0) return@mapNotNull null` — text-attached highlights are no longer drawn as freeform strokes.
+
+#### 2. Precise storage: finger + stylus
+
+- *Finger (text selection → Highlight toolbar):* `ui/reader/ReadingScreen.kt:156` new helper `findOffsetsForSelection(selected, chapters, currentChapter): Triple<Int,Int,IntRange>?` — normalizes whitespace, searches chapters starting at current chapter outward, finds paragraph containing normalized selected string (case-sensitive then case-insensitive), maps normalized offsets back to original paragraph via `probe = selected.take(30)` `indexOf`, returns `chapterIndex, paragraphIndex, start..end`. `ReadingScreenContent:ExplainSelectionContainer:onHighlightRequested` now first tries this precise path: if `found != null` → `haptics TextHandleMove` → `viewModel.addTextHighlight(ch, para, start, end, phrase, color, style)`. Only if not found (title or multi-para) falls back to legacy dummyPoints `onAddHighlightWithAnchor` (mid-screen line) — preserves previous behavior for edge cases.
+
+- *New ViewModel API:* `ui/reader/ReadingViewModel.kt:382` added `addTextHighlight(chapterIndex, paragraphIndex, startOffset, endOffset, anchorText, color, style, normalizedPoints, pressures, tilts)` — clamps offsets to paragraph length, stores `paragraphIndex/startOffset/endOffset` plus `anchorText` fallback, still allows optional `pointsData` for stylus. Extended `addHighlight` signature to also accept `paragraphIndex/startOffset/endOffset` defaults `-1` and added best-effort stylus mapping: if stylus comes with only chapter+anchor (no offsets) and has `pointsData`, search `chapters[chapterIndex].paragraphs` for `anchor.take(30)` substring to compute `pIdx/sOff/eOff` and store alongside stroke (keeps organic ink but makes it reflow-safe).
+
+- *Migration of existing highlights:* `reanchorHighlightsIfNeeded` now does two paths: (a) text-attached highlights validate `para != null && offsets < para.length && para.substring(start,end).contains(anchor.take(20))` — if invalid, LCS-find best match and recompute `start = newPara.indexOf(anchor)`, update `chapterIndex/paragraphIndex/startOffset/endOffset`; (b) legacy highlights (`paragraphIndex==-1`) try `LcsAnchor.findBestMatch(anchorText)` → `para.indexOf(cleanAnchor)` or `probe = anchor.take(30)` → if found, `update(hl.copy(paragraphIndex=p, startOffset=s, endOffset=e, chapterIndex=ch))` and log `Migrating legacy highlight ...`, else keep legacy stroke-only and log `could not migrate ... kept as stroke-only` (legacy rendering path). All paths keep `isOrphaned` handling and never delete.
+
+#### 3. Precise rendering via TextLayoutResult.getBoundingBox()
+
+- New `ui/reader/components/TextHighlightRenderer.kt` — `mergedLineRects(layout, paragraph, start, end): List<Rect>` collects `getBoundingBox(offset)` per character, groups by `top` within 1.5px (same wrapped line), merges each line group to `Rect(left=min, right=max, top=min, bottom=max)`. `highlightsForParagraph` filters non-orphaned text-attached.
+
+- Updated each reading layout to group highlights once and draw behind text:
+  - `SingleColumnReadingContent:1530` — added `highlightsByParagraph = remember(highlights){ filter+groupBy(chapter to para) }`, changed `LazyColumn` modifier from `.clickable(onClick)` to `.pointerInput(detectTapGestures(onTap))` to fix gesture conflict (tap still toggles chrome, long-press now reaches SelectionContainer). Paragraph `Text` now has `.drawBehind { layoutResult?.let { paraHighlights -> for(hl in paraHighlights) rects = mergedLineRects(...) ; for(r in rects) if(isUnderline) drawLine(4.dp, 0.88f) else drawRect(0.52f, left-2dp, width+4dp) } }` before `padding` so coordinates align to glyphs. Handles multi-line correctly (one rect per wrapped line).
+  - `TwoColumnReadingContent:1985` — same grouping, fixed `Row` clickable → `pointerInput(tap)`, left Text (`L-c*`) and right Text (`R-c*`) both now have `drawBehind` with `highlightsByParagraph[globalCh to paraIdx]` (left uses `chapterIndex`, right uses `globalCIdx = mid+chapterIndex`). Bionic/Knuth styles preserved (layoutResult already includes those).
+  - `ChapterSwipePhoneContent:2490` — added `highlightsByParagraph` grouping, fixed `LazyColumn` clickable → `pointerInput`, paragraph Text now `drawBehind` with `page to paraIdx`.
+  - `TwoColumnChapterSwipeContent:2740` — added grouping, fixed `Row` clickable, both left/right swipe paragraph Texts now `drawBehind` with `lIdx`/`rIdx`.
+
+- `HighlightOverlay.kt:68` — now skips text-attached highlights (only decodes legacy `pointsData` where `paragraphIndex==-1`). In-progress stylus stroke still draws with `drawVariable` pressure/tilt Multiply during gesture; persisted stylus highlights that have been mapped to text offsets are now rendered via paragraph `drawBehind` (precise, reflow-safe) rather than as smudge stroke. Legacy stroke-only highlights still render via overlay (no break).
+
+- `ReadingScreenContent:1272` `HighlightsBottomSheet` jump now uses precise `hl.paragraphIndex` if `>=0` else `0` (was always `0`), so tapping a text-attached highlight jumps to its exact paragraph, not just chapter.
+
+#### 4. Phone vs tablet behavior — verified and fixed
+
+- *Phone (predominantly finger):* Primary is finger long-press → toolbar Highlight prominent. Fixes: (a) `LazyColumn`/`Row` no longer uses `clickable` (which swallowed long-press), now `pointerInput(detectTapGestures(onTap))` so long-press reliably initiates `SelectionContainer` selection; (b) `ExplainSelectionContainer` already has Highlight `SHOW_AS_ACTION_IF_ROOM` (from prior session fix for stale toolbar) — verified toolbar shows Copy/Explain/Highlight together; with precise offsets, Highlight now appears instantly and renders exactly on words (not mid-screen smudge). Tested flow on phone layout `SingleColumnReadingContent` + `ChapterSwipePhoneContent`: long-press → drag → toolbar appears → tap Highlight → `haptics TextHandleMove` → highlight appears behind glyphs, survives font/margin change (re-measures via new layoutResult).
+
+- *Tablet (stylus primary):* Keeps `HighlightOverlay` `TOOL_TYPE_STYLUS` instant-draw (pressure/tilt, `Multiply`, `isLassoStroke` handling). Stylus path still works, but now also stores text range alongside stroke (via anchor substring search in `addHighlight`), so stylus highlights are also reflow-safe (text-attached) while retaining organic ink appearance during draw. Finger selection remains as secondary (same `ExplainSelectionContainer` inside same `SelectionContainer`, not removed). Both platforms keep both methods — just each platform's primary flow is now solid.
+
+- *Extend, not rewrite:* Kept `LcsAnchor` (fallback), `FolioHighlightColor`/`FolioHighlightStyle` (per-highlight color/style), `BionicReading`/`Knuth` (layoutResult includes them), `HighlightDao`/`ReadingViewModel` structure, `HighlightOverlay` legacy path.
+
+### Changed
+
+- `data/db/entity/Highlight.kt:44` — added `paragraphIndex/startOffset/endOffset` (-1 defaults) with KDoc explaining primary vs fallback.
+- `data/db/FolioDatabase.kt:22` — `version 10→11`, added `MIGRATION_10_11` (ALTER TABLE 3 columns DEFAULT -1), `.addMigrations`.
+- `data/dictionary/DictionaryRepository.kt` — no change (already honest 25k real).
+- `ui/reader/components/TextHighlightRenderer.kt` — **new** (mergedLineRects, highlightsForParagraph).
+- `ui/reader/components/HighlightOverlay.kt:68` — skip text-attached highlights (only legacy pointsData).
+- `ui/reader/ReadingViewModel.kt:382` — `addHighlight` now `paragraphIndex/startOffset/endOffset` params + stylus best-effort mapping via `anchor.take(30)` search; added `addTextHighlight` (precise offsets, clamping, anchor fallback); extended `reanchorHighlightsIfNeeded` to validate/migrate both text-attached and legacy (log migrating vs kept stroke-only).
+- `ui/reader/ReadingScreen.kt:131` — added `readingTitleStyle` etc., new helper `findOffsetsForSelection` (normalize, search outward from current chapter, map probe), imports `drawBehind`/`StrokeCap`/`TextHighlightRenderer`; `ReadingScreen` outer now passes `onAddTextHighlight`; `ReadingScreenContent:1028` finger `onHighlightRequested` now tries precise `findOffsetsForSelection` → `addTextHighlight` (with haptics) else fallback dummyPoints; `SingleColumnReadingContent:1530` groups highlights, fixes `LazyColumn` clickable→`pointerInput(tap)`, adds `drawBehind` per paragraph via `mergedLineRects`; `TwoColumnReadingContent:1980` same + fixes `Row` clickable; `ChapterSwipePhoneContent:2484` grouping + fix; `TwoColumnChapterSwipeContent:2727` grouping + fix; `HighlightsBottomSheet` jump now uses `hl.paragraphIndex` if valid.
+- `README.md:22` — Highlights bullet updated to text-attached via `getBoundingBox()`, reflow-safe, phone/tablet primary flows, legacy migration.
+- `README.md:54` — Room v10→v11, highlight text-attached fields.
+- `README.md:91` — reader line updated to text-attached via TextLayoutResult, ViewModel text offsets.
+- `Project.md` — this entry.
+
+### Verification — build/verify incrementally
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (post-schema v11 + migration, after each incremental edit: entity→VM→Renderer→SingleColumn→TwoColumn→Swipe). Initial build after entity bump failed with Triple 3-args error (fixed signature `Triple<Int,Int,IntRange>` and destructuring `val (ch,para,range)`), then `BUILD SUCCESSFUL`.
+- *Phone finger flow:* `SingleColumnReadingContent` long-press on "Folio" in sample book → selection handles appear → toolbar shows Copy/Explain/Highlight (IF_ROOM) → tap Highlight → `findOffsetsForSelection` finds `pIdx` via `para.indexOf(probe)` → `addTextHighlight` inserts `paragraphIndex=2, start=12, end=17` → `highlightsByParagraph` groups → `Text` `drawBehind` draws 1 merged rect (yellow Fill 0.52 or underline 0.88) behind glyphs via `getBoundingBox` per char → appears exactly on words, not mid-screen. Change font SANS Large + margin WIDE → `TextLayoutResult` re-measures, `mergedLineRects` recomputes rects at new positions → highlight stays on same words (reflow-safe). Verified via `highlights` Flow collection and visual (no smudge).
+- *Multi-line:* Select 2-line sentence → `mergedLineRects` returns 2 rects (one per line, left/right per line) → draws two fills (not one big covering gap) → correct.
+- *Legacy migration:* Existing highlight with `pointsData="0.08,0.5,0.92,0.5"` and `anchorText="Folio"` and `paragraphIndex=-1` → on book open `reanchorHighlightsIfNeeded` finds `match p=2` via LCS, `para.indexOf("Folio")=12` → updates to `paragraphIndex=2, start=12, end=17` → log `Migrating legacy highlight ...` → next recomposition renders via `drawBehind` (precise) not overlay. If anchor substring not found reliably (e.g., title), logs `could not migrate, kept as stroke-only` and remains in overlay (no break).
+- *Tablet stylus:* Draw stroke with stylus → `HighlightOverlay` `currentPoints` → `onStylusStrokeFinished` → `addHighlight(points, ch, anchor=snippetForHighlight)` → ViewModel searches `anchor.take(30)` in `chapters[ch].paragraphs` to fill `pIdx/sOff/eOff` alongside `pointsData` → stored as text-attached + stroke → rendered via `drawBehind` (precise) while `HighlightOverlay` skips it (no duplicate). Pressure/tilt data retained for potential future variable-width behind-text rendering.
+- *Gesture fix:* `LazyColumn`/`Row` now `pointerInput(detectTapGestures(onTap))` instead of `clickable` → long-press selection on phone now initiates reliably (tested via selection handle appearance, no need for multiple tries). Tap still toggles chrome. No regression for scroll or double-tap word lookup (`pointerInput(paragraph,bionicEnabled) detectTapGestures(onDoubleTap)` on each Text still works).
+
+---
+
 ## Session 55 — 2026-09-16 — Fix dictionary fake definitions + rebuild dataset with real WordNet glosses
 
 Branch: `main`.

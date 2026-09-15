@@ -337,13 +337,92 @@ class ReadingViewModel(
             if (highlights.isEmpty()) return
             for (hl in highlights) {
                 if (hl.anchorText.isBlank()) continue
+                // Text-attached highlights: validate offsets and re-anchor if needed
+                if (hl.paragraphIndex >= 0 && hl.startOffset >= 0 && hl.endOffset > hl.startOffset) {
+                    val para = chapters.getOrNull(hl.chapterIndex)?.paragraphs?.getOrNull(hl.paragraphIndex)
+                    val anchor = hl.anchorText
+                    val needsReanchor = para == null ||
+                        hl.startOffset >= para.length || hl.endOffset > para.length ||
+                        (anchor.isNotBlank() && !para.substring(hl.startOffset.coerceIn(0, para.length), hl.endOffset.coerceIn(0, para.length)).contains(anchor.take(20)))
+                    if (needsReanchor) {
+                        val match = LcsAnchor.findBestMatch(anchor, chapters)
+                        if (match != null && match.paragraphIndex >= 0) {
+                            val newPara = chapters[match.chapterIndex].paragraphs[match.paragraphIndex]
+                            val idx = newPara.indexOf(anchor)
+                            if (idx >= 0) {
+                                highlightDao.update(
+                                    hl.copy(
+                                        chapterIndex = match.chapterIndex,
+                                        paragraphIndex = match.paragraphIndex,
+                                        startOffset = idx,
+                                        endOffset = (idx + anchor.length).coerceAtMost(newPara.length),
+                                        isOrphaned = false,
+                                    ),
+                                )
+                            } else {
+                                // Anchor not exactly found but LCS says paragraph; keep paragraph but mark not orphaned
+                                if (match.chapterIndex != hl.chapterIndex || hl.isOrphaned) {
+                                    highlightDao.update(hl.copy(chapterIndex = match.chapterIndex, paragraphIndex = match.paragraphIndex, isOrphaned = false))
+                                }
+                            }
+                        } else if (match == null) {
+                            if (!hl.isOrphaned) highlightDao.update(hl.copy(isOrphaned = true))
+                        }
+                    }
+                    continue
+                }
+                // Legacy stroke-only highlights: try to migrate to text-attached via anchorText
+                if (hl.paragraphIndex == -1 && hl.startOffset == -1) {
+                    val match = LcsAnchor.findBestMatch(hl.anchorText, chapters)
+                    if (match != null && match.paragraphIndex >= 0) {
+                        val para = chapters[match.chapterIndex].paragraphs[match.paragraphIndex]
+                        // Try to find anchor substring precisely
+                        val cleanAnchor = hl.anchorText.trim().take(80)
+                        var start = para.indexOf(cleanAnchor)
+                        var end = -1
+                        if (start >= 0) {
+                            end = start + cleanAnchor.length
+                        } else {
+                            // Try to find a significant substring (first 20 chars) for best-effort
+                            val probe = cleanAnchor.take(30).trim()
+                            if (probe.length >= 10) {
+                                start = para.indexOf(probe)
+                                if (start >= 0) end = (start + probe.length).coerceAtMost(para.length)
+                            }
+                        }
+                        if (start >= 0 && end > start) {
+                            // Migrate legacy to text-attached, keep pointsData for visual fallback
+                            FolioLogger.i("LCS", "Migrating legacy highlight ${hl.id} to text range p=${match.paragraphIndex} $start-$end")
+                            highlightDao.update(
+                                hl.copy(
+                                    paragraphIndex = match.paragraphIndex,
+                                    startOffset = start,
+                                    endOffset = end,
+                                    chapterIndex = match.chapterIndex,
+                                    isOrphaned = false,
+                                ),
+                            )
+                            continue
+                        }
+                        // If couldn't compute offsets reliably, just update chapter and keep legacy path
+                        if (match.chapterIndex != hl.chapterIndex || hl.isOrphaned) {
+                            highlightDao.update(hl.copy(chapterIndex = match.chapterIndex, isOrphaned = false))
+                        }
+                        if (start == -1) {
+                            FolioLogger.i("LCS", "Legacy highlight ${hl.id} could not migrate to offsets, kept as stroke-only")
+                        }
+                    } else {
+                        if (!hl.isOrphaned) highlightDao.update(hl.copy(isOrphaned = true))
+                    }
+                    continue
+                }
+                // Fallback for other cases
                 val match = LcsAnchor.findBestMatch(hl.anchorText, chapters)
                 if (match != null) {
                     if (match.chapterIndex != hl.chapterIndex || hl.isOrphaned) {
                         highlightDao.update(hl.copy(chapterIndex = match.chapterIndex, isOrphaned = false))
                     }
                 } else {
-                    // No reasonable match — leave orphaned rather than guessing
                     if (!hl.isOrphaned) {
                         highlightDao.update(hl.copy(isOrphaned = true))
                     }
@@ -387,23 +466,53 @@ class ReadingViewModel(
         anchorText: String = "",
         color: Color = Color(0xFFF7B538),
         style: String = "FILL",
+        paragraphIndex: Int = -1,
+        startOffset: Int = -1,
+        endOffset: Int = -1,
     ) {
-        if (normalizedPoints.size < 2) return
+        if (normalizedPoints.size < 2 && paragraphIndex == -1) return
         val anchor = if (anchorText.isNotBlank()) anchorText
-        else LcsAnchor.snippetForHighlight(_uiState.value.chapters, chapterIndex)
+        else LcsAnchor.snippetForHighlight(_uiState.value.chapters, chapterIndex, paragraphIndex.takeIf { it >= 0 })
+        // For stylus highlights that come with only chapter + anchor (no paragraph offsets),
+        // best-effort map to nearest paragraph text range via anchor substring search.
+        // This makes stylus highlights also reflow-safe while keeping organic ink appearance.
+        var pIdx = paragraphIndex
+        var sOff = startOffset
+        var eOff = endOffset
+        if (pIdx == -1 && anchor.isNotBlank() && normalizedPoints.size >= 2) {
+            val chParas = _uiState.value.chapters.getOrNull(chapterIndex)?.paragraphs
+            if (chParas != null) {
+                val probe = anchor.trim().take(30)
+                if (probe.length >= 8) {
+                    for ((idx, para) in chParas.withIndex()) {
+                        var found = para.indexOf(probe)
+                        if (found == -1) found = para.lowercase().indexOf(probe.lowercase())
+                        if (found >= 0) {
+                            pIdx = idx
+                            sOff = found
+                            eOff = (found + anchor.length).coerceAtMost(para.length)
+                            break
+                        }
+                    }
+                }
+            }
+        }
         viewModelScope.launch {
             try {
                 highlightDao.insert(
                     Highlight(
                         bookId = bookId,
                         chapterIndex = chapterIndex,
-                        pointsData = encodePoints(normalizedPoints),
-                        pressuresData = if (pressures.size == normalizedPoints.size) encodeFloats(pressures) else "",
-                        tiltsData = if (tilts.size == normalizedPoints.size) encodeFloats(tilts) else "",
+                        pointsData = if (normalizedPoints.size >= 2) encodePoints(normalizedPoints) else "",
+                        pressuresData = if (pressures.size == normalizedPoints.size && normalizedPoints.size >= 2) encodeFloats(pressures) else "",
+                        tiltsData = if (tilts.size == normalizedPoints.size && normalizedPoints.size >= 2) encodeFloats(tilts) else "",
                         anchorText = anchor.take(LcsAnchor.ANCHOR_SNIPPET_LEN),
                         isOrphaned = false,
                         color = color.toArgb(),
                         style = style,
+                        paragraphIndex = pIdx,
+                        startOffset = sOff,
+                        endOffset = eOff,
                     ),
                 )
             } catch (e: Exception) {
@@ -429,6 +538,55 @@ class ReadingViewModel(
         color: Color = Color(0xFFF7B538),
         style: String = "FILL",
     ) = addHighlight(normalizedPoints, pressures, tilts, chapterIndex, anchorText, color, style)
+
+    /**
+     * Text-attached highlight (primary path for finger, and stylus with mapped range).
+     * Stores precise paragraph + character offsets as primary anchor, keeps anchorText
+     * as fallback for LCS re-anchoring after book updates. PointsData is kept for
+     * stylus organic ink but not required for finger highlights.
+     */
+    fun addTextHighlight(
+        chapterIndex: Int,
+        paragraphIndex: Int,
+        startOffset: Int,
+        endOffset: Int,
+        anchorText: String,
+        color: Color = Color(0xFFF7B538),
+        style: String = "FILL",
+        normalizedPoints: List<Offset> = emptyList(),
+        pressures: List<Float> = emptyList(),
+        tilts: List<Float> = emptyList(),
+    ) {
+        if (paragraphIndex < 0 || startOffset < 0 || endOffset <= startOffset) return
+        val chapters = _uiState.value.chapters
+        val para = chapters.getOrNull(chapterIndex)?.paragraphs?.getOrNull(paragraphIndex) ?: ""
+        // Clamp offsets to paragraph length for safety
+        val s = startOffset.coerceIn(0, para.length)
+        val e = endOffset.coerceIn(s + 1, para.length)
+        val anchor = anchorText.takeIf { it.isNotBlank() } ?: para.substring(s, e).take(LcsAnchor.ANCHOR_SNIPPET_LEN)
+        viewModelScope.launch {
+            try {
+                highlightDao.insert(
+                    Highlight(
+                        bookId = bookId,
+                        chapterIndex = chapterIndex,
+                        paragraphIndex = paragraphIndex,
+                        startOffset = s,
+                        endOffset = e,
+                        pointsData = if (normalizedPoints.size >= 2) encodePoints(normalizedPoints) else "",
+                        pressuresData = if (pressures.size == normalizedPoints.size && normalizedPoints.size >= 2) encodeFloats(pressures) else "",
+                        tiltsData = if (tilts.size == normalizedPoints.size && normalizedPoints.size >= 2) encodeFloats(tilts) else "",
+                        anchorText = anchor.take(LcsAnchor.ANCHOR_SNIPPET_LEN),
+                        isOrphaned = false,
+                        color = color.toArgb(),
+                        style = style,
+                    ),
+                )
+            } catch (e: Exception) {
+                FolioLogger.w("Highlight", "addTextHighlight failed $bookId ch=$chapterIndex p=$paragraphIndex $s-$e: ${e.message}", e)
+            }
+        }
+    }
 
     fun clearHighlights() {
         viewModelScope.launch {

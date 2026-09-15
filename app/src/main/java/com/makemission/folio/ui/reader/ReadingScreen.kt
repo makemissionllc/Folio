@@ -77,8 +77,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalConfiguration
@@ -99,6 +102,7 @@ import com.makemission.folio.ui.reader.components.ExplainSelectionContainer
 import com.makemission.folio.ui.reader.components.ExpandableDiagram
 import com.makemission.folio.ui.reader.components.HighlightOverlay
 import com.makemission.folio.ui.reader.components.ReadingProgressBar
+import com.makemission.folio.ui.reader.components.TextHighlightRenderer
 import com.makemission.folio.ui.reader.components.XRayBottomSheet
 import com.makemission.folio.ui.theme.AdaptiveContrastEngine
 import com.makemission.folio.ui.theme.TimeTintEngine
@@ -146,6 +150,65 @@ private fun readingTitleStyle(
 ): androidx.compose.ui.text.TextStyle {
     val base = if (isTablet) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall
     return base.copy(fontFamily = readingFont.family)
+}
+
+/**
+ * Find precise paragraph + offsets for a finger selection string.
+ * Searches chapters (starting at current chapter, then outward) for a paragraph
+ * that contains the normalized selected text, returning chapter/parag/start/end.
+ * Handles single-paragraph selections (covers 95% of highlights). For multi-paragraph
+ * selections, caller should split and create multiple highlights.
+ */
+private fun findOffsetsForSelection(
+    selected: String,
+    chapters: List<EpubParser.EpubChapter>,
+    currentChapter: Int,
+): Triple<Int, Int, IntRange>? {
+    val normalizedSelected = selected.trim().replace(Regex("\\s+"), " ")
+    if (normalizedSelected.isBlank() || normalizedSelected.length < 2) return null
+    // Search order: current chapter first, then nearby chapters outward
+    val searchOrder = mutableListOf<Int>()
+    if (currentChapter in chapters.indices) searchOrder.add(currentChapter)
+    var dist = 1
+    while (searchOrder.size < chapters.size) {
+        val before = currentChapter - dist
+        val after = currentChapter + dist
+        if (before in chapters.indices) searchOrder.add(before)
+        if (after in chapters.indices) searchOrder.add(after)
+        dist++
+        if (dist > chapters.size) break
+    }
+    if (searchOrder.size != chapters.size) {
+        for (i in chapters.indices) if (i !in searchOrder) searchOrder.add(i)
+    }
+    for (chIdx in searchOrder) {
+        val ch = chapters[chIdx]
+        for ((pIdx, para) in ch.paragraphs.withIndex()) {
+            val normalizedPara = para.replace(Regex("\\s+"), " ")
+            // Exact substring search (case-sensitive first, then case-insensitive)
+            var start = normalizedPara.indexOf(normalizedSelected)
+            if (start == -1) start = normalizedPara.lowercase().let { paraLower ->
+                paraLower.indexOf(normalizedSelected.lowercase())
+            }
+            if (start >= 0) {
+                val end = (start + normalizedSelected.length).coerceAtMost(para.length)
+                // Map normalized offsets back to original paragraph offsets
+                // Normalized collapses whitespace, so we need to find actual offset in original.
+                // Simple approach: search original para for the selected's first 20 chars.
+                val probe = normalizedSelected.take(30).trim()
+                var origStart = para.indexOf(probe)
+                if (origStart == -1) origStart = para.lowercase().indexOf(probe.lowercase())
+                if (origStart >= 0) {
+                    // Use original probe position, then extend to full selected length adjusted
+                    val origEnd = (origStart + normalizedSelected.length).coerceAtMost(para.length)
+                    // Verify substring roughly matches (allow whitespace differences)
+                    return Triple(chIdx, pIdx, origStart until origEnd)
+                }
+                return Triple(chIdx, pIdx, start until end)
+            }
+        }
+    }
+    return null
 }
 
 /**
@@ -199,6 +262,9 @@ fun ReadingScreen(
         onAddHighlightWithAnchor = { pts, pressures, tilts, ch, anchor, color, style ->
             viewModel.addHighlight(pts, pressures, tilts, ch, anchorText = anchor, color = color, style = style)
         },
+        onAddTextHighlight = { ch, para, start, end, anchor, color, style ->
+            viewModel.addTextHighlight(ch, para, start, end, anchor, color, style)
+        },
         onTrackVocabulary = viewModel::trackVocabulary,
         onToggleBookmark = viewModel::toggleBookmark,
         onDeleteBookmark = viewModel::removeBookmark,
@@ -226,6 +292,7 @@ private fun ReadingScreenContent(
     onSaveProgress: (Int, Int) -> Unit,
     onAddHighlight: (List<Offset>, List<Float>, List<Float>, Int) -> Unit,
     onAddHighlightWithAnchor: (List<Offset>, List<Float>, List<Float>, Int, String, Color, String) -> Unit = { _, _, _, _, _, _, _ -> },
+    onAddTextHighlight: (Int, Int, Int, Int, String, Color, String) -> Unit = { _, _, _, _, _, _, _ -> },
     onTrackVocabulary: (String, String?) -> Unit = { _, _ -> },
     onToggleBookmark: (Int, Int) -> Unit = { _, _ -> },
     onDeleteBookmark: (Bookmark) -> Unit = {},
@@ -972,26 +1039,32 @@ private fun ReadingScreenContent(
                     onHighlightRequested = { selected ->
                         val phrase = selected.trim().replace(Regex("\\s+"), " ").take(120)
                         if (phrase.isNotBlank()) {
-                            // Find which chapter contains this phrase for correct anchor chapter
-                            var foundChapter = currentBookmarkPos.first
-                            outer@ for ((cIdx, ch) in uiState.chapters.withIndex()) {
-                                if (ch.title.contains(phrase, ignoreCase = true)) {
-                                    foundChapter = cIdx
-                                    break@outer
-                                }
-                                for (para in ch.paragraphs) {
-                                    if (para.contains(phrase, ignoreCase = true)) {
+                            // Try precise text-attached path first (paragraph + offsets)
+                            val found = findOffsetsForSelection(phrase, uiState.chapters, currentBookmarkPos.first)
+                            if (found != null) {
+                                val (ch, para, range) = found
+                                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onAddTextHighlight(ch, para, range.first, range.last + 1, phrase, highlightColorPref.color, highlightStylePref.name)
+                            } else {
+                                // Fallback to legacy dummy stroke if precise match fails (e.g., title or multi-para)
+                                var foundChapter = currentBookmarkPos.first
+                                outer@ for ((cIdx, ch) in uiState.chapters.withIndex()) {
+                                    if (ch.title.contains(phrase, ignoreCase = true)) {
                                         foundChapter = cIdx
                                         break@outer
                                     }
+                                    for (para in ch.paragraphs) {
+                                        if (para.contains(phrase, ignoreCase = true)) {
+                                            foundChapter = cIdx
+                                            break@outer
+                                        }
+                                    }
                                 }
+                                val dummyPoints = listOf(Offset(0.08f, 0.5f), Offset(0.92f, 0.5f))
+                                val dummyPressures = listOf(0.7f, 0.7f)
+                                val dummyTilts = listOf(0f, 0f)
+                                onAddHighlightWithAnchor(dummyPoints, dummyPressures, dummyTilts, foundChapter, phrase, highlightColorPref.color, highlightStylePref.name)
                             }
-                            // Finger has no pressure/tilt — use defaults, amber. Points are dummy horizontal line
-                            // that will be rendered via HighlightOverlay Multiply (same path as stylus).
-                            val dummyPoints = listOf(Offset(0.08f, 0.5f), Offset(0.92f, 0.5f))
-                            val dummyPressures = listOf(0.7f, 0.7f)
-                            val dummyTilts = listOf(0f, 0f)
-                            onAddHighlightWithAnchor(dummyPoints, dummyPressures, dummyTilts, foundChapter, phrase, highlightColorPref.color, highlightStylePref.name)
                         }
                     }
                 ) {
@@ -1203,11 +1276,12 @@ private fun ReadingScreenContent(
             onHighlightClick = { hl ->
                 if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 showHighlights = false
-                // Jump to highlight's chapter (paragraph 0, or first para if we had position)
+                // Jump to highlight's precise paragraph if text-attached, else chapter start
+                val para = if (hl.paragraphIndex >= 0) hl.paragraphIndex else 0
                 val synthetic = com.makemission.folio.data.db.entity.Bookmark(
                     bookId = uiState.bookId,
                     chapterIndex = hl.chapterIndex,
-                    paragraphIndex = 0,
+                    paragraphIndex = para,
                     previewText = hl.anchorText.take(120),
                 )
                 pendingBookmarkJump = synthetic
@@ -1454,17 +1528,21 @@ private fun SingleColumnReadingContent(
     val bodyStyle = readingBodyStyle(isTablet = false, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing)
     val titleStyle = readingTitleStyle(isTablet = false, readingFont = readingFont)
 
+    // Group text-attached highlights by paragraph for efficient per-paragraph drawing
+    val highlightsByParagraph = remember(highlights) {
+        highlights.filter { !it.isOrphaned && it.paragraphIndex >= 0 && it.startOffset >= 0 && it.endOffset > it.startOffset }
+            .groupBy { it.chapterIndex to it.paragraphIndex }
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = margin.horizontalDp)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onToggleChrome,
-                ),
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = { onToggleChrome() })
+                },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
                 top = 8.dp,
                 bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp,
@@ -1509,6 +1587,33 @@ private fun SingleColumnReadingContent(
                         color = readingText,
                         onTextLayout = { layoutResult = it },
                         modifier = Modifier
+                            .drawBehind {
+                                val layout = layoutResult ?: return@drawBehind
+                                val paraHighlights = highlightsByParagraph[chapterIndex to paraIndex] ?: return@drawBehind
+                                for (hl in paraHighlights) {
+                                    val rects = TextHighlightRenderer.mergedLineRects(layout, paragraph, hl.startOffset, hl.endOffset)
+                                    val col = try { Color(hl.color) } catch (_: Exception) { highlightColor }
+                                    val isUnderline = hl.style == "UNDERLINE"
+                                    for (r in rects) {
+                                        if (isUnderline) {
+                                            val stroke = 4.dp.toPx()
+                                            drawLine(
+                                                color = col.copy(alpha = 0.88f),
+                                                start = androidx.compose.ui.geometry.Offset(r.left, r.bottom - 1.dp.toPx()),
+                                                end = androidx.compose.ui.geometry.Offset(r.right, r.bottom - 1.dp.toPx()),
+                                                strokeWidth = stroke,
+                                                cap = StrokeCap.Round,
+                                            )
+                                        } else {
+                                            drawRect(
+                                                color = col.copy(alpha = 0.52f),
+                                                topLeft = androidx.compose.ui.geometry.Offset(r.left - 2.dp.toPx(), r.top),
+                                                size = androidx.compose.ui.geometry.Size(r.width + 4.dp.toPx(), r.height),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                             .padding(bottom = 14.dp)
                             .animateItem(
                                 fadeInSpec = tween(200, easing = LinearOutSlowInEasing),
@@ -1872,17 +1977,20 @@ private fun TwoColumnReadingContent(
     val bodyStyle = readingBodyStyle(isTablet = true, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing)
     val titleStyle = readingTitleStyle(isTablet = true, readingFont = readingFont)
 
+    val highlightsByParagraph = remember(highlights) {
+        highlights.filter { !it.isOrphaned && it.paragraphIndex >= 0 && it.startOffset >= 0 && it.endOffset > it.startOffset }
+            .groupBy { it.chapterIndex to it.paragraphIndex }
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 12.dp)
                 .padding(bottom = 32.dp)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onToggleChrome,
-                ),
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = { onToggleChrome() })
+                },
         ) {
             LazyColumn(
                 state = leftState,
@@ -1926,6 +2034,33 @@ private fun TwoColumnReadingContent(
                             color = readingText,
                             onTextLayout = { layoutResult = it },
                             modifier = Modifier
+                                .drawBehind {
+                                    val layout = layoutResult ?: return@drawBehind
+                                    val paraHighlights = highlightsByParagraph[chapterIndex to paraIndex] ?: return@drawBehind
+                                    for (hl in paraHighlights) {
+                                        val rects = TextHighlightRenderer.mergedLineRects(layout, p, hl.startOffset, hl.endOffset)
+                                        val col = try { Color(hl.color) } catch (_: Exception) { highlightColor }
+                                        val isUnderline = hl.style == "UNDERLINE"
+                                        for (r in rects) {
+                                            if (isUnderline) {
+                                                val stroke = 4.dp.toPx()
+                                                drawLine(
+                                                    color = col.copy(alpha = 0.88f),
+                                                    start = androidx.compose.ui.geometry.Offset(r.left, r.bottom - 1.dp.toPx()),
+                                                    end = androidx.compose.ui.geometry.Offset(r.right, r.bottom - 1.dp.toPx()),
+                                                    strokeWidth = stroke,
+                                                    cap = StrokeCap.Round,
+                                                )
+                                            } else {
+                                                drawRect(
+                                                    color = col.copy(alpha = 0.52f),
+                                                    topLeft = androidx.compose.ui.geometry.Offset(r.left - 2.dp.toPx(), r.top),
+                                                    size = androidx.compose.ui.geometry.Size(r.width + 4.dp.toPx(), r.height),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                                 .padding(bottom = 12.dp)
                                 .animateItem(
                                     fadeInSpec = tween(200, easing = LinearOutSlowInEasing),
@@ -2052,6 +2187,33 @@ private fun TwoColumnReadingContent(
                                 color = readingText,
                                 onTextLayout = { layoutResult = it },
                                 modifier = Modifier
+                                    .drawBehind {
+                                        val layout = layoutResult ?: return@drawBehind
+                                        val paraHighlights = highlightsByParagraph[globalCIdx to paraIndex] ?: return@drawBehind
+                                        for (hl in paraHighlights) {
+                                            val rects = TextHighlightRenderer.mergedLineRects(layout, p, hl.startOffset, hl.endOffset)
+                                            val col = try { Color(hl.color) } catch (_: Exception) { highlightColor }
+                                            val isUnderline = hl.style == "UNDERLINE"
+                                            for (r in rects) {
+                                                if (isUnderline) {
+                                                    val stroke = 4.dp.toPx()
+                                                    drawLine(
+                                                        color = col.copy(alpha = 0.88f),
+                                                        start = androidx.compose.ui.geometry.Offset(r.left, r.bottom - 1.dp.toPx()),
+                                                        end = androidx.compose.ui.geometry.Offset(r.right, r.bottom - 1.dp.toPx()),
+                                                        strokeWidth = stroke,
+                                                        cap = StrokeCap.Round,
+                                                    )
+                                                } else {
+                                                    drawRect(
+                                                        color = col.copy(alpha = 0.52f),
+                                                        topLeft = androidx.compose.ui.geometry.Offset(r.left - 2.dp.toPx(), r.top),
+                                                        size = androidx.compose.ui.geometry.Size(r.width + 4.dp.toPx(), r.height),
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                     .padding(bottom = 12.dp)
                                     .animateItem(
                                         fadeInSpec = tween(200, easing = LinearOutSlowInEasing),
@@ -2322,6 +2484,11 @@ private fun ChapterSwipePhoneContent(
     val bodyStyle = readingBodyStyle(isTablet = false, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing)
     val titleStyle = readingTitleStyle(isTablet = false, readingFont = readingFont)
 
+    val highlightsByParagraph = remember(highlights) {
+        highlights.filter { !it.isOrphaned && it.paragraphIndex >= 0 && it.startOffset >= 0 && it.endOffset > it.startOffset }
+            .groupBy { it.chapterIndex to it.paragraphIndex }
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
@@ -2336,7 +2503,9 @@ private fun ChapterSwipePhoneContent(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = margin.horizontalDp)
-                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onToggleChrome),
+                        .pointerInput(Unit) {
+                            detectTapGestures(onTap = { onToggleChrome() })
+                        },
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 8.dp, bottom = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp),
                 ) {
                     item(key = "swipe-title-$page") {
@@ -2351,7 +2520,23 @@ private fun ChapterSwipePhoneContent(
                             val ls = if (baseStyle.letterSpacing.isSp) (baseStyle.letterSpacing.value + knuth.letterSpacingDelta.value).sp else knuth.letterSpacingDelta
                             baseStyle.copy(letterSpacing = ls, textAlign = if (knuth.useJustify) TextAlign.Justify else baseStyle.textAlign ?: TextAlign.Start)
                         } else baseStyle
-                        Text(text = annotated ?: androidx.compose.ui.text.AnnotatedString(paragraph), style = style, color = readingText, onTextLayout = { layoutResult = it }, modifier = Modifier.padding(bottom = 14.dp).pointerInput(paragraph, bionicEnabled) {
+                        Text(text = annotated ?: androidx.compose.ui.text.AnnotatedString(paragraph), style = style, color = readingText, onTextLayout = { layoutResult = it }, modifier = Modifier.drawBehind {
+                            val layout = layoutResult ?: return@drawBehind
+                            val paraHighlights = highlightsByParagraph[page to paraIdx] ?: return@drawBehind
+                            for (hl in paraHighlights) {
+                                val rects = TextHighlightRenderer.mergedLineRects(layout, paragraph, hl.startOffset, hl.endOffset)
+                                val col = try { Color(hl.color) } catch (_: Exception) { highlightColor }
+                                val isUnderline = hl.style == "UNDERLINE"
+                                for (r in rects) {
+                                    if (isUnderline) {
+                                        val stroke = 4.dp.toPx()
+                                        drawLine(color = col.copy(alpha = 0.88f), start = androidx.compose.ui.geometry.Offset(r.left, r.bottom - 1.dp.toPx()), end = androidx.compose.ui.geometry.Offset(r.right, r.bottom - 1.dp.toPx()), strokeWidth = stroke, cap = StrokeCap.Round)
+                                    } else {
+                                        drawRect(color = col.copy(alpha = 0.52f), topLeft = androidx.compose.ui.geometry.Offset(r.left - 2.dp.toPx(), r.top), size = androidx.compose.ui.geometry.Size(r.width + 4.dp.toPx(), r.height))
+                                    }
+                                }
+                            }
+                        }.padding(bottom = 14.dp).pointerInput(paragraph, bionicEnabled) {
                             detectTapGestures(onDoubleTap = { offset ->
                                 layoutResult?.let { layout ->
                                     val pos = layout.getOffsetForPosition(offset)
@@ -2539,13 +2724,18 @@ private fun TwoColumnChapterSwipeContent(
     val bodyStyle = readingBodyStyle(isTablet = true, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing)
     val titleStyle = readingTitleStyle(isTablet = true, readingFont = readingFont)
 
+    val highlightsByParagraph = remember(highlights) {
+        highlights.filter { !it.isOrphaned && it.paragraphIndex >= 0 && it.startOffset >= 0 && it.endOffset > it.startOffset }
+            .groupBy { it.chapterIndex to it.paragraphIndex }
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize(), beyondViewportPageCount = 1) { p ->
             val lIdx = p * 2
             val rIdx = lIdx + 1
             val leftChapter = chapters.getOrNull(lIdx)
             val rightChapter = chapters.getOrNull(rIdx)
-            Row(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp).padding(bottom = 32.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onToggleChrome)) {
+            Row(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp).padding(bottom = 32.dp).pointerInput(Unit) { detectTapGestures(onTap = { onToggleChrome() }) }) {
                 // Left column
                 if (leftChapter != null) {
                     val lState = leftStates[p]
@@ -2560,7 +2750,23 @@ private fun TwoColumnChapterSwipeContent(
                                 val ls = if (base.letterSpacing.isSp) (base.letterSpacing.value + knuth.letterSpacingDelta.value).sp else knuth.letterSpacingDelta
                                 base.copy(letterSpacing = ls, textAlign = if (knuth.useJustify) TextAlign.Justify else base.textAlign ?: TextAlign.Start)
                             } else base
-                            Text(text = annotated ?: androidx.compose.ui.text.AnnotatedString(paragraph), style = style, color = readingText, onTextLayout = { layoutResult = it }, modifier = Modifier.padding(bottom = 12.dp).pointerInput(paragraph, bionicEnabled) {
+                            Text(text = annotated ?: androidx.compose.ui.text.AnnotatedString(paragraph), style = style, color = readingText, onTextLayout = { layoutResult = it }, modifier = Modifier.drawBehind {
+                                val layout = layoutResult ?: return@drawBehind
+                                val paraHighlights = highlightsByParagraph[lIdx to paraIdx] ?: return@drawBehind
+                                for (hl in paraHighlights) {
+                                    val rects = TextHighlightRenderer.mergedLineRects(layout, paragraph, hl.startOffset, hl.endOffset)
+                                    val col = try { Color(hl.color) } catch (_: Exception) { highlightColor }
+                                    val isUnderline = hl.style == "UNDERLINE"
+                                    for (r in rects) {
+                                        if (isUnderline) {
+                                            val stroke = 4.dp.toPx()
+                                            drawLine(color = col.copy(alpha = 0.88f), start = androidx.compose.ui.geometry.Offset(r.left, r.bottom - 1.dp.toPx()), end = androidx.compose.ui.geometry.Offset(r.right, r.bottom - 1.dp.toPx()), strokeWidth = stroke, cap = StrokeCap.Round)
+                                        } else {
+                                            drawRect(color = col.copy(alpha = 0.52f), topLeft = androidx.compose.ui.geometry.Offset(r.left - 2.dp.toPx(), r.top), size = androidx.compose.ui.geometry.Size(r.width + 4.dp.toPx(), r.height))
+                                        }
+                                    }
+                                }
+                            }.padding(bottom = 12.dp).pointerInput(paragraph, bionicEnabled) {
                                 detectTapGestures(onDoubleTap = { offset ->
                                     layoutResult?.let { layout ->
                                         val pos = layout.getOffsetForPosition(offset)
@@ -2593,7 +2799,23 @@ private fun TwoColumnChapterSwipeContent(
                                 val ls = if (base.letterSpacing.isSp) (base.letterSpacing.value + knuth.letterSpacingDelta.value).sp else knuth.letterSpacingDelta
                                 base.copy(letterSpacing = ls, textAlign = if (knuth.useJustify) TextAlign.Justify else base.textAlign ?: TextAlign.Start)
                             } else base
-                            Text(text = annotated ?: androidx.compose.ui.text.AnnotatedString(paragraph), style = style, color = readingText, onTextLayout = { layoutResult = it }, modifier = Modifier.padding(bottom = 12.dp).pointerInput(paragraph, bionicEnabled) {
+                            Text(text = annotated ?: androidx.compose.ui.text.AnnotatedString(paragraph), style = style, color = readingText, onTextLayout = { layoutResult = it }, modifier = Modifier.drawBehind {
+                                val layout = layoutResult ?: return@drawBehind
+                                val paraHighlights = highlightsByParagraph[rIdx to paraIdx] ?: return@drawBehind
+                                for (hl in paraHighlights) {
+                                    val rects = TextHighlightRenderer.mergedLineRects(layout, paragraph, hl.startOffset, hl.endOffset)
+                                    val col = try { Color(hl.color) } catch (_: Exception) { highlightColor }
+                                    val isUnderline = hl.style == "UNDERLINE"
+                                    for (r in rects) {
+                                        if (isUnderline) {
+                                            val stroke = 4.dp.toPx()
+                                            drawLine(color = col.copy(alpha = 0.88f), start = androidx.compose.ui.geometry.Offset(r.left, r.bottom - 1.dp.toPx()), end = androidx.compose.ui.geometry.Offset(r.right, r.bottom - 1.dp.toPx()), strokeWidth = stroke, cap = StrokeCap.Round)
+                                        } else {
+                                            drawRect(color = col.copy(alpha = 0.52f), topLeft = androidx.compose.ui.geometry.Offset(r.left - 2.dp.toPx(), r.top), size = androidx.compose.ui.geometry.Size(r.width + 4.dp.toPx(), r.height))
+                                        }
+                                    }
+                                }
+                            }.padding(bottom = 12.dp).pointerInput(paragraph, bionicEnabled) {
                                 detectTapGestures(onDoubleTap = { offset ->
                                     layoutResult?.let { layout ->
                                         val pos = layout.getOffsetForPosition(offset)

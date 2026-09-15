@@ -67,6 +67,8 @@ fun HighlightOverlay(
     )
     val decodedHighlights = remember(highlights) {
         highlights.mapNotNull { hl ->
+            // Skip text-attached highlights (rendered via TextLayoutResult behind text, not as freeform stroke)
+            if (hl.paragraphIndex >= 0 && hl.startOffset >= 0 && hl.endOffset > hl.startOffset) return@mapNotNull null
             val norm = decodePoints(hl.pointsData)
             if (norm.size < 2) return@mapNotNull null
             val pressures = decodeFloats(hl.pressuresData)

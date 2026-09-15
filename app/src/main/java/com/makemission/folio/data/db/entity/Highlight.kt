@@ -10,7 +10,9 @@ import androidx.room.PrimaryKey
  * `pointsData` stores the normalized ink path as "x1,y1,x2,y2,..." where
  * x/y are 0..1 relative to the reading viewport. This keeps highlights
  * resolution-independent and lets the Room row capture which book, which
- * chapter, and the ink position.
+ * chapter, and the ink position. For text-attached highlights, pointsData
+ * is kept for stylus organic appearance but the primary anchor is now
+ * paragraphIndex + startOffset/endOffset.
  *
  * `pressuresData` / `tiltsData` enable organic stroke width (§4): pressure
  * (0..1) and tilt (radians 0..PI/2) captured per point via MotionEvent and
@@ -22,6 +24,13 @@ import androidx.room.PrimaryKey
  * highlight (e.g. 80 chars) as a contextual anchor. On reopen/reimport,
  * an LCS scan relocates the highlight to the closest matching paragraph
  * if the EPUB changed, otherwise it stays orphaned.
+ *
+ * Text-attached fields (added in v11): `paragraphIndex`, `startOffset`,
+ * `endOffset` store the precise character range within the paragraph as the
+ * primary anchor. This makes highlights reflow-safe (font size / margin /
+ * device changes) and precisely aligned to glyphs via
+ * TextLayoutResult.getBoundingBox(). Legacy rows have -1 for these fields
+ * and fall back to pointsData/LCS rendering.
  */
 @Entity(tableName = "highlights")
 data class Highlight(
@@ -42,5 +51,11 @@ data class Highlight(
     val color: Int,
     /** Highlight style — FILL (Multiply fill, default) or UNDERLINE, persisted per highlight. */
     val style: String = "FILL",
+    /** Text-attached: paragraph index within chapter, -1 = legacy stroke-only. */
+    val paragraphIndex: Int = -1,
+    /** Text-attached: start character offset within paragraph (inclusive), -1 = legacy. */
+    val startOffset: Int = -1,
+    /** Text-attached: end character offset within paragraph (exclusive), -1 = legacy. */
+    val endOffset: Int = -1,
     val createdAt: Long = System.currentTimeMillis(),
 )
