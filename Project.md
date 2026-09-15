@@ -7,6 +7,76 @@ Active coding branch: `main`.
 
 ---
 
+## Session 54 — 2026-09-16 — Content disclaimer + battery/thermal drain audit (sensor, tint, animations, WorkManager, Canvas, polling)
+
+Branch: `main`.
+
+### Content Disclaimer
+
+- Added verbatim **CONTENT DISCLAIMER** to two surfaces per request:
+  - `ui/onboarding/OnboardingScreen.kt` — new page 5 (`OnboardingPageDisclaimer`) in pager (now 5 pages: Welcome, Write like paper, Smart on-device, Private by design, Content Disclaimer). Card with two paragraphs verbatim: *Folio is a reading application only...* + *You are solely responsible...* Dots `repeat(5)`, `pagerState` `pageCount 5`, Skip/Next logic updated (`<4`), `Get started` only on page 4.
+  - `ui/settings/SettingsScreen.kt` — new `Content Disclaimer` `SettingsSection` at end of LazyColumn (after Privacy/Data), two `Text` paragraphs verbatim `bodySmall` `onSurfaceVariant`.
+  - `README.md` — Appearance & Settings and Onboarding sections now mention disclaimer; Onboarding notes 5-page pager and verbatim text.
+
+### Battery/thermal audit — 6 candidates investigated, 2 fixes applied (4 confirmed not problems)
+
+#### 1. Ambient light sensor (`AmbientLightSensor.kt:26`) — FIXED (lifecycle)
+
+- *Investigated:* `rememberAmbientLightLux(enabled)` used `DisposableEffect(context, enabled)` with `registerListener(SENSOR_DELAY_NORMAL)` and `unregister` onDispose. `ReadingScreen.kt:358` called `rememberAmbientLightLux(enabled = adaptiveEnabled && hasSensor)` — correctly not registered when Comfort Contrast OFF (early return null). EMA throttling (`abs>5 or >2%`) avoided noise recompositions. However, sensor stayed registered while reader was in background (`onPause`): `DisposableEffect` only disposes on composition removal or `enabled` change, not on Activity pause. If user pressed Home with reader open and Comfort Contrast ON, sensor continued firing every ~200ms, keeping CPU awake and triggering `adaptivePair`→`colorDistance`→`animateColorAsState` 900ms tweens continuously — sustained battery drain and warmth.
+- *Fix:* Added `LocalLifecycleOwner` + `LifecycleEventObserver` tracking `isResumed` (`RESUMED` vs `PAUSE`). New `DisposableEffect(context, enabled, isResumed)` registers only when `enabled && isResumed`; when `!isResumed` returns early without listener (keeps last lux value, no flash on resume) and unregisters via previous effect's `onDispose`. When `!enabled` still nulls value. Ensures sensor never runs while screen not visible/active. Timeout measured: sensor unregister on pause eliminates ~5 Hz wakeups during background.
+
+#### 2. Time-of-day tint (`TimeTintEngine.kt:98` `rememberTimeWarmth`) — FIXED (lifecycle + enabled gating)
+
+- *Investigated:* `rememberTimeWarmth()` used `LaunchedEffect(Unit) { while(true) { warmth=currentWarmth(); delay(aligned 60s) } }` unconditionally, even when Evening warmth toggle OFF, and without lifecycle awareness. In `ReadingScreen.kt:367` called unconditionally `rememberTimeWarmth()` then layered only if `timeTintEnabled`, so poll ran every 60s even when OFF (waking coroutine, recomputing warmth, no visual effect). When app backgrounded but ReadingScreen still composed, poll continued waking every 60s, updating `warmthState` → recomposing `timeTintedPair` → `debouncedTarget` check. No overlapping instances (single `LaunchedEffect(Unit)` per composition), but continuous when not needed.
+- *Fix:* Changed signature to `rememberTimeWarmth(enabled: Boolean = true)` with `LocalLifecycleOwner` `isResumed` tracking (same pattern as sensor). Two `LaunchedEffect(enabled, isResumed)`: first immediately refreshes `warmth` when re-enabled/resumed, second runs `while(true)` loop only if `enabled && isResumed`, otherwise `return@LaunchedEffect` (cancelled). `ReadingScreen.kt:367` now `rememberTimeWarmth(enabled = timeTintEnabled)` so poll is fully stopped when toggle OFF. Cancels on `onPause` and onDisabled, restarts on `onResume` with fresh warmth. Keeps backward compat overload (`enabled=true` default). Verified: toggle OFF → no coroutine; background → coroutine cancelled (no 60s wake); foreground toggle ON → single instance, no overlapping.
+
+#### 3. `animateColorAsState` / `rememberInfiniteTransition` — NOT A PROBLEM (already throttled, short-lived)
+
+- *Investigated:* `ReadingScreen.kt:395` two `animateColorAsState(debouncedTargetBg/Text, tween 900 LinearOutSlowIn)` — previously would restart every sensor tick (~200ms) for imperceptible deltas, causing 60fps recomposition of reading tree. Already fixed prior pass with `colorDistance >0.015` debouncing + EMA throttling, so only perceptible changes animate (not every tick). No infinite transition in reading content; only loading dots. `InsightsScreen.kt:82` and `ReadingScreen.kt:896` `rememberInfiniteTransition(pulse 0.9→1.15 900ms Reverse)` only composed when `state.isLoading || showLoading` (early `return@Scaffold` branch) — disposed after load + 900ms `Crossfade`, not running during reading. `LibraryScreen.kt:583` vocab dot `rememberInfiniteTransition(1→1.35 900ms)` was in `LibraryQuickRow` which is currently **not called** from `LibraryScreen` (removed in earlier pass), so no drain. `SettingsScreen.kt:675` `animateFloatAsState(scale 1→1.03 180ms)` is one-shot toggle animation, not continuous. All other `animateItem`/`Crossfade`/`AnimatedVisibility` are bounded (220–400ms) and only on interaction.
+- *Fix:* No change needed; existing debounce + short-lived loading pulse confirmed lifecycle-correct (disposed when not loading / not in foreground).
+
+#### 4. WorkManager background processing (`BookProcessingScheduler.kt:24` / `BookProcessingWorker.kt:47`) — NOT A PROBLEM (one-shot, KEEP)
+
+- *Investigated:* `BookProcessingScheduler.schedule` enqueues `OneTimeWorkRequest` with `enqueueUniqueWork("folio_process_$bookId", ExistingWorkPolicy.KEEP, request)` + `BatteryNotLow false`, `StorageNotLow false`, `Backoff LINEAR 10s`, `Expedited RUN_AS_NON`. Worker uses `Semaphore(2)` to throttle concurrency and `ParsedBookCache.load` / `XRayCache.loadChapter` to skip already-cached chapters (hash-validated). Logs: `Start processing bookId=...` then `Done processed=... total=...` or `Parsed cache hit`. No `PeriodicWorkRequest`, no re-enqueue loop. `ExistingWorkPolicy.KEEP` prevents duplicate enqueue for same bookId; already-processed books skip chapters via `if (existing != null) continue`. No scheduling bug causing re-run loop.
+- *Fix:* No change needed; verified one-shot stays one-shot, queue does not re-trigger repeatedly.
+
+#### 5. HighlightOverlay Canvas (`HighlightOverlay.kt:134`) — NOT A PROBLEM (cached, gesture-only redraw)
+
+- *Investigated:* `HighlightOverlay` draws persisted highlights via `decodedHighlights = remember(highlights) { mapNotNull decode }` (cached, not re-parsing on scroll), plus in-progress stroke `currentPoints` updated via `pointerInteropFilter` only for `TOOL_TYPE_STYLUS` `ACTION_MOVE` filtered by `distance>1.2f`. Canvas `drawVariable/drawFixed` runs on every recomposition, but recomposition only triggered when `highlights` list changes (new highlight) or `currentPoints` changes (active stylus gesture) or parent forces. `ReadingScreenContent`'s `readingBg` animated color (900ms tween) does cause parent recomposition, but `HighlightOverlay` is skippable if inputs (`highlights`, `highlightColor`, `highlightStyle`) are stable (Compose skips if equal). Even when redrawn, cost is `O(highlights)` lines with `BlendMode.Multiply` — cheap for <100 highlights, not full-book re-layout. No `snapshotFlow` poll or frame callback.
+- *Fix:* No change needed; redraw only on highlight change or active gesture, not every frame idle. Confirmed `pointerInteropFilter` returns `false` for finger so scroll not blocked, no continuous invalidation.
+
+#### 6. Tight polling loops (`snapshotFlow` / `LaunchedEffect delay`) — MOSTLY OK, ONE FIX (time tint only)
+
+- *Investigated:* Grepped `snapshotFlow`, `delay(`, `LaunchedEffect`:
+  - `ReadingScreen.kt:479` `snapshotFlow { currentBookmarkPos } distinctUntilChanged delay 700` — debounced save on position change only, not polling; cancellable but wraps `withContext(NonCancellable)` so save completes on nav away.
+  - `ReadingScreen.kt:1391` velocity estimator `snapshotFlow firstVisibleItemIndex distinctUntilChanged` — updates time-remaining only on scroll, no timer.
+  - `ReadingScreen.kt:328` `delay(60)` + `540 delay 100` + `586 delay 80` — one-shot restoration after `LaunchedEffect(chapters, ...)`, not loops.
+  - `ReadingScreen.kt:874 delay(remaining)` — one-shot loading `Crossfade` minimum 900ms.
+  - `LibraryScreen.kt:137 delay(600)` — one-shot auto-scan on launch.
+  - `TimeTintEngine.kt:108 delay(60s)` — the only continuous loop, fixed above.
+  - Search debounce `280ms library, 260ms in-book` already `distinctUntilChanged` + `debounce`.
+- *Fix:* Only time tint poll was continuous and now lifecycle-gated; other `snapshotFlow` loops are event-driven (scroll) not polling.
+
+### Changed
+
+- `ui/theme/AmbientLightSensor.kt:9` — added `Lifecycle`/`LifecycleEventObserver`/`LocalLifecycleOwner` imports; `26` added `isResumed` tracking via `DisposableEffect(lifecycleOwner)` observer; `33` now `DisposableEffect(context, enabled, isResumed)` with early return when `!isResumed` (unregister, keep last lux) and when `!enabled` (null).
+- `ui/theme/TimeTintEngine.kt:98` — added lifecycle imports; `rememberTimeWarmth(enabled: Boolean = true)` now lifecycle-aware with `isResumed` observer, `LaunchedEffect(enabled, isResumed)` gated loop (only while `enabled && isResumed`), immediate refresh on re-enable/resume; keeps `while(true)` 60s aligned delay otherwise cancelled.
+- `ui/reader/ReadingScreen.kt:365` — `rememberTimeWarmth()` → `rememberTimeWarmth(enabled = timeTintEnabled)` so poll stops when Evening warmth OFF.
+- `ui/onboarding/OnboardingScreen.kt:64` — `pageCount 4→5`, Skip `<3→<4`, HorizontalPager added `4 -> OnboardingPageDisclaimer()`, dots `repeat 4→5`, Next `<3→<4` and `"Get started"` check `==3→==4`; added `OnboardingPageDisclaimer` composable (title Content Disclaimer + Card with two verbatim paragraphs).
+- `ui/settings/SettingsScreen.kt:523` — added `Content Disclaimer` `SettingsSection` with two verbatim paragraphs.
+- `README.md` — updated Reading features Comfort Contrast/Evening warmth bullets to note lifecycle-aware, updated Appearance & Settings and Onboarding to mention disclaimer (5-page pager verbatim).
+- `Project.md` — this entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (post-edit).
+- Manual: Comfort Contrast ON + RESUMED → sensor registers `SENSOR_DELAY_NORMAL`; `onPause` (Home) → `isResumed false` → listener unregistered (no sensor callbacks in log); `onResume` → re-registered, EMA continues. OFF → null, no registration even when resumed.
+- Manual: Evening warmth ON + RESUMED → `warmthState` updates every 60s aligned to minute; OFF → no coroutine (verified via `LaunchedEffect` not launched); `onPause` → coroutine cancelled (no 60s wake in background dump); `onResume` → single instance restarts, no overlapping.
+- Infinite transitions: Insights loading pulse only during `isLoading`; Reading pulse only during `showLoading` (≤~1s); Library vocab dot not composed; no 60fps infinite recomposition during idle reading observed (Profile GPU rendering flat when sensor debounced).
+- WorkManager: schedule same bookId twice → second `KEEP` ignored; already-cached chapters `loadChapter != null` skipped, `processed=0` logged, not re-processed.
+
+---
+
 ## Session 53 — 2026-09-16 — Pre-production polish pass (manual, guide, settings, onboarding, metadata, docs)
 
 Branch: `main`.

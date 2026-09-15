@@ -363,8 +363,9 @@ private fun ReadingScreenContent(
         } else null
     }
     // Time-aware tint (on-device, deterministic, system clock, no location)
+    // Lifecycle-aware: only polls when enabled && RESUMED, cancelled otherwise
     val timeTintEnabled by settingsRepo.timeTintEnabled.collectAsState(initial = false)
-    val warmthState = rememberTimeWarmth()
+    val warmthState = rememberTimeWarmth(enabled = timeTintEnabled)
     val warmth = warmthState.value
     // Layer: palette base → adaptive (lux) → time tint (warmth) → animated
     val adaptiveBg = adaptivePair?.first ?: baseBg

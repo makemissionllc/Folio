@@ -61,7 +61,7 @@ fun OnboardingScreen(
     val scope = rememberCoroutineScope()
     val repo = remember { SettingsRepository.get(context) }
 
-    val pagerState = rememberPagerState(pageCount = { 4 })
+    val pagerState = rememberPagerState(pageCount = { 5 })
     // Permission state tracking
     var storageGranted by remember {
         mutableStateOf(checkStorageGranted(context))
@@ -103,7 +103,7 @@ fun OnboardingScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
-                if (pagerState.currentPage < 3) {
+                if (pagerState.currentPage < 4) {
                     TextButton(onClick = {
                         scope.launch {
                             repo.setHasSeenOnboarding(true)
@@ -142,6 +142,7 @@ fun OnboardingScreen(
                             }
                         },
                     )
+                    4 -> OnboardingPageDisclaimer()
                 }
             }
 
@@ -151,7 +152,7 @@ fun OnboardingScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                repeat(4) { idx ->
+                repeat(5) { idx ->
                     val isSelected = pagerState.currentPage == idx
                     Box(
                         modifier = Modifier
@@ -185,7 +186,7 @@ fun OnboardingScreen(
 
                 Button(
                     onClick = {
-                        if (pagerState.currentPage < 3) {
+                        if (pagerState.currentPage < 4) {
                             scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
                         } else {
                             scope.launch {
@@ -201,7 +202,7 @@ fun OnboardingScreen(
                     shape = RoundedCornerShape(24.dp),
                 ) {
                     Text(
-                        text = if (pagerState.currentPage == 3) "Get started" else "Next",
+                        text = if (pagerState.currentPage == 4) "Get started" else "Next",
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
@@ -360,6 +361,41 @@ private fun OnboardingPagePrivacy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OnboardingPageDisclaimer(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.fillMaxSize().padding(horizontal = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = "CONTENT DISCLAIMER",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Folio is a reading application only. It does not provide, host, sell, or distribute any books, and does not include any copyrighted content. Any books you read in Folio come from files you choose to open or import yourself, from your own device or from other apps.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "You are solely responsible for ensuring you have the legal right to any content you add to Folio, including complying with applicable copyright law in your jurisdiction. Folio's developer is not responsible or liable for how you obtain, use, or possess the content you open in the app.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

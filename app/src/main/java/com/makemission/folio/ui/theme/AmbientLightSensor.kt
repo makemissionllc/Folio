@@ -8,9 +8,14 @@ import android.hardware.SensorManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
+    import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 /**
  * Ambient light sensor reader (§5 Colorimetric Contrast Optimization).
@@ -28,11 +33,31 @@ fun rememberAmbientLightLux(
     smoothingAlpha: Float = 0.15f,
 ): State<Float?> {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val luxState = remember { mutableStateOf<Float?>(null) }
 
-    DisposableEffect(context, enabled) {
+    // Track RESUMED state so sensor is only active while screen is visible.
+    // When app goes to background (onPause) we unregister to avoid battery drain.
+    var isResumed by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> isResumed = true
+                Lifecycle.Event.ON_PAUSE -> isResumed = false
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    DisposableEffect(context, enabled, isResumed) {
         if (!enabled) {
             luxState.value = null
+            return@DisposableEffect onDispose {}
+        }
+        if (!isResumed) {
+            // Pause sensor while backgrounded — keep last value but don't listen
             return@DisposableEffect onDispose {}
         }
 

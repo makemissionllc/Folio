@@ -538,6 +538,25 @@ fun SettingsScreen(
                 }
             }
 
+            item {
+                SettingsSection(
+                    title = "Content Disclaimer",
+                    subtitle = "",
+                ) {
+                    Text(
+                        text = "Folio is a reading application only. It does not provide, host, sell, or distribute any books, and does not include any copyrighted content. Any books you read in Folio come from files you choose to open or import yourself, from your own device or from other apps.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "You are solely responsible for ensuring you have the legal right to any content you add to Folio, including complying with applicable copyright law in your jurisdiction. Folio's developer is not responsible or liable for how you obtain, use, or possess the content you open in the app.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
             item { Spacer(modifier = Modifier.height(24.dp)) }
             }
             val canScrollUp by remember { derivedStateOf { listState.canScrollBackward } }

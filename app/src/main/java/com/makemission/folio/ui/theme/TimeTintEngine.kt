@@ -1,12 +1,18 @@
 package com.makemission.folio.ui.theme
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.time.LocalTime
 import kotlinx.coroutines.delay
 
@@ -94,11 +100,33 @@ object TimeTintEngine {
 /**
  * Remember current warmth that updates gradually as time passes.
  * Polls every 60s (and on composition) — deterministic, no location.
+ * Lifecycle-aware: only polls while enabled && RESUMED, cancelled otherwise
+ * to avoid background battery drain and overlapping instances on recomposition.
  */
 @Composable
-fun rememberTimeWarmth(): State<Float> {
+fun rememberTimeWarmth(enabled: Boolean = true): State<Float> {
     val warmth = remember { mutableStateOf(TimeTintEngine.currentWarmth()) }
-    LaunchedEffect(Unit) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isResumed by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> isResumed = true
+                Lifecycle.Event.ON_PAUSE -> isResumed = false
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    // Refresh immediately when re-enabled or resumed
+    LaunchedEffect(enabled, isResumed) {
+        if (enabled && isResumed) {
+            warmth.value = TimeTintEngine.currentWarmth()
+        }
+    }
+    LaunchedEffect(enabled, isResumed) {
+        if (!enabled || !isResumed) return@LaunchedEffect
         while (true) {
             warmth.value = TimeTintEngine.currentWarmth()
             // Align to next minute boundary for efficiency
