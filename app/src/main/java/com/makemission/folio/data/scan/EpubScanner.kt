@@ -78,6 +78,24 @@ object EpubScanner {
     const val MAX_DEPTH = 8
     private const val TAG = "EpubScanner"
 
+    /**
+     * Whether Folio can attempt storage scan.
+     *
+     * Priority: SAF persisted tree URI grant (primary, no media permission needed) > legacy
+     * READ_EXTERNAL_STORAGE (pre-33) > READ_MEDIA_IMAGES best-effort fallback on 13+.
+     *
+     * READ_MEDIA_VIDEO/AUDIO intentionally not checked: .epub files are not video/audio,
+     * so those grants never enable epub discovery, and declaring them triggers Play
+     * Photo & Video policy scrutiny without benefit. See AndroidManifest and README/PROJECT.md.
+     *
+     * READ_MEDIA_IMAGES is retained as a single fallback token: on Android 13+,
+     * MediaStore.Files queries for non-media types (like .epub) are not actually gated
+     * by READ_MEDIA_IMAGES per docs (epub is not image/video/audio, SAF is the sanctioned
+     * path for non-media), so the permission is of limited value. It is kept narrowly
+     * as a best-effort gate for legacy fallback paths (file-walk/MediaStore) on devices
+     * where such queries still return results when any media permission is granted, and
+     * can be removed entirely if Folio decides to rely solely on SAF + ACTION_OPEN_DOCUMENT.
+     */
     fun hasStoragePermission(context: Context): Boolean {
         val hasLegacy = ContextCompat.checkSelfPermission(
             context,
@@ -87,20 +105,12 @@ object EpubScanner {
             context,
             Manifest.permission.READ_MEDIA_IMAGES
         ) == PackageManager.PERMISSION_GRANTED
-        val hasVideo = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.READ_MEDIA_VIDEO
-        ) == PackageManager.PERMISSION_GRANTED
-        val hasAudio = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.READ_MEDIA_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
         val hasSaf = try {
             context.contentResolver.persistedUriPermissions.any { it.isReadPermission }
         } catch (_: Exception) { false }
 
         val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            hasSaf || hasLegacy || hasImages || hasVideo || hasAudio
+            hasSaf || hasLegacy || hasImages
         } else {
             hasLegacy || hasSaf
         }

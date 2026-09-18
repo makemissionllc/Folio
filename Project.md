@@ -7,6 +7,63 @@ Active coding branch: `main`.
 
 ---
 
+## Session 57 — 2026-09-18 — Permission audit: remove READ_MEDIA_VIDEO/AUDIO, keep READ_MEDIA_IMAGES as removable fallback; fix Play Photo & Video policy risk
+
+Branch: `main`.
+
+### Investigation
+
+#### 1. What Folio actually uses READ_MEDIA_IMAGES / READ_MEDIA_VIDEO for
+
+- Checked `app/src/main/AndroidManifest.xml:6-10` — declared `READ_EXTERNAL_STORAGE (maxSdk 32)`, `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`, `READ_MEDIA_AUDIO`, `POST_NOTIFICATIONS`.
+- Checked `data/scan/EpubScanner.kt:63` `EpubScanner` hierarchy: (1) SAF `DocumentFile` walk via persisted `ACTION_OPEN_DOCUMENT_TREE` grant (primary, no media permission needed), (2) raw `File` walk of `Environment.getExternalStorageDirectory()` / `Downloads` / `Documents` (`MAX_DEPTH 8`, `MAX_FILES 5000`), (3) `MediaStore.Files` query `DISPLAY_NAME LIKE %.epub` best-effort fallback. Both (2) and (3) are gated by `hasStoragePermission()`.
+- `hasStoragePermission()` checked `READ_MEDIA_IMAGES || READ_MEDIA_VIDEO || READ_MEDIA_AUDIO || READ_EXTERNAL_STORAGE || SAF`. The granted permission is only used as a boolean gate to attempt (2)+(3); the subsequent `MediaStore.Files` query filters `DISPLAY_NAME LIKE %.epub` and `walkDir` filters `extension == "epub"` — no image/video files are read, decoded or displayed. Covers used in the reader come from unzipping the epub itself (`EpubParser`), not from `MediaStore.Images`. So the original addition was “add any READ_MEDIA_* so MediaStore.Files query can run on Android 13+”, not for actual photo/video access.
+- Verified via `grep`: no `MediaStore.Images`/`Video` queries, no `READ_MEDIA_VIDEO` usage beyond manifest+permission check. `READ_MEDIA_AUDIO` equally unused.
+
+#### 2. Is READ_MEDIA_VIDEO necessary? — No, removed
+
+- EPUB (`application/epub+zip`) is not `image/*` nor `video/*` nor `audio/*`. Declaring `READ_MEDIA_VIDEO` makes Play Console show “Photos and videos” access and triggers October 2023 Photo & Video Permissions policy review: Play requires that `READ_MEDIA_IMAGES`/`VIDEO` be used only when the photo picker is insufficient for core functionality and the app actually accesses the user’s photos/videos. Folio’s scan uses neither; declaring video is therefore unjustifiable and risks rejection.
+- With SAF as primary (`Settings → Library → Choose books folder` persisted URI; `ACTION_OPEN_DOCUMENT` manual fallback; `ACTION_VIEW` intent from Files/browser), fallbacks still run when SAF or the single `READ_MEDIA_IMAGES` token is granted. `READ_MEDIA_VIDEO` never enables an epub to become visible if `READ_MEDIA_IMAGES` already gates the check, and removing it leaves the permission gate satisfied by `hasImages || hasSaf || hasLegacy`. No functional loss.
+- Action: removed `READ_MEDIA_VIDEO` and `READ_MEDIA_AUDIO` from `AndroidManifest.xml` (AUDIO same rationale — epub is not audio; not flagged by photo/video policy but still unnecessary) and from permission checks.
+
+#### 3. Is READ_MEDIA_IMAGES genuinely required for MediaStore.Files on Android 13+?
+
+- Android docs (`developer.android.com/training/data-storage/shared/media`, `/about/versions/13/behavior-changes-13`): On Android 10+ with scoped storage, `MediaStore.Files` union shows only files the app created unless the app holds a storage permission; to access _other apps’_ media, the app must hold the matching `READ_MEDIA_IMAGES` / `VIDEO` / `AUDIO` and the file must reside in `MediaStore.Images` / `Video` / `Audio`. “As long as a file is viewable from Images/Video/Audio queries, it’s also viewable via Files.” EPUB is not an image/video/audio, so it is not in those collections; Google’s sanctioned path for Documents/Downloads non-media types is **SAF / `ACTION_OPEN_DOCUMENT`**, not `MediaStore` with a media permission.
+- Empirical consequence: Granting `READ_MEDIA_IMAGES` on Android 13+ does **not** reliably make `MediaStore.Files` return other apps’ `.epub` files in Downloads/Documents — the provider still filters by media type, and direct `File.listFiles()` walks are blocked by scoped storage regardless of a single image permission. Several OEMs may return some `Files` rows when any media permission is granted, but per docs this is not guaranteed and not the intended API for documents.
+- Folio’s `MediaStore.Files` fallback (`queryMediaStore()` with `DISPLAY_NAME LIKE %.epub`) is therefore **best-effort and of limited value** on Android 13+. The primary reliable path is SAF persisted tree URI (already implemented, no permission needed) plus `ACTION_OPEN_DOCUMENT`/`ACTION_VIEW` per-book intents.
+- Verdict: `READ_MEDIA_IMAGES` is **not genuinely required** for SAF-primary discovery. It is retained narrowly as a single fallback token so legacy auto-scan can still attempt `MediaStore.Files`/`File` on devices where that fallback happens to return results when any media permission is granted. It can be **removed entirely** if Folio decides to rely solely on SAF (auto-scan would then require a folder grant; manual Add book and external VIEW still work). Keeping it limits Play policy exposure to one permission instead of three, but it is still photo-scoped — see Play declaration below.
+
+#### 4. Permission-check logic updated
+
+- `EpubScanner.kt:81` `hasStoragePermission()` now checks `hasLegacy || hasImages || hasSaf` only (removed `hasVideo`/`hasAudio` locals). KDoc documents why VIDEO/AUDIO are intentionally not checked and why IMAGES is retained as removable fallback, with logic matching the manifest.
+- `ui/onboarding/OnboardingScreen.kt:538` `storagePermissions()` on Tiramisu now returns `arrayOf(READ_MEDIA_IMAGES)` only (was three). `checkStorageGranted()` (`perms.any { granted }`) automatically reflects the single permission.
+- `AndroidManifest.xml:6` updated comment to explain SAF primary, VIDEO/AUDIO removal, and IMAGES fallback rationale.
+
+### Play Console declaration — what to fill out
+
+- **If keeping `READ_MEDIA_IMAGES` (current manifest: `READ_EXTERNAL_STORAGE maxSdk 32` + `READ_MEDIA_IMAGES` + `POST_NOTIFICATIONS`):** In Play Console → Policy → App content → Photos and videos, declare that access is not for viewing the user’s photos. Explain: “Folio is an ebook reader that discovers `.epub` documents. `READ_MEDIA_IMAGES` is used solely as a best-effort fallback to allow `MediaStore.Files` (`DISPLAY_NAME LIKE %.epub`) / file-walk enumeration of epub documents when the user has not granted a SAF folder. No image or video files are read or displayed; primary discovery is the Storage Access Framework (`ACTION_OPEN_DOCUMENT_TREE` persisted URI, `ACTION_OPEN_DOCUMENT`, `ACTION_VIEW`). The app filters strictly to `*.epub`.” Be prepared for reviewer scrutiny — the justification is weak per policy because the app does not actually need photos, and the fallback is not guaranteed to work for non-media types.
+- **Cleaner alternative (recommended if you want zero photo/video declarations):** Remove `READ_MEDIA_IMAGES` as well. Then manifest declares only `READ_EXTERNAL_STORAGE maxSdk 32` (inert at `minSdk 33`) + `POST_NOTIFICATIONS`. No Photos-and-videos declaration is needed. Auto-scan on Android 13+ would then require a SAF folder grant (Settings → Library → Choose books folder) or per-file `ACTION_OPEN_DOCUMENT`/`ACTION_VIEW`; legacy file-walk/MediaStore fallbacks would not gate on a media permission and would rely on SAF. Update `EpubScanner.hasStoragePermission()` to `hasSaf || hasLegacy` and `OnboardingScreen.storagePermissions()` to return empty array on 33+ (or keep as informational but not requested). This fully satisfies Play’s minimization principle.
+- `READ_MEDIA_VIDEO` / `READ_MEDIA_AUDIO` — **not needed, not declared**. No declaration required.
+- `POST_NOTIFICATIONS` — optional, for future reading reminders/vocabulary alerts; handled gracefully when denied.
+
+### Changed
+
+- `app/src/main/AndroidManifest.xml:6` — removed `READ_MEDIA_VIDEO` and `READ_MEDIA_AUDIO`; updated comment to SAF primary + IMAGES fallback rationale and VIDEO/AUDIO removal note.
+- `app/src/main/java/com/makemission/folio/data/scan/EpubScanner.kt:81` — removed `hasVideo`/`hasAudio` checks, now `hasSaf || hasLegacy || hasImages`; added KDoc explaining why VIDEO/AUDIO are intentionally excluded and why IMAGES is retained as removable fallback per docs; log now `legacy/images/saf`.
+- `app/src/main/java/com/makemission/folio/ui/onboarding/OnboardingScreen.kt:538` — `storagePermissions()` on `TIRAMISU` now `arrayOf(READ_MEDIA_IMAGES)` only.
+- `README.md:39` — Library intake now notes SAF primary + IMAGES fallback and points to Permissions section; `45` Onboarding now documents `READ_MEDIA_IMAGES` fallback vs SAF primary; new `## Permissions — Play Console declaration` section detailing each permission, why VIDEO/AUDIO removed, and exact text to paste in Play Console.
+- `Project.md` — this entry.
+
+### Verification
+
+- `grep -rn READ_MEDIA` — only `READ_MEDIA_IMAGES` remains in manifest, `EpubScanner`, and `OnboardingScreen`; no `READ_MEDIA_VIDEO`/`AUDIO` references remain.
+- `grep -rn hasStoragePermission` — callers (`SettingsScreen`, `LibraryScreen`, `LibraryViewModel`) unchanged, still delegate to `EpubScanner.hasStoragePermission`; logic now matches manifest.
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (post-edit).
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:testDebugUnitTest` — `BUILD SUCCESSFUL` (`EpubScannerTest` Maxwell depth-8 still 36, no permission test affected).
+- Manual permission check simulation: on API 33 with no SAF and no IMAGES → `hasStoragePermission==false` (scan disabled, SAF picker / Add book manual still works); with SAF grant → `true`; with IMAGES granted → `true` (best-effort fallback path enabled). On <33 → legacy path unchanged.
+
+---
+
 ## Session 56 — 2026-09-16 — Text-attached highlighting (precise glyph-aligned, reflow-safe) + phone finger-highlight fix
 
 Branch: `main`.

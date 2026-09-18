@@ -2,11 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Onboarding upfront permissions: storage for EPUB auto-scan, notifications for future features -->
+    <!-- Storage: SAF is primary (persisted tree URI, no permission needed). Fallbacks: direct file-walk
+         (needs no permission on pre-33 via READ_EXTERNAL_STORAGE, blocked by scoped storage on 13+)
+         and MediaStore.Files best-effort. READ_MEDIA_IMAGES is retained as the single best-effort
+         fallback token on Android 13+ — see EpubScanner.hasStoragePermission KDoc.
+         READ_MEDIA_VIDEO / READ_MEDIA_AUDIO removed: not needed for .epub discovery (not video/audio)
+         and unjustifiable under Play Photo & Video policy. Notifications for future reminders. -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
