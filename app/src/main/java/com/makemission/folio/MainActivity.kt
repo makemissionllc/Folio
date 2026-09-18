@@ -6,6 +6,7 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -31,6 +32,10 @@ import com.makemission.folio.ui.theme.ThemeMode
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Modern SplashScreen API — no hand-rolled delay; system shows
+        // deep-green + centered amber wordmark + bottom MakeMission branding
+        // until first frame is ready, then crossfades to Theme.Folio.
+        val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         handleEpubViewIntent(intent)
         enableEdgeToEdge()

@@ -7,6 +7,62 @@ Active coding branch: `main`.
 
 ---
 
+## Session 59 — 2026-09-18 — Branded launch splash (modern SplashScreen API, deep green + amber wordmark + MakeMission attribution)
+
+Branch: `main`.
+
+### Requirement
+
+- Add a splash screen for app launch styled after the reference layout: centered app icon/logomark in the middle, small "from MakeMission" two-line attribution (smaller muted "from" above bolder "MakeMission") near the bottom, on a clean solid background.
+
+- Spec demands: (1) modern SplashScreen API (`androidx.core.splashscreen` / `Theme.SplashScreen`, not a hand-rolled Activity delay — proper Android 12+ behavior), (2) background uses FolioTheme's deep green (or Cool Slate) to match Folio identity, (3) centered mark uses Folio's existing icon/logomark or a clean "Folio" wordmark in heavy sans + amber/accent as placeholder if no vector logomark yet, (4) bottom attribution small muted / bolder stack in UI font, (5) brief — transition quickly to Library/Onboarding, no artificial delay, (6) respect light/dark/auto if straightforward, otherwise default to dark.
+
+### Decision — background: deep green over Cool Slate / white
+
+- Folio brand `Color.kt:14` defines `FolioDeepGreen = 0xFF004F39` as `FolioDarkColorScheme.background` and library background, `FolioAmber = 0xFFF7B538` as accent, `FolioPaper = 0xFFFBF6EC` as light. `Theme.kt:39` documents "Cool Slate is the dark default" (`FolioPalette.SLATE`, `folioDarkSchemeFor(SLATE)`) alongside Folio Green palette. The app's dark palette default is Cool Slate for readability inside the app, but the *brand* color that users associate with Folio is the deep green (library, dark mode surfaces, docs). Reference aesthetic is dark + saturated; a white splash would flash then cut to dark library (jarring) and a neutral Cool Slate grey would feel off-brand on cold open.
+- Judgment: use **deep green `#004F39`** for the splash (`values/colors.xml:6` `folio_splash_background`) even though Cool Slate is the in-app dark default. This keeps launch instantly recognizable as Folio and matches `FolioDarkColorScheme.background`. Documented as such in `README.md: Splash screen` and `themes.xml:10` comment.
+
+### Decision — centered mark: amber wordmark placeholder
+
+- Checked `res/mipmap-*` — existing app icon is an adaptive icon (`mipmap-anydpi-v26/ic_launcher.xml:1` with `ic_launcher_background` + `ic_launcher_foreground` + `monochrome`) generated via IconKitchen (`icons/android/res/...`), colorful but not a vector wordmark suitable for a splash at 288 dp. No standalone vector logomark exists in `res/drawable`.
+- Per spec, fall back to a simple clean rendering of the "Folio" wordmark in the existing heavy sans display weight, styled in amber. Created `res/drawable/folio_splash_icon.png` (512×512 px, transparent, 4.1 KB) — wordmark bbox 342×84 px centered at y 247/512, color `#F0B030` (quantized `#F7B538` FolioAmber, 14779 non-transparent px, single amber hue). This is the `windowSplashScreenAnimatedIcon` — Android 12+ centers and scales it to ≤288 dp. Amber on deep green is high-contrast and matches the app's accent (highlights, progress).
+
+### Decision — bottom attribution: two-line stack via windowSplashScreenBrandingImage
+
+- Spec wants smaller muted "from" above bolder "MakeMission" near the bottom, in UI font/weight system. Created `res/drawable/folio_splash_branding.png` (560×140 px, transparent, 3.7 KB) — two-line stack bbox 228×47 px, top half 306 px muted, bottom half 2952 px bolder (off-white `#F0F0E0` ≈ `FolioOffWhite #FFF8E7` at reduced alpha for muted "from"). Uses system sans weight hierarchy.
+- Wired as `values/themes.xml:20` `android:windowSplashScreenBrandingImage = @drawable/folio_splash_branding` (platform attr, shown on API 31-32; ignored on 33+ per deprecation) — there the centered amber wordmark remains the primary brand moment and the splash still meets the brief-transition requirement without an artificial delay. Documented in `themes.xml:10` comment and `README.md`.
+
+### Implementation — modern SplashScreen API, no delay
+
+- `gradle/libs.versions.toml:25` added `splashscreen = "1.0.1"` and `56` `androidx-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "splashscreen" }`; `app/build.gradle.kts:76` added `implementation(libs.androidx.splashscreen)`.
+- `res/values/themes.xml:19` added `Theme.Folio.Splash` parent `Theme.SplashScreen` with `windowSplashScreenBackground = @color/folio_splash_background`, `windowSplashScreenAnimatedIcon = @drawable/folio_splash_icon`, `android:windowSplashScreenBrandingImage = @drawable/folio_splash_branding`, `windowSplashScreenAnimationDuration 400`, `postSplashScreenTheme = @style/Theme.Folio` (DayNight — so after the splash the app's `ThemeMode` Light/Dark/Auto + `FolioPalette` logic in `Theme.kt:39` resumes).
+- `AndroidManifest.xml:38` changed `MainActivity` `android:theme` from `@style/Theme.Folio` to `@style/Theme.Folio.Splash` so the system shows the splash before `onCreate` (proper Android 12+ behavior — not a Compose `LaunchedEffect delay`).
+- `MainActivity.kt:9` added `import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen` and `34` `val splashScreen = installSplashScreen()` before `super.onCreate()` with comment "no hand-rolled delay; system shows deep-green + centered amber wordmark + bottom MakeMission branding until first frame is ready, then crossfades to Theme.Folio." No `setKeepOnScreenCondition` with a timer — splash is kept only until the first `setContent` frame (Library/Onboarding via `FolioNavHost`) is ready, so it is brief. `enableEdgeToEdge()` and `handleEpubViewIntent()` remain after.
+- `res/values/colors.xml:6` added `folio_splash_background #FF004F39` (matches `FolioDeepGreen`).
+- Light/dark: splash intentionally stays deep green in both modes (straightforward DayNight via `values-night` would need a second brand color for little gain; a white/light splash would feel off-brand). Post-splash `FolioTheme` still respects `ThemeMode` AUTO/LIGHT/DARK via `SettingsRepository.themeMode` + `isSystemInDarkTheme()` in `MainActivity.kt:45`. This is the "otherwise default to the dark version since that matches the reference's aesthetic best on brand" branch of the spec, documented in `README.md`.
+
+### Changed
+
+- `gradle/libs.versions.toml:25,56` — add `splashscreen 1.0.1` + `androidx-splashscreen` library.
+- `app/build.gradle.kts:76` — `implementation(libs.androidx.splashscreen)`.
+- `app/src/main/res/values/colors.xml:6` — `folio_splash_background #FF004F39`.
+- `app/src/main/res/values/themes.xml:10,19` — new `Theme.Folio.Splash` (Theme.SplashScreen) with background, animatedIcon, brandingImage, animationDuration 400, postSplashScreenTheme; comment explains API 33+ branding ignored + dark-default rationale.
+- `app/src/main/res/drawable/folio_splash_icon.png` — **new** 512×512 amber "Folio" wordmark (heavy sans, FolioAmber).
+- `app/src/main/res/drawable/folio_splash_branding.png` — **new** 560×140 "from / MakeMission" two-line attribution (muted/bolder, off-white).
+- `app/src/main/AndroidManifest.xml:38` — `MainActivity` theme `Theme.Folio` → `Theme.Folio.Splash`.
+- `app/src/main/java/com/makemission/folio/MainActivity.kt:9,34` — `installSplashScreen()` before super, no artificial delay.
+- `README.md: Design system→Splash screen` — new `## Splash screen` section detailing API, deep green rationale, wordmark, attribution, no delay, light/dark; Tech stack adds `androidx.core.splashscreen 1.0.1`; Project structure lists `drawable/{folio_splash_icon,folio_splash_branding}` and `folio_splash_background`.
+- `Project.md` — this entry.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (post-splash; verified `installSplashScreen` resolves via `androidx.core.splashscreen`).
+- `ls -lh app/src/main/res/drawable/folio_splash*.png` — 4.1 KB icon (512×512 RGBA) + 3.7 KB branding (560×140 RGBA), both transparent with expected bboxes.
+- Manual check: launch on API 33 emulator — deep green background, centered amber "Folio" shown immediately from system splash, crossfades within <1s to Library (or Onboarding pager if `has_seen_onboarding` false) with no extra delay; Light theme in Settings → Appearance still shows deep green splash (intentional) then light `FolioPaper` surfaces.
+- `grep -rn windowSplashScreen` — confirms `themes.xml` contains background, animatedIcon, brandingImage, postSplashScreenTheme; `grep -rn installSplashScreen` confirms `MainActivity` single call before super.
+
+---
+
 ## Session 58 — 2026-09-18 — Tablet-adaptive Settings (master-detail) + Insights/Vocabulary/Smart Features/Onboarding capped layouts
 
 Branch: `main`.

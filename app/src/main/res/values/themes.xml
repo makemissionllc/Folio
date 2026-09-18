@@ -6,4 +6,23 @@
     </style>
 
     <style name="Theme.Folio" parent="Base.Theme.Folio" />
+
+    <!-- Splash — deep green brand background (#004F39) with centered Folio wordmark
+         and bottom MakeMission attribution. Uses modern SplashScreen API
+         (androidx.core.splashscreen Theme.SplashScreen) for proper Android 12+
+         behavior — no hand-rolled delay. Post-splash reverts to Theme.Folio
+         (DayNight) so light/dark/auto still works for the app.
+         Branding at bottom is via folio_splash_branding.png as
+         windowSplashScreenBrandingImage (shown on API 31-32; ignored on 33+
+         per platform — there the centered amber wordmark remains the primary
+         brand moment, keeping the brief transition with no artificial delay).
+         Background intentionally stays deep green in both light and dark
+         (folio_splash_background) to match Folio's identity over white. -->
+    <style name="Theme.Folio.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/folio_splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/folio_splash_icon</item>
+        <item name="android:windowSplashScreenBrandingImage">@drawable/folio_splash_branding</item>
+        <item name="windowSplashScreenAnimationDuration">400</item>
+        <item name="postSplashScreenTheme">@style/Theme.Folio</item>
+    </style>
 </resources>

@@ -64,9 +64,19 @@ Folio is **offline and reads only .epub files**. It does not browse or use photo
 - Jetpack Compose BOM `2025.09.00` (`ui`, `foundation`, `material3`, `activity-compose`), Navigation Compose 2.8.4, lifecycle `viewmodel-compose` / `runtime-compose`
 - Room 2.7.2 (`room-runtime`, `room-ktx`, KSP `room-compiler`) for books, progress, highlights (color + style `FILL`/`UNDERLINE`, plus text-attached `paragraphIndex`/`startOffset`/`endOffset` with `anchorText` fallback), bookmarks (unique `(bookId, chapterIndex, paragraphIndex)`), vocabulary (v11 — `MIGRATION_10_11` adds text-anchor columns, `fallbackToDestructiveMigration`)
 - DataStore Preferences 1.1.1 for user settings (alwaysShowProgressBar, `hasSeenOnboarding`, `autoScanEnabled`, `booksFolderUri`, `hapticsEnabled`, `darkPalette` default Cool Slate, `themeMode` Light/Dark/Auto default Auto, `timeTintEnabled`, `bionicEnabled`, `adaptiveContrastEnabled`, `readingFont`/`readingFontSize`/`readingLineSpacing`/`readingMargin`/`highlightColor`/`highlightStyle`)
-- Coil 2.7.0 for cover images (downsampled 440×660, mem/disk cache, crossfade); Jsoup 1.18.3 for EPUB; WorkManager 2.9.1 for background X-Ray + parsed cache; DocumentFile 1.0.1 for SAF; `androidx.datastore:datastore-preferences` + `WorkManager` + `DocumentFile`
+- Coil 2.7.0 for cover images (downsampled 440×660, mem/disk cache, crossfade); Jsoup 1.18.3 for EPUB; WorkManager 2.9.1 for background X-Ray + parsed cache; DocumentFile 1.0.1 for SAF; `androidx.core.splashscreen` 1.0.1 for launch branding; `androidx.datastore:datastore-preferences` + `WorkManager` + `DocumentFile`
 - Offline dictionary `assets/dictionary.json.gz` (25k WordNet-derived, 512 KB gz / 1.5 MB json, real WordNet glosses + 110 Folio-specific overrides; honest "No definition found" for words without a WordNet entry — no synthetic templates); on-device search `SearchRepository` (phrase search, highlights/bookmarks ranked first, `ConcurrentHashMap` + per-book isolation, skips still-processing books)
 - Debug logging `FolioLogger` + `FolioApp` (`filesDir/logs/folio.log`, 256 KB rolling, half-trim, no network, `UncaughtExceptionHandler`; `LogsScreen` via `FileProvider`)
+
+## Splash screen
+
+Branded launch via Android's modern SplashScreen API (`androidx.core.splashscreen`, `Theme.SplashScreen`, `installSplashScreen()` in `MainActivity` — no hand-rolled delay). Reference layout: centered app mark in the middle, small two-line "from MakeMission" attribution near the bottom, on a clean solid background.
+
+- **Background** — `folio_splash_background` `#004F39` (Folio deep green, `Color.kt:FolioDeepGreen` / `FolioDarkColorScheme.background`) rather than white — matches Folio's identity. Cool Slate (`FolioPalette.SLATE`) is the app's dark-mode default, but the splash intentionally uses the brand deep green so the cold open feels Folio-green, not neutral grey. The same deep green is used for both light and dark (`Theme.SplashScreen` parent + `postSplashScreenTheme` → `Theme.Folio` DayNight) — the reference aesthetic is best on brand in dark, and a white splash would break identity.
+- **Centered mark** — `res/drawable/folio_splash_icon.png` (512 px, transparent) — a clean rendering of the "Folio" wordmark in the app's heavy sans display weight, styled in amber `#F7B538` (`FolioAmber`). Reuses the existing app logomark identity (`mipmap/ic_launcher` adaptive icon) as a wordmark placeholder; amber keeps the launch recognizable against the deep green. Set as `windowSplashScreenAnimatedIcon` and centered by the system (Android 12+ centers and scales to ≤288 dp).
+- **"from MakeMission" attribution** — `res/drawable/folio_splash_branding.png` (560×140 px, transparent) — small muted "from" label above a bolder "MakeMission" word, positioned near the bottom via `android:windowSplashScreenBrandingImage` (shown on API 31-32; platform ignores the attr on 33+ where the centered amber wordmark remains the primary brand moment). Uses the app's UI sans weight hierarchy (lighter muted top, semibold bottom) and off-white `FolioOffWhite` at reduced alpha.
+- **No artificial delay** — `MainActivity:34` calls `installSplashScreen()` before `super.onCreate()` and does not set `setKeepOnScreenCondition` with a timer; the splash is kept only until the first Compose frame is ready, then crossfades via `postSplashScreenTheme` to `Theme.Folio` and the normal `FolioNavHost` Library/Onboarding flow. `windowSplashScreenAnimationDuration 400` is only the icon animation, not a hold.
+- **Light/dark** — post-splash respects `ThemeMode` Light/Dark/Auto (DataStore `themeMode` + `darkPalette`). The system splash itself stays deep green in both modes (straightforward DayNight via `Theme.SplashScreen` would need a separate `values-night` splash background, but that would be a second brand color for little gain); defaulting to dark matches the reference and avoids a white flash on launch.
 
 ## Design system
 
@@ -101,11 +111,11 @@ Folio/
 │       │       ├── theme/ Color, Type, Theme (FolioPalette SLATE default, ThemeMode Auto), AdaptiveContrastEngine, TimeTintEngine, AmbientLightSensor
 │       │       ├── reader/ ReadingScreen (Continuous vs Chapter-swipe, TruePage/Knuth + typography/margins/text-attached highlights via TextLayoutResult), ReadingViewModel (text offsets + LCS fallback), BionicReading, VelocityEstimator, TruePageEngine, KnuthPlassEngine, ReaderPageTurnHandler, ReadingAppearance, components/TextHighlightRenderer + HighlightOverlay + ExplainSelectionContainer/*
 │       │       ├── library/ LibraryScreen + LibraryViewModel (minimal import + scan dedup + recently-read sorting + scroll-to-top), components/*
-│       │       ├── onboarding/ OnboardingScreen (pager 4, permissions, DataStore gate)
+│       │       │       ├── onboarding/ OnboardingScreen (pager 5 with Content Disclaimer, permissions, DataStore gate)
 │       │       ├── settings/ SettingsScreen + SmartFeaturesScreen (15 features) + LogsScreen
 │       │       ├── insights/ InsightsScreen + InsightsViewModel (read-only journal)
 │       │       └── vocabulary/ VocabularyScreen + VocabularyViewModel (SM-2 review)
-│       └── res/ mipmap-*, values/{strings,colors,themes,dimens}, xml/{backup_rules,data_extraction_rules,file_paths}
+│       └── res/ mipmap-*, drawable/{folio_splash_icon,folio_splash_branding}, values/{strings,colors,themes,dimens} (+ folio_splash_background), xml/{backup_rules,data_extraction_rules,file_paths}
 ├── Inspiration/ Folio_Project.md, book-story-master/
 ├── icons/android/ IconKitchen source
 ├── gradle/ build.gradle.kts settings.gradle.kts
