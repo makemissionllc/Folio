@@ -1,5 +1,6 @@
 package com.makemission.folio.ui.settings
 
+import android.content.res.Configuration
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -13,7 +14,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -23,10 +29,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 
 private data class SmartFeature(
@@ -50,6 +58,11 @@ fun SmartFeaturesScreen(
 ) {
     val features = rememberFeatures()
 
+    val configuration = LocalConfiguration.current
+    val isTablet = remember(configuration) {
+        configuration.screenWidthDp >= 840 && configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -57,65 +70,111 @@ fun SmartFeaturesScreen(
             SmartFeaturesHeader(onBack = onBack)
         }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            item { Spacer(modifier = Modifier.height(4.dp)) }
-            item { SmartFeaturesHero() }
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "How to read this guide",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Text(
-                            text = "Folio’s smart features live entirely on your phone or tablet. No network, no account, no waiting. They notice quietly, adjust gently, and get out of the way — so you can stay with the book.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            text = "Fifteen quiet helpers — each solves one small, real annoyance of reading on a screen.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                        )
+        if (!isTablet) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                item { Spacer(modifier = Modifier.height(4.dp)) }
+                item { SmartFeaturesHero() }
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "How to read this guide",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = "Folio’s smart features live entirely on your phone or tablet. No network, no account, no waiting. They notice quietly, adjust gently, and get out of the way — so you can stay with the book.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                text = "Fifteen quiet helpers — each solves one small, real annoyance of reading on a screen.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                            )
+                        }
                     }
                 }
-            }
-            items(features, key = { it.number }) { feature ->
-                SmartFeatureCard(feature = feature)
-            }
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-                ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "All on-device, all private",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Text(
-                            text = "Every feature above is calculated right here on your device — not sent anywhere. That keeps Folio fast even without signal, and keeps your reading yours alone. If you change a book file or rotate your tablet, Folio simply recalculates. No setup needed.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                items(features, key = { it.number }) { feature ->
+                    SmartFeatureCard(feature = feature)
+                }
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "All on-device, all private",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = "Every feature above is calculated right here on your device — not sent anywhere. That keeps Folio fast even without signal, and keeps your reading yours alone. If you change a book file or rotate your tablet, Folio simply recalculates. No setup needed.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
+                item { Spacer(modifier = Modifier.height(24.dp)) }
             }
-            item { Spacer(modifier = Modifier.height(24.dp)) }
+        } else {
+            // Tablet: two-column grid — uses space well while keeping cards readable (caps at ~2 per row)
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                item(span = { GridItemSpan(2) }) { Spacer(modifier = Modifier.height(4.dp)) }
+                item(span = { GridItemSpan(2) }) { SmartFeaturesHero() }
+                item(span = { GridItemSpan(2) }) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(text = "How to read this guide", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+                            Text(text = "Folio’s smart features live entirely on your phone or tablet. No network, no account, no waiting. They notice quietly, adjust gently, and get out of the way — so you can stay with the book.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(text = "Fifteen quiet helpers — each solves one small, real annoyance of reading on a screen.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f))
+                        }
+                    }
+                }
+                items(features, key = { it.number }) { feature ->
+                    SmartFeatureCard(feature = feature)
+                }
+                item(span = { GridItemSpan(2) }) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(text = "All on-device, all private", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+                            Text(text = "Every feature above is calculated right here on your device — not sent anywhere. That keeps Folio fast even without signal, and keeps your reading yours alone. If you change a book file or rotate your tablet, Folio simply recalculates. No setup needed.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                item(span = { GridItemSpan(2) }) { Spacer(modifier = Modifier.height(24.dp)) }
+            }
         }
     }
 }

@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.graphics.graphicsLayer
+import android.content.res.Configuration
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.derivedStateOf
@@ -42,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -100,230 +103,242 @@ fun InsightsScreen(
 
         val isEmpty = state.totalBooks == 0 && state.totalHighlights == 0 && state.totalBookmarks == 0 && state.totalVocab == 0 && state.readingSessions == 0
 
+        // Tablet: same 840dp landscape threshold as reader, centered capped width
+        val configuration = LocalConfiguration.current
+        val isTablet = remember(configuration) {
+            configuration.screenWidthDp >= 840 && configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        }
+
         val listState = rememberLazyListState()
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
+            // Centered capped container so cards don't stretch edge-to-edge on tablet
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.TopCenter
             ) {
-            item { Spacer(Modifier.height(4.dp)) }
-            item { InsightsHero(isEmpty = isEmpty) }
+                // Inner content: on tablet widthIn(720dp) centered; on phone fills
+                val contentModifier = if (isTablet) Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(horizontal = 16.dp) else Modifier.fillMaxSize().padding(horizontal = 16.dp)
+                LazyColumn(
+                    state = listState,
+                    modifier = contentModifier,
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                item { Spacer(Modifier.height(4.dp)) }
+                item { InsightsHero(isEmpty = isEmpty) }
 
-            if (isEmpty) {
-                item { EmptyJournalCard() }
-            } else {
-                // Shelf — books
-                item {
-                    InsightsSection(
-                        title = "Shelf",
-                        subtitle = "Books in your folio",
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                if (isEmpty) {
+                    item { EmptyJournalCard() }
+                } else {
+                    // Shelf — books
+                    item {
+                        InsightsSection(
+                            title = "Shelf",
+                            subtitle = "Books in your folio",
                         ) {
-                            StatCell(
-                                label = "Books",
-                                value = state.totalBooks.toString(),
-                                caption = if (state.totalBooks == 1) "title" else "titles in library",
-                                modifier = Modifier.weight(1f),
-                            )
-                            StatCell(
-                                label = "In progress",
-                                value = state.inProgressBooks.toString(),
-                                caption = "with a saved position",
-                                modifier = Modifier.weight(1f),
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                StatCell(
+                                    label = "Books",
+                                    value = state.totalBooks.toString(),
+                                    caption = if (state.totalBooks == 1) "title" else "titles in library",
+                                    modifier = Modifier.weight(1f),
+                                )
+                                StatCell(
+                                    label = "In progress",
+                                    value = state.inProgressBooks.toString(),
+                                    caption = "with a saved position",
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            if (state.totalBooks > 0 && state.inProgressBooks == 0) {
+                                Text(
+                                    text = "Open a book — Folio will remember where you left off.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 10.dp),
+                                )
+                            }
                         }
-                        if (state.totalBooks > 0 && state.inProgressBooks == 0) {
-                            Text(
-                                text = "Open a book — Folio will remember where you left off.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 10.dp),
-                            )
+                    }
+
+                    // Marginalia — highlights & bookmarks
+                    item {
+                        InsightsSection(
+                            title = "Marginalia",
+                            subtitle = "Marks you’ve left in the text",
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                StatCell(
+                                    label = "Highlights",
+                                    value = state.totalHighlights.toString(),
+                                    caption = "inked passages",
+                                    modifier = Modifier.weight(1f),
+                                )
+                                StatCell(
+                                    label = "Bookmarks",
+                                    value = state.totalBookmarks.toString(),
+                                    caption = "quiet placeholders",
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            if (state.totalHighlights == 0 && state.totalBookmarks == 0) {
+                                Text(
+                                    text = "No marks yet — a stylus stroke or a bookmark will appear here, lightly.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 10.dp),
+                                )
+                            }
                         }
+                    }
+
+                    // Vocabulary — SM-2
+                    item {
+                        InsightsSection(
+                            title = "Lexicon",
+                            subtitle = "Words gathered along the way",
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                StatCell(
+                                    label = "Words",
+                                    value = state.totalVocab.toString(),
+                                    caption = "looked up",
+                                    modifier = Modifier.weight(1f),
+                                )
+                                StatCell(
+                                    label = "Mastered",
+                                    value = state.masteredVocab.toString(),
+                                    caption = "repetitions ≥ 3",
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                StatCell(
+                                    label = "Due",
+                                    value = state.dueVocab.toString(),
+                                    caption = "for review",
+                                    modifier = Modifier.weight(1f),
+                                )
+                                StatCell(
+                                    label = "Learning",
+                                    value = (state.totalVocab - state.masteredVocab).coerceAtLeast(0).toString(),
+                                    caption = "still in cycle",
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            if (state.totalVocab == 0) {
+                                Text(
+                                    text = "Double-tap a word while reading — Folio keeps it here, on-device.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 10.dp),
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            TextButton(
+                                onClick = onVocabularyClick,
+                                modifier = androidx.compose.ui.Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+                            ) {
+                                Text(
+                                    text = if (state.dueVocab > 0) "Review Vocabulary · ${state.dueVocab} due" else "Open Vocabulary",
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
+                        }
+                    }
+
+                    // Rhythm — reading sessions & streaks
+                    item {
+                        InsightsSection(
+                            title = "Rhythm",
+                            subtitle = "Quiet patterns from your reading",
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                StatCell(
+                                    label = "Streak",
+                                    value = if (state.currentStreak == 0 && state.distinctDays > 0) "—" else "${state.currentStreak}d",
+                                    caption = if (state.currentStreak == 1) "consecutive day" else "consecutive days",
+                                    modifier = Modifier.weight(1f),
+                                )
+                                StatCell(
+                                    label = "Sessions",
+                                    value = state.readingSessions.toString(),
+                                    caption = "saved positions",
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                StatCell(
+                                    label = "Distinct days",
+                                    value = state.distinctDays.toString(),
+                                    caption = "days you opened a book",
+                                    modifier = Modifier.weight(1f),
+                                )
+                                StatCell(
+                                    label = "Last read",
+                                    value = state.lastReadLabel ?: "—",
+                                    caption = if (state.lastReadLabel == null) "not yet" else "most recent",
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            if (state.longestStreak > state.currentStreak && state.longestStreak > 1) {
+                                Text(
+                                    text = "Longest streak: ${state.longestStreak} days — a small, steady habit.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 10.dp),
+                                )
+                            }
+                            if (state.readingSessions == 0) {
+                                Text(
+                                    text = "Your rhythm will appear after you turn a few pages.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 10.dp),
+                                )
+                            }
+                        }
+                    }
+
+                    item {
+                        // Closing journal note — understated, editorial
+                        Text(
+                            text = "All counts are on-device, from your library — Folio keeps no cloud ledger.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
                     }
                 }
 
-                // Marginalia — highlights & bookmarks
-                item {
-                    InsightsSection(
-                        title = "Marginalia",
-                        subtitle = "Marks you’ve left in the text",
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            StatCell(
-                                label = "Highlights",
-                                value = state.totalHighlights.toString(),
-                                caption = "inked passages",
-                                modifier = Modifier.weight(1f),
-                            )
-                            StatCell(
-                                label = "Bookmarks",
-                                value = state.totalBookmarks.toString(),
-                                caption = "quiet placeholders",
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        if (state.totalHighlights == 0 && state.totalBookmarks == 0) {
-                            Text(
-                                text = "No marks yet — a stylus stroke or a bookmark will appear here, lightly.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 10.dp),
-                            )
-                        }
-                    }
+                item { Spacer(Modifier.height(24.dp)) }
                 }
-
-                // Vocabulary — SM-2
-                item {
-                    InsightsSection(
-                        title = "Lexicon",
-                        subtitle = "Words gathered along the way",
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            StatCell(
-                                label = "Words",
-                                value = state.totalVocab.toString(),
-                                caption = "looked up",
-                                modifier = Modifier.weight(1f),
-                            )
-                            StatCell(
-                                label = "Mastered",
-                                value = state.masteredVocab.toString(),
-                                caption = "repetitions ≥ 3",
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            StatCell(
-                                label = "Due",
-                                value = state.dueVocab.toString(),
-                                caption = "for review",
-                                modifier = Modifier.weight(1f),
-                            )
-                            StatCell(
-                                label = "Learning",
-                                value = (state.totalVocab - state.masteredVocab).coerceAtLeast(0).toString(),
-                                caption = "still in cycle",
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        if (state.totalVocab == 0) {
-                            Text(
-                                text = "Double-tap a word while reading — Folio keeps it here, on-device.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 10.dp),
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        TextButton(
-                            onClick = onVocabularyClick,
-                            modifier = androidx.compose.ui.Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
-                        ) {
-                            Text(
-                                text = if (state.dueVocab > 0) "Review Vocabulary · ${state.dueVocab} due" else "Open Vocabulary",
-                                style = MaterialTheme.typography.labelLarge,
-                            )
-                        }
-                    }
-                }
-
-                // Rhythm — reading sessions & streaks
-                item {
-                    InsightsSection(
-                        title = "Rhythm",
-                        subtitle = "Quiet patterns from your reading",
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            StatCell(
-                                label = "Streak",
-                                value = if (state.currentStreak == 0 && state.distinctDays > 0) "—" else "${state.currentStreak}d",
-                                caption = if (state.currentStreak == 1) "consecutive day" else "consecutive days",
-                                modifier = Modifier.weight(1f),
-                            )
-                            StatCell(
-                                label = "Sessions",
-                                value = state.readingSessions.toString(),
-                                caption = "saved positions",
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            StatCell(
-                                label = "Distinct days",
-                                value = state.distinctDays.toString(),
-                                caption = "days you opened a book",
-                                modifier = Modifier.weight(1f),
-                            )
-                            StatCell(
-                                label = "Last read",
-                                value = state.lastReadLabel ?: "—",
-                                caption = if (state.lastReadLabel == null) "not yet" else "most recent",
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        if (state.longestStreak > state.currentStreak && state.longestStreak > 1) {
-                            Text(
-                                text = "Longest streak: ${state.longestStreak} days — a small, steady habit.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 10.dp),
-                            )
-                        }
-                        if (state.readingSessions == 0) {
-                            Text(
-                                text = "Your rhythm will appear after you turn a few pages.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 10.dp),
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    // Closing journal note — understated, editorial
-                    Text(
-                        text = "All counts are on-device, from your library — Folio keeps no cloud ledger.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
-                    )
-                }
-            }
-
-            item { Spacer(Modifier.height(24.dp)) }
             }
             val canScrollUp by remember { derivedStateOf { listState.canScrollBackward } }
             val canScrollDown by remember { derivedStateOf { listState.canScrollForward } }

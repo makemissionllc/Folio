@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.content.res.Configuration
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -86,18 +89,31 @@ fun OnboardingScreen(
         notificationsGranted = granted || checkNotificationsGranted(context)
     }
 
+    val configuration = LocalConfiguration.current
+    val isTablet = remember(configuration) {
+        configuration.screenWidthDp >= 840 && configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .statusBarsPadding()
-                .padding(horizontal = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .statusBarsPadding(),
+            contentAlignment = Alignment.TopCenter
         ) {
+            // Capped width on tablet so pager text and permission card don't stretch edge-to-edge
+            val contentMax = if (isTablet) 640.dp else 1000.dp // 1000 effectively no cap on phone
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .widthIn(max = contentMax)
+                    .padding(horizontal = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
             // Top skip
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -206,6 +222,7 @@ fun OnboardingScreen(
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
+            }
             }
         }
     }

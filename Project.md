@@ -7,6 +7,63 @@ Active coding branch: `main`.
 
 ---
 
+## Session 58 — 2026-09-18 — Tablet-adaptive Settings (master-detail) + Insights/Vocabulary/Smart Features/Onboarding capped layouts
+
+Branch: `main`.
+
+### Problem
+
+- On tablet, `SettingsScreen` rendered as a single full-width `LazyColumn` (`horizontal 16dp`) stretched edge-to-edge, so `SettingsSection` cards, `SettingsToggleRow` rows, and segmented controls (`ThemeModeSegmentedControl`, `ReadingNavigationModeSegmentedControl`, `PaletteOptionRow`) spanned the entire tablet width (≈1100dp) and looked sparse/oversized.
+- Same stretched-phone-layout risk on `InsightsScreen`, `VocabularyScreen`, `SmartFeaturesScreen` (15 feature cards), and `OnboardingScreen` (pager + permission card) — all `fillMaxWidth` cards/lists with `16dp` padding, no width cap.
+
+### Detection pattern
+
+- Followed the existing width-based threshold from `ui/reader/ReadingScreen.kt:310` `TwoColumnReadingContent` / `TruePageEngine`: `configuration.screenWidthDp >= 840 && orientation == ORIENTATION_LANDSCAPE` via `LocalConfiguration`. Phone path is completely untouched; tablet branch only renders when that predicate is true, so behavior on phones is identical.
+
+### Fix — purely layout/structure, no state/logic change
+
+#### 1. SettingsScreen — master-detail vs two-column grid decision
+
+- Audited `SettingsSection` card design: editorial grouped cards with uppercase label + `Card(surface, 16dp, elevation 1dp)` + `animateContentSize`; palette and segmented controls are *inside* cards. A two-column grid of cards would still leave each card’s internal toggle rows full-bleed *within* the card (card width ≈ 500dp on tablet /2) and would pair unrelated groups (e.g. Reading + Privacy side-by-side) — not editorial.
+- Chose **master-detail** for tablet: left nav list (fixed 268dp, `surface 0.35f`) + `VerticalDivider` + right detail pane. Left nav shows 7 categories (`READING`, `LIBRARY`, `INSIGHTS`, `SMART`, `APPEARANCE`, `SUPPORT`, `PRIVACY` — Privacy detail includes both Privacy/Data + Disclaimer so disclaimer stays with privacy). Right detail `LazyColumn` is centered `widthIn(max=640dp)` so every `SettingsSection` and its internal controls are capped and never go full-bleed. The `Navigation` and `Theme` segmented controls, palette rows, and folder/scan rows thus stay at sensible ≈600dp width. Hero (`SettingsHero`) shown at top of detail only when `READING` is selected to keep editorial feel without stretching.
+- `SettingsScreen.kt:182` added `LocalConfiguration`/`Configuration` + `SettingsTabletSection` enum; `Scaffold` content now branches `if (!isTablet) { // original phone LazyColumn unchanged } else { Row { left LazyColumn + detail Box+LazyColumn } }`. Phone block is verbatim copy of prior phone code (no behavior change). Left nav items are `Card` + `clickable` with haptic `TextHandleMove`, selected state `primary` vs `surface`. Detail recomposes the same `SettingsSection`/`SettingsToggleRow`/`ThemeModeSegmentedControl` etc. capturing the same `repo` flows — no new state or persistence code.
+- Added `VerticalDivider`, `HorizontalDivider`, `widthIn`, `isTablet` handling; preserved `TopReadingFade`/`BottomReadingFade` for both phone `listState` and tablet `detailListState`.
+
+#### 2. InsightsScreen — centered capped column (not master-detail)
+
+- Editorial ledger with 4 sections (Shelf, Marginalia, Lexicon, Rhythm) each a card with internal `Row(weight 1f)` StatCells. Master-detail would hide sections behind nav and break the ledger narrative; 2-column grid of section cards would pair Shelf+Magrinalia but make StatCells cramped inside narrower cards.
+- Kept single-column but **capped at 720dp centered** on tablet: outer `Box(fillMaxSize)` + inner `Box(widthIn(max=720dp).fillMaxWidth() + 16dp)` wrapping the same `LazyColumn`. Cards stay readable width, empty visual space reduced, `InsightsHero` stays full-card but within cap.
+
+#### 3. VocabularyScreen — centered capped
+
+- `ReviewCard` (`fillMaxWidth` inside Card), due/all lists with `LazyColumn` of cards. Same single-column centered cap at **640dp** (`widthIn(max=640dp).fillMaxWidth()`) on tablet; phone path `fillMaxSize` unchanged. TopBar stays.
+
+#### 4. SmartFeaturesScreen — two-column grid on tablet (fits this screen)
+
+- Guide of 15 `SmartFeatureCard`s (each independent, editorial problem/fix/why) + hero + intro + footer. Unlike Settings, cards are homogeneous and benefit from grid: two per row uses tablet width well without pairing unrelated *group types*. Phone keeps `LazyColumn`; tablet switches to `LazyVerticalGrid(columns=Fixed(2), horizontal 16dp, vertical 16dp)` with `GridItemSpan(2)` for hero/intro/footer/spacers, and 1-span for each feature card. Uses same `rememberFeatures()` list.
+
+#### 5. OnboardingScreen — centered capped
+
+- Pager of 5 pages (`HorizontalPager` weight 1f) with dots and Back/Next buttons full-width. Tablet caps entire content `Column` at **640dp** centered via outer `Box(TopCenter)` + `widthIn(max=640dp)`; text/illustrations and the Privacy permission `Card` stay within readable measure. Pager swipe, permission launchers, `storagePermissions()` logic unchanged.
+
+### Changed
+
+- `ui/settings/SettingsScreen.kt:1` — added `Configuration`, `BoxWithConstraints`, `widthIn`, `VerticalDivider`, `SettingsTabletSection` enum, `LocalConfiguration` import; `182` `isTablet` detection same threshold as reader; branch: phone verbatim `LazyColumn` + fades vs tablet `Row { left LazyColumn(268dp) + VerticalDivider + Box(weight 1f) { detail LazyColumn(widthIn 640dp) } }` with 7 section detail switches, haptic nav.
+- `ui/insights/InsightsScreen.kt:1` — added `Configuration`, `widthIn`, `LocalConfiguration`; `isTablet` at `Scaffold` content; wrap `LazyColumn` in `Box(widthIn 720dp)` centered.
+- `ui/vocabulary/VocabularyScreen.kt:1` — added `Configuration`, `widthIn`, `LocalConfiguration`; `isTablet` detection; outer `Box` now `TopCenter` + inner `Box(widthIn 640dp)` capping review/list.
+- `ui/settings/SmartFeaturesScreen.kt:1` — added `Configuration`, `widthIn`, `GridCells`, `LazyVerticalGrid`, `LocalConfiguration`; `isTablet` branch: phone `LazyColumn` vs tablet `LazyVerticalGrid(Fixed 2)` with span 2 for hero/intro/footer.
+- `ui/onboarding/OnboardingScreen.kt:1` — added `Configuration`, `widthIn`, `LocalConfiguration`; `isTablet` detection; outer `Box(TopCenter)` + inner `Column(widthIn 640dp)` so pager + permission card capped.
+- `README.md:43` — updated Appearance & Settings paragraph to document phone single-column vs tablet master-detail 840dp threshold and capped widths for Insights/Vocabulary/Smart Features/Onboarding.
+
+### Verification
+
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:assembleDebug -x lint` — `BUILD SUCCESSFUL` (post-edit).
+- `JAVA_HOME=/snap/android-studio/current/jbr ./gradlew :app:testDebugUnitTest` — `BUILD SUCCESSFUL` (EpubScannerTest depth-8 still 36).
+- Phone logic/state unchanged: toggles still `repo.setAlwaysShowProgressBar` etc., SAF pickers, scan, palette, theme, `hasSeenOnboarding` flows identical; only layout tree branches on `isTablet`.
+- Tablet thresholds: verified `screenWidthDp >=840 && landscape` triggers tablet branch; phone (<840 or portrait) keeps original `LazyColumn` with 16dp padding and 20dp spacing.
+
+---
+
 ## Session 57 — 2026-09-18 — Permission audit: remove READ_MEDIA_VIDEO/AUDIO, keep READ_MEDIA_IMAGES as removable fallback; fix Play Photo & Video policy risk
 
 Branch: `main`.

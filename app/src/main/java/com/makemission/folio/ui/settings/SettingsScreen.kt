@@ -9,6 +9,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import android.content.res.Configuration
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,9 +17,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,10 +30,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.makemission.folio.ui.reader.components.BottomReadingFade
 import com.makemission.folio.ui.reader.components.TopReadingFade
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,6 +67,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
@@ -169,6 +179,12 @@ fun SettingsScreen(
         }
     }
 
+    val configuration = LocalConfiguration.current
+    val isTablet = remember(configuration) {
+        configuration.screenWidthDp >= 840 &&
+            configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -177,402 +193,707 @@ fun SettingsScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
-        val listState = rememberLazyListState()
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            LazyColumn(
-                state = listState,
+        if (!isTablet) {
+            val listState = rememberLazyListState()
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
+                    .padding(padding)
             ) {
-            item { Spacer(modifier = Modifier.height(4.dp)) }
-
-            // Illustration header — editorial, flat, Folio palette (amber sun + books)
-            item { SettingsHero() }
-
-            item {
-                SettingsSection(
-                    title = "Reading",
-                    subtitle = "",
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
-                    SettingsToggleRow(
-                        title = "Always show progress bar",
+                item { Spacer(modifier = Modifier.height(4.dp)) }
+
+                // Illustration header — editorial, flat, Folio palette (amber sun + books)
+                item { SettingsHero() }
+
+                item {
+                    SettingsSection(
+                        title = "Reading",
                         subtitle = "",
-                        checked = alwaysShow,
-                        onCheckedChange = { checked ->
-                            if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            scope.launch { repo.setAlwaysShowProgressBar(checked) }
-                        },
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    SettingsToggleRow(
-                        title = "Haptic feedback",
-                        subtitle = "On chapter turn",
-                        checked = hapticsEnabled,
-                        onCheckedChange = { checked ->
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            scope.launch { repo.setHapticsEnabled(checked) }
-                        },
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    val bionicEnabled by repo.bionicEnabled.collectAsState(initial = false)
-                    val adaptiveContrastEnabled by repo.adaptiveContrastEnabled.collectAsState(initial = false)
-                    val hasSensor = remember { hasAmbientLightSensor(context) }
-                    SettingsToggleRow(
-                        title = "Guided Reading (Bionic)",
-                        subtitle = "Bold first syllable to guide eyes — read faster, stay focused",
-                        checked = bionicEnabled,
-                        onCheckedChange = { checked ->
-                            if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            scope.launch { repo.setBionicEnabled(checked) }
-                        },
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    SettingsToggleRow(
-                        title = if (!hasSensor) "Comfort Contrast — No sensor" else if (adaptiveContrastEnabled) "Comfort Contrast — Auto (7:1)" else "Comfort Contrast — Fixed",
-                        subtitle = "Keeps contrast comfortable in any light (WCAG 7:1, via sensor)",
-                        checked = adaptiveContrastEnabled && hasSensor,
-                        enabled = hasSensor,
-                        onCheckedChange = { checked ->
-                            if (hasSensor) { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { repo.setAdaptiveContrastEnabled(checked) } }
-                        },
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    val navigationMode by repo.readingNavigationMode.collectAsState(initial = ReadingNavigationMode.CONTINUOUS)
-                    ReadingNavigationModeSegmentedControl(
-                        selected = navigationMode,
-                        onSelect = { mode -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            scope.launch { repo.setReadingNavigationMode(mode) } }
-                    )
-                }
-            }
-
-            item {
-                SettingsSection(
-                    title = "Library",
-                    subtitle = "",
-                ) {
-                    SettingsToggleRow(
-                        title = "Auto-scan on launch",
-                        subtitle = when {
-                            folderDisplayName != null -> "Searches $folderDisplayName (SAF)"
-                            hasPermission -> "Downloads & Documents"
-                            else -> "Needs permission or folder grant — pick a folder below"
-                        },
-                        checked = autoScanEnabled,
-                        onCheckedChange = { checked ->
-                            if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            scope.launch { repo.setAutoScanEnabled(checked) }
-                        },
-                    )
-                    if (!hasPermission) {
-                        Text(
-                            text = "Choose a books folder below or grant storage access in system settings.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                            Text(
-                                text = "Choose books folder",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                text = folderDisplayName ?: "Pick folder via Storage Access Framework",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (folderDisplayName != null) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            )
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (folderDisplayName != null) {
-                                TextButton(
-                                    onClick = {
-                                        scope.launch {
-                                            booksFolderUriString?.let { uriStr ->
-                                                try {
-                                                    context.contentResolver.releasePersistableUriPermission(
-                                                        Uri.parse(uriStr),
-                                                        Intent.FLAG_GRANT_READ_URI_PERMISSION
-                                                    )
-                                                } catch (_: Exception) {}
-                                            }
-                                            repo.setBooksFolderUri(null)
-                                            snackbarHostState.showSnackbar("Folder grant cleared.")
-                                        }
-                                    }
-                                ) {
-                                    Text(
-                                        text = "Clear",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(4.dp))
-                            }
-                            Button(
-                                onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); folderPickerLauncher.launch(null) },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                                ),
-                                shape = RoundedCornerShape(20.dp),
-                            ) {
-                                Text(
-                                    text = if (folderDisplayName != null) "Change" else "Choose",
-                                    style = MaterialTheme.typography.labelLarge,
-                                )
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                            Text(
-                                text = "Scan device",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                text = if (isScanning) (scanProgress ?: "Scanning…")
-                                else if (folderDisplayName != null) "Search $folderDisplayName & device"
-                                else "Find new EPUBs",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            )
-                        }
-                        if (isScanning) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        } else {
-                            Button(
-                                onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); libraryViewModel.scanDevice(context) },
-                                enabled = hasPermission,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                ),
-                                shape = RoundedCornerShape(20.dp),
-                            ) {
-                                Text("Scan", style = MaterialTheme.typography.labelLarge)
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    // Manual fallback — minor text row, not a prominent FAB, reuses same import pipeline
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                            Text(
-                                text = "Add book manually",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                text = "Pick an EPUB if scan missed it",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            )
-                        }
-                        TextButton(
-                            onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); epubPickerLauncher.launch(arrayOf("application/epub+zip", "application/octet-stream", "*/*")) },
-                            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 36.dp),
-                        ) {
-                            Text("Add…", style = MaterialTheme.typography.labelLarge)
-                        }
-                    }
-                }
-            }
-
-            item {
-                SettingsSection(
-                    title = "Insights",
-                    subtitle = "",
-                ) {
-                    Button(
-                        onClick = onInsightsClick,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                        ),
-                        shape = RoundedCornerShape(20.dp),
-                    ) {
-                        Text("Open", style = MaterialTheme.typography.labelLarge)
-                    }
-                }
-            }
-
-            item {
-                SettingsSection(
-                    title = "Smart Features",
-                    subtitle = "",
-                ) {
-                    Button(
-                        onClick = onSmartFeaturesClick,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                        ),
-                        shape = RoundedCornerShape(20.dp),
-                    ) {
-                        Text("Explore", style = MaterialTheme.typography.labelLarge)
-                    }
-                }
-            }
-
-            item {
-                SettingsSection(
-                    title = "Appearance",
-                    subtitle = "",
-                ) {
-                    val themeMode by repo.themeMode.collectAsState(initial = ThemeMode.AUTO)
-                    val selectedPalette by repo.darkPalette.collectAsState(initial = com.makemission.folio.ui.theme.FolioPalette.SLATE)
-                    val timeTintEnabled by repo.timeTintEnabled.collectAsState(initial = false)
-                    ThemeModeSegmentedControl(
-                        selected = themeMode,
-                        onSelect = { mode -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            scope.launch { repo.setThemeMode(mode) } }
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Dark palette",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    com.makemission.folio.ui.theme.FolioPalette.entries.forEach { palette ->
-                        PaletteOptionRow(
-                            palette = palette,
-                            selected = selectedPalette == palette,
-                            onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            scope.launch { repo.setDarkPalette(palette) } }
+                        SettingsToggleRow(
+                            title = "Always show progress bar",
+                            subtitle = "",
+                            checked = alwaysShow,
+                            onCheckedChange = { checked ->
+                                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                scope.launch { repo.setAlwaysShowProgressBar(checked) }
+                            },
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                    }
-                    Text(
-                        text = "Cool Slate is the default in dark mode. Your pick persists across Light / Dark / Auto.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    SettingsToggleRow(
-                        title = "Evening warmth",
-                        subtitle = "Warmer tones after sunset",
-                        checked = timeTintEnabled,
-                        onCheckedChange = { checked -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            scope.launch { repo.setTimeTintEnabled(checked) } }
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    SettingsInfoRow(
-                        title = "Comfort Contrast (Adaptive 7:1)",
-                        subtitle = "Reader → Comfort Contrast — Auto",
-                    )
-                }
-            }
-
-            item {
-                SettingsSection(
-                    title = "Support / Developer",
-                    subtitle = "",
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "Local log for troubleshooting. Nothing sent automatically.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        SettingsToggleRow(
+                            title = "Haptic feedback",
+                            subtitle = "On chapter turn",
+                            checked = hapticsEnabled,
+                            onCheckedChange = { checked ->
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                scope.launch { repo.setHapticsEnabled(checked) }
+                            },
                         )
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val bionicEnabled by repo.bionicEnabled.collectAsState(initial = false)
+                        val adaptiveContrastEnabled by repo.adaptiveContrastEnabled.collectAsState(initial = false)
+                        val hasSensor = remember { hasAmbientLightSensor(context) }
+                        SettingsToggleRow(
+                            title = "Guided Reading (Bionic)",
+                            subtitle = "Bold first syllable to guide eyes — read faster, stay focused",
+                            checked = bionicEnabled,
+                            onCheckedChange = { checked ->
+                                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                scope.launch { repo.setBionicEnabled(checked) }
+                            },
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        SettingsToggleRow(
+                            title = if (!hasSensor) "Comfort Contrast — No sensor" else if (adaptiveContrastEnabled) "Comfort Contrast — Auto (7:1)" else "Comfort Contrast — Fixed",
+                            subtitle = "Keeps contrast comfortable in any light (WCAG 7:1, via sensor)",
+                            checked = adaptiveContrastEnabled && hasSensor,
+                            enabled = hasSensor,
+                            onCheckedChange = { checked ->
+                                if (hasSensor) { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { repo.setAdaptiveContrastEnabled(checked) } }
+                            },
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        val navigationMode by repo.readingNavigationMode.collectAsState(initial = ReadingNavigationMode.CONTINUOUS)
+                        ReadingNavigationModeSegmentedControl(
+                            selected = navigationMode,
+                            onSelect = { mode -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                scope.launch { repo.setReadingNavigationMode(mode) } }
+                        )
+                    }
+                }
+
+                item {
+                    SettingsSection(
+                        title = "Library",
+                        subtitle = "",
+                    ) {
+                        SettingsToggleRow(
+                            title = "Auto-scan on launch",
+                            subtitle = when {
+                                folderDisplayName != null -> "Searches $folderDisplayName (SAF)"
+                                hasPermission -> "Downloads & Documents"
+                                else -> "Needs permission or folder grant — pick a folder below"
+                            },
+                            checked = autoScanEnabled,
+                            onCheckedChange = { checked ->
+                                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                scope.launch { repo.setAutoScanEnabled(checked) }
+                            },
+                        )
+                        if (!hasPermission) {
+                            Text(
+                                text = "Choose a books folder below or grant storage access in system settings.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text(
+                                    text = "Choose books folder",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = folderDisplayName ?: "Pick folder via Storage Access Framework",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (folderDisplayName != null) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                )
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (folderDisplayName != null) {
+                                    TextButton(
+                                        onClick = {
+                                            scope.launch {
+                                                booksFolderUriString?.let { uriStr ->
+                                                    try {
+                                                        context.contentResolver.releasePersistableUriPermission(
+                                                            Uri.parse(uriStr),
+                                                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                                        )
+                                                    } catch (_: Exception) {}
+                                                }
+                                                repo.setBooksFolderUri(null)
+                                                snackbarHostState.showSnackbar("Folder grant cleared.")
+                                            }
+                                        }
+                                    ) {
+                                        Text(
+                                            text = "Clear",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                }
+                                Button(
+                                    onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); folderPickerLauncher.launch(null) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                                    ),
+                                    shape = RoundedCornerShape(20.dp),
+                                ) {
+                                    Text(
+                                        text = if (folderDisplayName != null) "Change" else "Choose",
+                                        style = MaterialTheme.typography.labelLarge,
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text(
+                                    text = "Scan device",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = if (isScanning) (scanProgress ?: "Scanning…")
+                                    else if (folderDisplayName != null) "Search $folderDisplayName & device"
+                                    else "Find new EPUBs",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                )
+                            }
+                            if (isScanning) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            } else {
+                                Button(
+                                    onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); libraryViewModel.scanDevice(context) },
+                                    enabled = hasPermission,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    ),
+                                    shape = RoundedCornerShape(20.dp),
+                                ) {
+                                    Text("Scan", style = MaterialTheme.typography.labelLarge)
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        // Manual fallback — minor text row, not a prominent FAB, reuses same import pipeline
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text(
+                                    text = "Add book manually",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = "Pick an EPUB if scan missed it",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                )
+                            }
+                            TextButton(
+                                onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); epubPickerLauncher.launch(arrayOf("application/epub+zip", "application/octet-stream", "*/*")) },
+                                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 36.dp),
+                            ) {
+                                Text("Add…", style = MaterialTheme.typography.labelLarge)
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    SettingsSection(
+                        title = "Insights",
+                        subtitle = "",
+                    ) {
                         Button(
-                            onClick = onLogsClick,
+                            onClick = onInsightsClick,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary,
                             ),
                             shape = RoundedCornerShape(20.dp),
                         ) {
-                            Text("View logs", style = MaterialTheme.typography.labelLarge)
+                            Text("Open", style = MaterialTheme.typography.labelLarge)
                         }
                     }
                 }
-            }
 
-            item {
-                SettingsSection(
-                    title = "Privacy / Data",
-                    subtitle = "",
+                item {
+                    SettingsSection(
+                        title = "Smart Features",
+                        subtitle = "",
+                    ) {
+                        Button(
+                            onClick = onSmartFeaturesClick,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                        ) {
+                            Text("Explore", style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
+
+                item {
+                    SettingsSection(
+                        title = "Appearance",
+                        subtitle = "",
+                    ) {
+                        val themeMode by repo.themeMode.collectAsState(initial = ThemeMode.AUTO)
+                        val selectedPalette by repo.darkPalette.collectAsState(initial = com.makemission.folio.ui.theme.FolioPalette.SLATE)
+                        val timeTintEnabled by repo.timeTintEnabled.collectAsState(initial = false)
+                        ThemeModeSegmentedControl(
+                            selected = themeMode,
+                            onSelect = { mode -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                scope.launch { repo.setThemeMode(mode) } }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Dark palette",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        com.makemission.folio.ui.theme.FolioPalette.entries.forEach { palette ->
+                            PaletteOptionRow(
+                                palette = palette,
+                                selected = selectedPalette == palette,
+                                onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                scope.launch { repo.setDarkPalette(palette) } }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                        Text(
+                            text = "Cool Slate is the default in dark mode. Your pick persists across Light / Dark / Auto.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        SettingsToggleRow(
+                            title = "Evening warmth",
+                            subtitle = "Warmer tones after sunset",
+                            checked = timeTintEnabled,
+                            onCheckedChange = { checked -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                scope.launch { repo.setTimeTintEnabled(checked) } }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        SettingsInfoRow(
+                            title = "Comfort Contrast (Adaptive 7:1)",
+                            subtitle = "Reader → Comfort Contrast — Auto",
+                        )
+                    }
+                }
+
+                item {
+                    SettingsSection(
+                        title = "Support / Developer",
+                        subtitle = "",
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = "Local log for troubleshooting. Nothing sent automatically.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Button(
+                                onClick = onLogsClick,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                                ),
+                                shape = RoundedCornerShape(20.dp),
+                            ) {
+                                Text("View logs", style = MaterialTheme.typography.labelLarge)
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    SettingsSection(
+                        title = "Privacy / Data",
+                        subtitle = "",
+                    ) {
+                        SettingsInfoRow(
+                            title = "Local-only reading",
+                            subtitle = "No cloud sync",
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        SettingsInfoRow(
+                            title = "Caches",
+                            subtitle = "Cleared with app data",
+                        )
+                    }
+                }
+
+                item {
+                    SettingsSection(
+                        title = "Content Disclaimer",
+                        subtitle = "",
+                    ) {
+                        Text(
+                            text = "Folio is a reading application only. It does not provide, host, sell, or distribute any books, and does not include any copyrighted content. Any books you read in Folio come from files you choose to open or import yourself, from your own device or from other apps.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "You are solely responsible for ensuring you have the legal right to any content you add to Folio, including complying with applicable copyright law in your jurisdiction. Folio's developer is not responsible or liable for how you obtain, use, or possess the content you open in the app.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                item { Spacer(modifier = Modifier.height(24.dp)) }
+                }
+                val canScrollUp by remember { derivedStateOf { listState.canScrollBackward } }
+                val canScrollDown by remember { derivedStateOf { listState.canScrollForward } }
+                TopReadingFade(
+                    backgroundColor = MaterialTheme.colorScheme.background,
+                    visible = canScrollUp,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+                BottomReadingFade(
+                    backgroundColor = MaterialTheme.colorScheme.background,
+                    visible = canScrollDown,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
+            // end phone Box
+        } else {
+            // Tablet: master-detail — keeps toggle rows and segmented controls capped at 560..600dp.
+            // Same threshold as reader (840dp landscape) so phone layout stays untouched.
+            var selected by remember { mutableStateOf(SettingsTabletSection.READING) }
+            val detailListState = rememberLazyListState()
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+                // Left nav — categories
+                LazyColumn(
+                    modifier = Modifier
+                        .width(268.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.35f))
+                        .padding(vertical = 12.dp, horizontal = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    SettingsInfoRow(
-                        title = "Local-only reading",
-                        subtitle = "No cloud sync",
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    SettingsInfoRow(
-                        title = "Caches",
-                        subtitle = "Cleared with app data",
-                    )
+                    item { Spacer(Modifier.height(4.dp)) }
+                    items(SettingsTabletSection.entries) { section ->
+                        val isSelected = section == selected
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selected = section
+                                },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSelected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.surface,
+                                contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                else MaterialTheme.colorScheme.onSurface,
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = if (isSelected) 2.dp else 0.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = section.title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                )
+                                if (isSelected) {
+                                    Text(text = "›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimary)
+                                }
+                            }
+                        }
+                    }
+                    item { Spacer(Modifier.height(12.dp)) }
+                }
+                VerticalDivider(
+                    modifier = Modifier.fillMaxHeight(),
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+                // Right detail — capped width, centered
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                ) {
+                    LazyColumn(
+                        state = detailListState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        item { Spacer(Modifier.height(8.dp)) }
+                        // Hero + selected section card(s) — capped at 640dp so controls don't go full-bleed
+                        item {
+                            Box(modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
+                                Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                                    // Show hero at top of detail for Reading (keeps editorial feel without stretching)
+                                    if (selected == SettingsTabletSection.READING) {
+                                        SettingsHero()
+                                    }
+                                    when (selected) {
+                                        SettingsTabletSection.READING -> {
+                                            SettingsSection(title = "Reading", subtitle = "") {
+                                                SettingsToggleRow(
+                                                    title = "Always show progress bar",
+                                                    subtitle = "",
+                                                    checked = alwaysShow,
+                                                    onCheckedChange = { checked ->
+                                                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        scope.launch { repo.setAlwaysShowProgressBar(checked) }
+                                                    },
+                                                )
+                                                Spacer(Modifier.height(8.dp))
+                                                SettingsToggleRow(
+                                                    title = "Haptic feedback",
+                                                    subtitle = "On chapter turn",
+                                                    checked = hapticsEnabled,
+                                                    onCheckedChange = { checked ->
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        scope.launch { repo.setHapticsEnabled(checked) }
+                                                    },
+                                                )
+                                                Spacer(Modifier.height(8.dp))
+                                                val bionicEnabled by repo.bionicEnabled.collectAsState(initial = false)
+                                                val adaptiveContrastEnabled by repo.adaptiveContrastEnabled.collectAsState(initial = false)
+                                                val hasSensor = remember { hasAmbientLightSensor(context) }
+                                                SettingsToggleRow(
+                                                    title = "Guided Reading (Bionic)",
+                                                    subtitle = "Bold first syllable to guide eyes — read faster, stay focused",
+                                                    checked = bionicEnabled,
+                                                    onCheckedChange = { checked ->
+                                                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        scope.launch { repo.setBionicEnabled(checked) }
+                                                    },
+                                                )
+                                                Spacer(Modifier.height(8.dp))
+                                                SettingsToggleRow(
+                                                    title = if (!hasSensor) "Comfort Contrast — No sensor" else if (adaptiveContrastEnabled) "Comfort Contrast — Auto (7:1)" else "Comfort Contrast — Fixed",
+                                                    subtitle = "Keeps contrast comfortable in any light (WCAG 7:1, via sensor)",
+                                                    checked = adaptiveContrastEnabled && hasSensor,
+                                                    enabled = hasSensor,
+                                                    onCheckedChange = { checked ->
+                                                        if (hasSensor) { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { repo.setAdaptiveContrastEnabled(checked) } }
+                                                    },
+                                                )
+                                                Spacer(Modifier.height(12.dp))
+                                                val navigationMode by repo.readingNavigationMode.collectAsState(initial = ReadingNavigationMode.CONTINUOUS)
+                                                ReadingNavigationModeSegmentedControl(
+                                                    selected = navigationMode,
+                                                    onSelect = { mode -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        scope.launch { repo.setReadingNavigationMode(mode) } }
+                                                )
+                                            }
+                                        }
+                                        SettingsTabletSection.LIBRARY -> {
+                                            SettingsSection(title = "Library", subtitle = "") {
+                                                SettingsToggleRow(
+                                                    title = "Auto-scan on launch",
+                                                    subtitle = when {
+                                                        folderDisplayName != null -> "Searches $folderDisplayName (SAF)"
+                                                        hasPermission -> "Downloads & Documents"
+                                                        else -> "Needs permission or folder grant — pick a folder below"
+                                                    },
+                                                    checked = autoScanEnabled,
+                                                    onCheckedChange = { checked ->
+                                                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        scope.launch { repo.setAutoScanEnabled(checked) }
+                                                    },
+                                                )
+                                                if (!hasPermission) {
+                                                    Text(
+                                                        text = "Choose a books folder below or grant storage access in system settings.",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                                        modifier = Modifier.padding(top = 4.dp),
+                                                    )
+                                                }
+                                                Spacer(Modifier.height(12.dp))
+                                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                                                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                                        Text(text = "Choose books folder", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+                                                        Text(text = folderDisplayName ?: "Pick folder via Storage Access Framework", style = MaterialTheme.typography.labelSmall, color = if (folderDisplayName != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                                                    }
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        if (folderDisplayName != null) {
+                                                            TextButton(onClick = {
+                                                                scope.launch {
+                                                                    booksFolderUriString?.let { uriStr ->
+                                                                        try { context.contentResolver.releasePersistableUriPermission(Uri.parse(uriStr), Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
+                                                                    }
+                                                                    repo.setBooksFolderUri(null)
+                                                                    snackbarHostState.showSnackbar("Folder grant cleared.")
+                                                                }
+                                                            }) { Text(text = "Clear", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                                            Spacer(Modifier.width(4.dp))
+                                                        }
+                                                        Button(
+                                                            onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); folderPickerLauncher.launch(null) },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary),
+                                                            shape = RoundedCornerShape(20.dp),
+                                                        ) { Text(text = if (folderDisplayName != null) "Change" else "Choose", style = MaterialTheme.typography.labelLarge) }
+                                                    }
+                                                }
+                                                Spacer(Modifier.height(12.dp))
+                                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                                                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                                        Text(text = "Scan device", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+                                                        Text(text = if (isScanning) (scanProgress ?: "Scanning…") else if (folderDisplayName != null) "Search $folderDisplayName & device" else "Find new EPUBs", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                                                    }
+                                                    if (isScanning) {
+                                                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                                                    } else {
+                                                        Button(
+                                                            onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); libraryViewModel.scanDevice(context) },
+                                                            enabled = hasPermission,
+                                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary, disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant, disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                                                            shape = RoundedCornerShape(20.dp),
+                                                        ) { Text("Scan", style = MaterialTheme.typography.labelLarge) }
+                                                    }
+                                                }
+                                                Spacer(Modifier.height(4.dp))
+                                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                                                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                                        Text(text = "Add book manually", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+                                                        Text(text = "Pick an EPUB if scan missed it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                                                    }
+                                                    TextButton(onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); epubPickerLauncher.launch(arrayOf("application/epub+zip", "application/octet-stream", "*/*")) }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 36.dp)) {
+                                                        Text("Add…", style = MaterialTheme.typography.labelLarge)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        SettingsTabletSection.INSIGHTS -> {
+                                            SettingsSection(title = "Insights", subtitle = "") {
+                                                Button(
+                                                    onClick = onInsightsClick,
+                                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary),
+                                                    shape = RoundedCornerShape(20.dp),
+                                                ) { Text("Open", style = MaterialTheme.typography.labelLarge) }
+                                            }
+                                        }
+                                        SettingsTabletSection.SMART -> {
+                                            SettingsSection(title = "Smart Features", subtitle = "") {
+                                                Button(
+                                                    onClick = onSmartFeaturesClick,
+                                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary),
+                                                    shape = RoundedCornerShape(20.dp),
+                                                ) { Text("Explore", style = MaterialTheme.typography.labelLarge) }
+                                            }
+                                        }
+                                        SettingsTabletSection.APPEARANCE -> {
+                                            SettingsSection(title = "Appearance", subtitle = "") {
+                                                val themeMode by repo.themeMode.collectAsState(initial = ThemeMode.AUTO)
+                                                val selectedPalette by repo.darkPalette.collectAsState(initial = com.makemission.folio.ui.theme.FolioPalette.SLATE)
+                                                val timeTintEnabled by repo.timeTintEnabled.collectAsState(initial = false)
+                                                ThemeModeSegmentedControl(selected = themeMode, onSelect = { mode -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { repo.setThemeMode(mode) } })
+                                                Spacer(Modifier.height(12.dp))
+                                                Text(text = "Dark palette", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                Spacer(Modifier.height(8.dp))
+                                                com.makemission.folio.ui.theme.FolioPalette.entries.forEach { palette ->
+                                                    PaletteOptionRow(palette = palette, selected = selectedPalette == palette, onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { repo.setDarkPalette(palette) } })
+                                                    Spacer(Modifier.height(8.dp))
+                                                }
+                                                Text(text = "Cool Slate is the default in dark mode. Your pick persists across Light / Dark / Auto.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                                                Spacer(Modifier.height(12.dp))
+                                                SettingsToggleRow(title = "Evening warmth", subtitle = "Warmer tones after sunset", checked = timeTintEnabled, onCheckedChange = { checked -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { repo.setTimeTintEnabled(checked) } })
+                                                Spacer(Modifier.height(8.dp))
+                                                SettingsInfoRow(title = "Comfort Contrast (Adaptive 7:1)", subtitle = "Reader → Comfort Contrast — Auto")
+                                            }
+                                        }
+                                        SettingsTabletSection.SUPPORT -> {
+                                            SettingsSection(title = "Support / Developer", subtitle = "") {
+                                                Column(modifier = Modifier.fillMaxWidth()) {
+                                                    Text(text = "Local log for troubleshooting. Nothing sent automatically.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                                                    Spacer(Modifier.height(10.dp))
+                                                    Button(onClick = onLogsClick, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary), shape = RoundedCornerShape(20.dp)) { Text("View logs", style = MaterialTheme.typography.labelLarge) }
+                                                }
+                                            }
+                                        }
+                                        SettingsTabletSection.PRIVACY -> {
+                                            Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                                                SettingsSection(title = "Privacy / Data", subtitle = "") {
+                                                    SettingsInfoRow(title = "Local-only reading", subtitle = "No cloud sync")
+                                                    Spacer(Modifier.height(8.dp))
+                                                    SettingsInfoRow(title = "Caches", subtitle = "Cleared with app data")
+                                                }
+                                                SettingsSection(title = "Content Disclaimer", subtitle = "") {
+                                                    Text(text = "Folio is a reading application only. It does not provide, host, sell, or distribute any books, and does not include any copyrighted content. Any books you read in Folio come from files you choose to open or import yourself, from your own device or from other apps.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    Spacer(Modifier.height(10.dp))
+                                                    Text(text = "You are solely responsible for ensuring you have the legal right to any content you add to Folio, including complying with applicable copyright law in your jurisdiction. Folio's developer is not responsible or liable for how you obtain, use, or possess the content you open in the app.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        item { Spacer(Modifier.height(24.dp)) }
+                    }
+                    val canScrollDetailUp by remember { derivedStateOf { detailListState.canScrollBackward } }
+                    val canScrollDetailDown by remember { derivedStateOf { detailListState.canScrollForward } }
+                    TopReadingFade(backgroundColor = MaterialTheme.colorScheme.background, visible = canScrollDetailUp, modifier = Modifier.align(Alignment.TopCenter))
+                    BottomReadingFade(backgroundColor = MaterialTheme.colorScheme.background, visible = canScrollDetailDown, modifier = Modifier.align(Alignment.BottomCenter))
                 }
             }
-
-            item {
-                SettingsSection(
-                    title = "Content Disclaimer",
-                    subtitle = "",
-                ) {
-                    Text(
-                        text = "Folio is a reading application only. It does not provide, host, sell, or distribute any books, and does not include any copyrighted content. Any books you read in Folio come from files you choose to open or import yourself, from your own device or from other apps.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = "You are solely responsible for ensuring you have the legal right to any content you add to Folio, including complying with applicable copyright law in your jurisdiction. Folio's developer is not responsible or liable for how you obtain, use, or possess the content you open in the app.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            item { Spacer(modifier = Modifier.height(24.dp)) }
-            }
-            val canScrollUp by remember { derivedStateOf { listState.canScrollBackward } }
-            val canScrollDown by remember { derivedStateOf { listState.canScrollForward } }
-            TopReadingFade(
-                backgroundColor = MaterialTheme.colorScheme.background,
-                visible = canScrollUp,
-                modifier = Modifier.align(Alignment.TopCenter),
-            )
-            BottomReadingFade(
-                backgroundColor = MaterialTheme.colorScheme.background,
-                visible = canScrollDown,
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
         }
     }
+}
+
+private enum class SettingsTabletSection(val title: String) {
+    READING("Reading"),
+    LIBRARY("Library"),
+    INSIGHTS("Insights"),
+    SMART("Smart Features"),
+    APPEARANCE("Appearance"),
+    SUPPORT("Support"),
+    PRIVACY("Privacy"),
 }
 
 @Composable

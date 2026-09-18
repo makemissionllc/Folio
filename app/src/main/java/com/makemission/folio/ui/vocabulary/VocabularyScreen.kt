@@ -1,5 +1,6 @@
 package com.makemission.folio.ui.vocabulary
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,11 +13,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalConfiguration
 import com.makemission.folio.ui.reader.components.BottomReadingFade
 import com.makemission.folio.ui.reader.components.TopReadingFade
 import androidx.compose.foundation.lazy.items
@@ -76,12 +79,21 @@ fun VocabularyScreen(
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
+        val configuration = LocalConfiguration.current
+        val isTablet = remember(configuration) {
+            configuration.screenWidthDp >= 840 && configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp),
+                .padding(padding),
+            contentAlignment = Alignment.TopCenter
         ) {
+            // Capped width on tablet so review card / lists don't stretch edge-to-edge
+            Box(
+                modifier = if (isTablet) Modifier.widthIn(max = 640.dp).fillMaxWidth().padding(16.dp)
+                else Modifier.fillMaxSize().padding(16.dp)
+            ) {
             if (current != null) {
                 ReviewCard(
                     word = current!!.word,
@@ -218,6 +230,7 @@ fun VocabularyScreen(
                         )
                     }
                 }
+            }
             }
         }
     }
