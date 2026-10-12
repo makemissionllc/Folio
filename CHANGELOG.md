@@ -5,6 +5,7 @@
 ### Library and design
 
 - Refreshed the phone and tablet library and reader around the provided mockups, with a quieter editorial layout, blue controls, hand-drawn accents and responsive tablet layouts.
+- Switched app and widget interface typography to bundled Inter for a consistent, San Francisco-inspired Android look; book text keeps the reader's selected typeface.
 - Added All, Reading, Want to Read and Finished shelves, book details and persisted shelf actions. A short Undo action reverses an accidental shelf move, and shelf/sort choices survive app launches.
 - Added whole-device EPUB, MOBI and FB2 discovery, optional folder import, idle-aware background scanning, unchanged-file caching and duplicate detection.
 - Moved heavy chapter enrichment out of active use: it waits for idle time, healthy battery and available storage, processes one book at a time, and pauses when Android reports thermal pressure. Books remain readable as soon as import completes.

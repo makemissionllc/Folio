@@ -1,36 +1,35 @@
 package com.makemission.folio.ui.theme
 
 import androidx.compose.material3.Typography
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import com.makemission.folio.R
 
 /**
- * Folio typography — SF-style system font for all UI chrome, serif for reading.
+ * Folio typography — Inter for the Android interface, reader-selected type for book text.
  *
- * App chrome (library, settings, navigation, labels, buttons, etc.) uses a
- * San Francisco–style system sans (Android's default Roboto via [FontFamily.Default],
- * the closest SF analogue on Android) with WEIGHT to differentiate hierarchy:
- * headlines heavy/black, titles bold/extraBold, labels medium/regular — not
- * different font families. This keeps the interface calm and premium iOS-like.
+ * Inter is bundled under SIL OFL 1.1 for a consistent San Francisco-inspired
+ * interface across Android devices. App chrome uses its real weight files to
+ * differentiate hierarchy; book text remains controlled by the reader's font setting.
  *
- * Reading typography (actual book text) stays serif [FolioReadingFamily] for
- * immersive legibility (see Folio_Project.md §2) and is NOT changed here.
+ * Reading typography (actual book text) is overridden in ReadingScreen and the
+ * pagination engines from the reader's persisted font selection.
  */
-private val FolioUiFamily = FontFamily.Default // SF-style: Roboto on Android
-private val FolioReadingFamily = FontFamily.Serif
+private val FolioUiFamily = FontFamily(
+    Font(R.font.inter_regular, FontWeight.Normal),
+    Font(R.font.inter_medium, FontWeight.Medium),
+    Font(R.font.inter_semibold, FontWeight.SemiBold),
+    Font(R.font.inter_bold, FontWeight.Bold),
+    Font(R.font.inter_black, FontWeight.Black),
+)
 
 private val FolioUiHeavy = TextStyle(
     fontFamily = FolioUiFamily,
     fontWeight = FontWeight.Black,
     letterSpacing = (-0.5).sp,
-)
-
-private val FolioReadingStyle = TextStyle(
-    fontFamily = FolioReadingFamily,
-    fontWeight = FontWeight.Normal,
-    letterSpacing = 0.2.sp,
 )
 
 val FolioTypography = Typography(
@@ -61,9 +60,21 @@ val FolioTypography = Typography(
         lineHeight = 20.sp,
         letterSpacing = 0.sp,
     ),
-    bodyLarge = FolioReadingStyle.copy(fontSize = 17.sp, lineHeight = 27.sp),
-    bodyMedium = FolioReadingStyle.copy(fontSize = 15.sp, lineHeight = 24.sp),
-    // UI chrome small body — sans regular, not serif (reading keeps serif via bodyLarge/Medium)
+    bodyLarge = TextStyle(
+        fontFamily = FolioUiFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 17.sp,
+        lineHeight = 27.sp,
+        letterSpacing = 0.1.sp,
+    ),
+    bodyMedium = TextStyle(
+        fontFamily = FolioUiFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 15.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.1.sp,
+    ),
+    // Reader pages override the interface font with the user's selected book typeface.
     bodySmall = TextStyle(
         fontFamily = FolioUiFamily,
         fontWeight = FontWeight.Normal,

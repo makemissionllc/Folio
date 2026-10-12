@@ -87,7 +87,7 @@ private val tourStops = listOf(
     TourStop(
         "03 · READ COMFORTABLY", "Make each page feel right",
         "Adjust the page to your eyes and your device. Folio remembers your reading setup.",
-        listOf("Paper, White, Sepia and Night page styles", "Fonts, text size, spacing, margins and brightness", "Continuous or chapter-swipe reading, keep-awake and sleep timer"),
+        listOf("Inter gives the interface a clear, familiar system feel; book text keeps your chosen font", "Paper, White, Sepia and Night page styles with text size, spacing, margins and brightness", "Continuous or chapter-swipe reading, keep-awake and sleep timer"),
         TourDemo.READER,
     ),
     TourStop(

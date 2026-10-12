@@ -45,6 +45,14 @@ private val updateSections = listOf(
         ),
     ),
     UpdateSection(
+        title = "A clearer interface type",
+        summary = "Folio now uses Inter across its Android interface for a consistent, San Francisco-inspired feel.",
+        details = listOf(
+            "Library, settings, onboarding, tablet controls and widget actions share the same type family.",
+            "Your reader font preference continues to apply to the book itself.",
+        ),
+    ),
+    UpdateSection(
         title = "Find books without browsing folders",
         summary = "Folio now reads EPUB, MOBI, FictionBook (FB2) and plain-text (TXT) books.",
         details = listOf(
