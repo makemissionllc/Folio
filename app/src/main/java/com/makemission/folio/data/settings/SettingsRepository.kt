@@ -52,6 +52,8 @@ class SettingsRepository(private val context: Context) {
         private val KEY_HIGHLIGHT_COLOR = stringPreferencesKey("highlight_color")
         private val KEY_HIGHLIGHT_STYLE = stringPreferencesKey("highlight_style")
         private val KEY_TABLET_COMPACT_LIBRARY_GRID = booleanPreferencesKey("tablet_compact_library_grid")
+        private val KEY_LIBRARY_SHELF = stringPreferencesKey("library_shelf")
+        private val KEY_LIBRARY_SORT = stringPreferencesKey("library_sort")
 
         @Volatile
         private var INSTANCE: SettingsRepository? = null
@@ -269,6 +271,22 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setTabletCompactLibraryGrid(compact: Boolean) {
         context.folioSettingsDataStore.edit { prefs -> prefs[KEY_TABLET_COMPACT_LIBRARY_GRID] = compact }
+    }
+
+    /** Keeps the last library shelf selected across app launches. */
+    val libraryShelf: Flow<String> =
+        context.folioSettingsDataStore.data.map { prefs -> prefs[KEY_LIBRARY_SHELF] ?: "ALL" }
+
+    suspend fun setLibraryShelf(shelf: String) {
+        context.folioSettingsDataStore.edit { prefs -> prefs[KEY_LIBRARY_SHELF] = shelf }
+    }
+
+    /** Keeps the last library sort selected across app launches. */
+    val librarySort: Flow<String> =
+        context.folioSettingsDataStore.data.map { prefs -> prefs[KEY_LIBRARY_SORT] ?: "RECENT" }
+
+    suspend fun setLibrarySort(sort: String) {
+        context.folioSettingsDataStore.edit { prefs -> prefs[KEY_LIBRARY_SORT] = sort }
     }
 
     fun getFolderDisplayName(uriString: String?): String? {

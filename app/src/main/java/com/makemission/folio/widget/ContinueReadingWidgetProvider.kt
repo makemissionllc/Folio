@@ -11,7 +11,6 @@ import android.widget.RemoteViews
 import com.makemission.folio.R
 import com.makemission.folio.data.db.FolioDatabase
 import com.makemission.folio.data.db.entity.BookEntity
-import com.makemission.folio.data.db.entity.ReadingProgress
 import com.makemission.folio.data.model.ShelfStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -107,7 +106,7 @@ class ContinueReadingWidgetProvider : AppWidgetProvider() {
                         } else {
                             views.setTextViewText(R.id.widgetEyebrow, "YOUR READING SPACE")
                             views.setTextViewText(R.id.widgetTitle, "A good book is close")
-                            views.setTextViewText(R.id.widgetAuthor, "Add an EPUB or MOBI to your Folio library")
+                            views.setTextViewText(R.id.widgetAuthor, "Add a book to your Folio library")
                             views.setProgressBar(R.id.widgetProgress, 100, 0, false)
                             views.setTextViewText(R.id.widgetProgressLabel, "Open library")
                             views.setOnClickPendingIntent(R.id.widgetCard, WidgetNavigation.libraryPendingIntent(appContext, id))
@@ -133,10 +132,14 @@ class ContinueReadingWidgetProvider : AppWidgetProvider() {
             while (bounds.outWidth / (sampleSize * 2) >= 128 && bounds.outHeight / (sampleSize * 2) >= 192) {
                 sampleSize *= 2
             }
-            return BitmapFactory.decodeFile(
-                file.absolutePath,
-                BitmapFactory.Options().apply { inSampleSize = sampleSize },
-            )
+            return try {
+                BitmapFactory.decodeFile(
+                    file.absolutePath,
+                    BitmapFactory.Options().apply { inSampleSize = sampleSize },
+                )
+            } catch (_: OutOfMemoryError) {
+                null
+            }
         }
     }
 }

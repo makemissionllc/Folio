@@ -209,7 +209,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 val result = withContext(Dispatchers.IO) { importInternal(uri, context) }
                 if (result == null) {
                     FolioLogger.w("Import", "Import parse failed: uri=${uri.toString().take(80)}")
-                    _importError.emit("Could not parse this EPUB or MOBI file.")
+                    _importError.emit("Couldn't read this book. Check that it is a supported EPUB, MOBI, FB2 or TXT file.")
                 } else {
                     FolioLogger.i("Import", "Import success id=${result.id} title='${result.title.take(60)}'")
                 }
@@ -262,13 +262,19 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
         val cleanName = displayName.substringAfterLast('/').substringAfterLast('\\')
             .replace(Regex("[^A-Za-z0-9._ -]"), "_")
+        val mimeType = resolver.getType(uri).orEmpty().lowercase()
         val extension = when {
             cleanName.endsWith(".mobi", true) -> ".mobi"
             cleanName.endsWith(".epub", true) -> ".epub"
-            resolver.getType(uri)?.contains("mobipocket", true) == true -> ".mobi"
+            cleanName.endsWith(".fb2", true) -> ".fb2"
+            cleanName.endsWith(".txt", true) -> ".txt"
+            mimeType.contains("mobipocket") -> ".mobi"
+            mimeType.contains("fictionbook") -> ".fb2"
+            mimeType == "text/plain" -> ".txt"
             else -> ".epub"
         }
-        val safeName = cleanName.substringBeforeLast('.').take(90).ifBlank { "book" } + extension
+        val baseName = if (cleanName.endsWith(extension, true)) cleanName.dropLast(extension.length) else cleanName
+        val safeName = baseName.take(90).ifBlank { "book" } + extension
         val booksDir = File(context.filesDir, "books").apply { mkdirs() }
 
         // Copy to a temp file first so we can parse without yet committing to DB
@@ -309,7 +315,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             }
             EpubParser.EpubMetadata(title = epub.title, author = epub.author)
         }
-        if (tmpFile.extension.equals("mobi", true) && BookFileParser.parse(tmpFile) == null) {
+        if (tmpFile.extension.lowercase() in setOf("mobi", "fb2", "txt") && BookFileParser.parse(tmpFile) == null) {
             tmpFile.delete()
             return null
         }
@@ -387,7 +393,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
             DeviceScanScheduler.requestScan(context, manual = true)
-            _scanResult.emit("EPUB and MOBI scan queued for when your device is idle.")
+            _scanResult.emit("EPUB, MOBI and FB2 scan queued for when your device is idle.")
         }
     }
 

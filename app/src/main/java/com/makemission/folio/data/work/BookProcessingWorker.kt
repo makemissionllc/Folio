@@ -19,11 +19,11 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Background worker for heavy book processing — scheduled after import/scan.
+ * Background worker for heavy book processing — scheduled after import/scan for quiet periods.
  *
- * Does NOT run on import thread. Instead, WorkManager runs this when the
- * device can (battery not low, soon after import). Heavy work (full parse,
- * X-Ray TF-IDF per-chapter) runs here, chapter-by-chapter, with caching.
+ * Does NOT run on the import thread. WorkManager waits until the device is idle,
+ * battery is healthy and storage is available. Full parsing and chapter-by-chapter
+ * X-Ray TF-IDF are cached so each book is prepared only when necessary.
  *
  * - Minimum import (copy + title/author/cover) already done; this does the rest.
  * - Chapter-level progressive: each chapter's X-Ray is computed and cached individually
@@ -32,9 +32,8 @@ import java.io.File
  *   fileHash validation — reopening doesn't reparse if hash unchanged (reuses dedup).
  * - Reuses existing algorithms (TF-IDF unchanged) — only when/order changes.
  *
- * Constraints: scheduled with battery-not-low so it completes soon, but also
- * benefits from idle/charging when available (WorkManager batches). An expedited
- * flag ensures the first chapters are ready quickly even if device not idle.
+ * Thermal-aware: one worker processes one book at a time and pauses when Android
+ * reports moderate-or-higher thermal pressure.
  */
 class BookProcessingWorker(
     appContext: Context,
@@ -42,10 +41,8 @@ class BookProcessingWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        // Concurrency limit: throttle many books selected via SAF (50+). Without this,
-        // WorkManager would start dozens of BookProcessingWorkers within ms (log: "Start processing"
-        // back-to-back), each holding full EPUB bytes + X-Ray TF-IDF in memory -> OOM / file contention.
-        // Semaphore with 2 permits ensures at most 2 books parse+X-Ray concurrently, rest queue.
+        // WorkManager may enqueue several workers after a multi-file import; serialize the expensive
+        // parse and X-Ray steps so only one book can consume substantial CPU at a time.
         processingSemaphore.withPermit {
         val bookId = inputData.getString(KEY_BOOK_ID) ?: return@withContext Result.failure()
         val fileHash = inputData.getString(KEY_FILE_HASH)
@@ -63,9 +60,7 @@ class BookProcessingWorker(
                 return@withContext Result.failure()
             }
 
-            val startingThermal = applicationContext.getSystemService(PowerManager::class.java)?.currentThermalStatus
-                ?: PowerManager.THERMAL_STATUS_NONE
-            if (startingThermal >= PowerManager.THERMAL_STATUS_MODERATE) return@withContext Result.retry()
+            if (currentThermalStatus() >= PowerManager.THERMAL_STATUS_MODERATE) return@withContext Result.retry()
 
             // 1) Parsed text cache — full parse only if not already cached for this hash
             var book = ParsedBookCache.load(applicationContext, bookId, entity.fileHash ?: fileHash)
@@ -85,10 +80,18 @@ class BookProcessingWorker(
 
             val chapters = book.chapters
             if (chapters.isEmpty()) return@withContext Result.success()
+            if (currentThermalStatus() >= PowerManager.THERMAL_STATUS_MODERATE) {
+                FolioLogger.i("BookWorker", "Pausing warm device before chapter indexing for $bookId")
+                return@withContext Result.retry()
+            }
 
             // 2) X-Ray chapter-by-chapter — skip already cached chapters
             // Precompute global stats once (lightweight df scan), then per chapter
             val globalStats = XRayExtractor.precomputeGlobalStats(chapters)
+            if (currentThermalStatus() >= PowerManager.THERMAL_STATUS_MODERATE) {
+                FolioLogger.i("BookWorker", "Pausing warm device after index preparation for $bookId")
+                return@withContext Result.retry()
+            }
             var processed = 0
             for (chIdx in chapters.indices) {
                 // Cooperative cancellation
@@ -96,8 +99,7 @@ class BookProcessingWorker(
                     FolioLogger.i("BookWorker", "Stopped mid-loop at $chIdx for $bookId")
                     return@withContext Result.retry()
                 }
-                val thermal = applicationContext.getSystemService(PowerManager::class.java)?.currentThermalStatus
-                    ?: PowerManager.THERMAL_STATUS_NONE
+                val thermal = currentThermalStatus()
                 if (thermal >= PowerManager.THERMAL_STATUS_MODERATE) {
                     FolioLogger.i("BookWorker", "Pausing warm device at chapter $chIdx for $bookId")
                     return@withContext Result.retry()
@@ -129,12 +131,15 @@ class BookProcessingWorker(
         }
     }
 
+    private fun currentThermalStatus(): Int =
+        applicationContext.getSystemService(PowerManager::class.java)?.currentThermalStatus
+            ?: PowerManager.THERMAL_STATUS_NONE
+
     companion object {
         const val KEY_BOOK_ID = "bookId"
         const val KEY_FILE_HASH = "fileHash"
         const val KEY_PROGRESS = "progress"
-        // Throttle concurrent heavy parsing: at most 2 books parse+X-Ray at once.
-        // Prevents OOM / file-race when user picks 50+ books via SAF.
-        private val processingSemaphore = Semaphore(2)
+        // Throttle heavy parsing and X-Ray extraction to one book at a time.
+        private val processingSemaphore = Semaphore(1)
     }
 }

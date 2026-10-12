@@ -294,7 +294,7 @@ private fun OnboardingPagePrivacy(modifier: Modifier = Modifier) {
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OnboardingChoiceRow("Start simply", "Use Add Books to choose EPUB or MOBI files. No extra access is needed.")
+                OnboardingChoiceRow("Start simply", "Use Add Books to choose EPUB, MOBI, FB2 or TXT files. No extra access is needed.")
                 OnboardingChoiceRow("Scan when you want", "Enable whole-device scanning later in Settings → Library. Folio waits for idle conditions.")
             }
         }

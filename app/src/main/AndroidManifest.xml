@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Whole-device EPUB/MOBI discovery in shared storage. User may use SAF/manual import instead. -->
+    <!-- Whole-device EPUB/MOBI/FB2 discovery in shared storage. User may use SAF/manual import instead. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <!-- Health Connect is only checked/opened from Settings for now. No health data permissions are requested. -->
@@ -51,7 +51,7 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Open EPUB or MOBI from Files / browser / email. -->
+            <!-- Open EPUB, MOBI, FB2 or plain text from Files / browser / email. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
 
@@ -63,12 +63,18 @@
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/epub" />
                 <data android:mimeType="application/x-mobipocket-ebook" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="text/plain" />
                 <data android:mimeType="application/octet-stream" />
                 <data android:mimeType="*/*" />
                 <data android:pathPattern=".*\\.epub" />
                 <data android:pathPattern=".*\\.EPUB" />
                 <data android:pathPattern=".*\\.mobi" />
                 <data android:pathPattern=".*\\.MOBI" />
+                <data android:pathPattern=".*\\.fb2" />
+                <data android:pathPattern=".*\\.FB2" />
+                <data android:pathPattern=".*\\.txt" />
+                <data android:pathPattern=".*\\.TXT" />
                 <data android:host="*" />
             </intent-filter>
         </activity>

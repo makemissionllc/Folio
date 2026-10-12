@@ -46,17 +46,27 @@ private val updateSections = listOf(
     ),
     UpdateSection(
         title = "Find books without browsing folders",
-        summary = "With Android’s shared-storage access, Folio can discover EPUB and MOBI files across device storage.",
+        summary = "Folio now reads EPUB, MOBI, FictionBook (FB2) and plain-text (TXT) books.",
         details = listOf(
+            "With Android’s shared-storage access, Folio can discover EPUB, MOBI and FB2 books across device storage.",
+            "Pick TXT files manually. This avoids importing unrelated notes and documents during a device scan.",
             "Scanning and indexing wait for idle device conditions. Cached file details help Folio skip unchanged books.",
-            "Choose a folder or add a file manually when you prefer a narrower import route.",
+            "Choose a folder or add files manually when you prefer a narrower import route.",
         ),
     ),
     UpdateSection(
         title = "Add a stack of books at once",
-        summary = "The system book picker can import multiple EPUB or MOBI files in one pass.",
+        summary = "The system book picker can import multiple supported books in one pass.",
         details = listOf(
-            "Choose several files together; Folio copies and indexes them one by one and reports any files it couldn't read.",
+            "Choose EPUB, MOBI, FB2 and TXT files together; Folio copies and indexes them one by one and reports any files it couldn't read.",
+        ),
+    ),
+    UpdateSection(
+        title = "Background work stays gentle",
+        summary = "Heavy text and chapter analysis avoid active use and wait for a cooler, quiet period.",
+        details = listOf(
+            "Book discovery and chapter enrichment wait until the device is idle, battery is healthy and storage is available.",
+            "Folio prepares one book at a time and pauses when Android reports thermal pressure. You can open and read a book as soon as its import finishes.",
         ),
     ),
     UpdateSection(
@@ -80,6 +90,7 @@ private val updateSections = listOf(
         title = "Keep your thoughts with the passage",
         summary = "Highlights attach to text, and you can add notes, revisit the passage, and share your notes.",
         details = listOf(
+            "On phones, long-press a word or passage and choose Folio’s Highlight action. The mark stays attached when text reflows.",
             "Notes save automatically as you type, with a Save now action when you want to commit immediately.",
             "Gemini Nano availability is detected on supported devices for local passage explanations. Other offline reading tools remain available when Nano isn’t supported.",
         ),
@@ -94,11 +105,18 @@ private val updateSections = listOf(
         ),
     ),
     UpdateSection(
+        title = "Your library remembers",
+        summary = "Folio reopens on the shelf and sort order you last chose, even after you close the app.",
+        details = listOf(
+            "Choose All, Reading, Want to Read or Finished, then switch between Recent and Title. Your choices stay on this device.",
+        ),
+    ),
+    UpdateSection(
         title = "A roomier tablet reader",
         summary = "Landscape tablets get a two-page spread, a collapsible Contents rail, and a compact reader-settings popover.",
         details = listOf(
             "Drag the Contents divider to choose a width; Folio remembers it through rotation. Notes open in a split review layout.",
-            "With a hardware keyboard, Page Up and Page Down move through the book, and Ctrl+F opens in-book search.",
+            "With a hardware keyboard, Page Up and Page Down move through the book, Ctrl+F opens in-book search, Ctrl+K opens library search, and Escape clears or closes it.",
         ),
     ),
     UpdateSection(

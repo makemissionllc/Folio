@@ -95,10 +95,16 @@ class MainActivity : ComponentActivity() {
     private fun handleEpubViewIntent(intent: Intent?) {
         if (intent?.action != Intent.ACTION_VIEW) return
         val uri = intent.data ?: return
+        val uriName = uri.lastPathSegment.orEmpty()
+        val mimeType = intent.type.orEmpty()
         val isBook = intent.type?.contains("epub", ignoreCase = true) == true ||
             intent.type?.contains("mobipocket", ignoreCase = true) == true ||
-            uri.toString().endsWith(".epub", ignoreCase = true) ||
-            uri.toString().endsWith(".mobi", ignoreCase = true)
+            intent.type?.contains("fictionbook", ignoreCase = true) == true ||
+            mimeType == "text/plain" ||
+            uriName.endsWith(".epub", ignoreCase = true) ||
+            uriName.endsWith(".mobi", ignoreCase = true) ||
+            uriName.endsWith(".fb2", ignoreCase = true) ||
+            uriName.endsWith(".txt", ignoreCase = true)
         if (!isBook && intent.type != "*/*" && intent.type != "application/octet-stream") return
         try {
             val vm = ViewModelProvider(this)[LibraryViewModel::class.java]
@@ -107,6 +113,18 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (event?.isCtrlPressed == true && keyCode == KeyEvent.KEYCODE_K) {
+            ReaderPageTurnHandler.onKeyboardLibrarySearch?.let { openLibrarySearch ->
+                openLibrarySearch()
+                return true
+            }
+        }
+        if (keyCode == KeyEvent.KEYCODE_ESCAPE) {
+            ReaderPageTurnHandler.onKeyboardLibraryEscape?.let { dismissLibrarySearch ->
+                dismissLibrarySearch()
+                return true
+            }
+        }
         if (event?.isCtrlPressed == true && keyCode == KeyEvent.KEYCODE_F) {
             ReaderPageTurnHandler.onKeyboardSearch?.let { openSearch ->
                 openSearch()

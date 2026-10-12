@@ -76,6 +76,7 @@ import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.makemission.folio.data.logging.FolioLogger
+import com.makemission.folio.data.epub.BookFileParser
 import com.makemission.folio.data.ai.GeminiNanoAssistant
 import com.makemission.folio.data.scan.EpubScanner
 import com.makemission.folio.data.work.DeviceScanScheduler
@@ -415,7 +416,7 @@ fun SettingsScreen(
                                 Text(
                                     text = if (isScanning) (scanProgress ?: "Scanning…")
                                     else if (folderDisplayName != null) "Search $folderDisplayName during idle time"
-                                    else "Find EPUB and MOBI books during idle time",
+                                    else "Find EPUB, MOBI and FB2 books during idle time",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 )
@@ -456,13 +457,13 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
                                 Text(
-                                    text = "Pick one or more EPUB or MOBI files",
+                                    text = "Pick EPUB, MOBI, FB2 or TXT files",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 )
                             }
                             TextButton(
-                                onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); epubPickerLauncher.launch(arrayOf("application/epub+zip", "application/x-mobipocket-ebook", "application/octet-stream", "*/*")) },
+                                onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); epubPickerLauncher.launch(BookFileParser.pickerMimeTypes) },
                                 modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 36.dp),
                             ) {
                                 Text("Add…", style = MaterialTheme.typography.labelLarge)
@@ -868,7 +869,7 @@ fun SettingsScreen(
                                                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                                                     Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                                                         Text(text = "Scan device", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
-                                                        Text(text = if (isScanning) (scanProgress ?: "Scanning…") else if (folderDisplayName != null) "Search $folderDisplayName during idle time" else "Find EPUB and MOBI books during idle time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                                                        Text(text = if (isScanning) (scanProgress ?: "Scanning…") else if (folderDisplayName != null) "Search $folderDisplayName during idle time" else "Find EPUB, MOBI and FB2 books during idle time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                                                     }
                                                     if (isScanning) {
                                                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
@@ -885,9 +886,9 @@ fun SettingsScreen(
                                                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                                                     Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                                                         Text(text = "Add books manually", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
-                                                        Text(text = "Pick one or more EPUB or MOBI files", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                                                        Text(text = "Pick EPUB, MOBI, FB2 or TXT files", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                                                     }
-                                                    TextButton(onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); epubPickerLauncher.launch(arrayOf("application/epub+zip", "application/x-mobipocket-ebook", "application/octet-stream", "*/*")) }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 36.dp)) {
+                                                    TextButton(onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); epubPickerLauncher.launch(BookFileParser.pickerMimeTypes) }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 36.dp)) {
                                                         Text("Add…", style = MaterialTheme.typography.labelLarge)
                                                     }
                                                 }

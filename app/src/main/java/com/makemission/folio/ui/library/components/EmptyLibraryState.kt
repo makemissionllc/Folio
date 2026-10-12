@@ -51,7 +51,7 @@ fun EmptyLibraryState(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Add a book in Settings → Library\nor let an idle scan find EPUB and MOBI books —\nthe built-in guide is already here.",
+            text = "Add a book in Settings → Library\nor let an idle scan find EPUB, MOBI and FB2 —\nthe built-in guide is already here.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

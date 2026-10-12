@@ -103,7 +103,7 @@ class DeviceScanWorker(context: Context, params: WorkerParameters) : CoroutineWo
             val cleaned = source.displayName.substringAfterLast('/').substringAfterLast('\\')
                 .replace(Regex("[^A-Za-z0-9._ -]"), "_")
             val safeName = cleaned.substringBeforeLast('.').take(90) + "." + cleaned.substringAfterLast('.')
-            if (safeName.isBlank() || !(safeName.endsWith(".epub", true) || safeName.endsWith(".mobi", true))) {
+            if (safeName.isBlank() || !BookFileParser.isDeviceScanFileName(safeName)) {
                 rejected++
                 continue
             }
@@ -117,7 +117,7 @@ class DeviceScanWorker(context: Context, params: WorkerParameters) : CoroutineWo
                     continue
                 }
                 val metadata = BookFileParser.metadata(tmp)
-                if (metadata == null || (tmp.extension.equals("mobi", true) && BookFileParser.parse(tmp) == null)) {
+                if (metadata == null || (tmp.extension.lowercase() in setOf("mobi", "fb2") && BookFileParser.parse(tmp) == null)) {
                     if (fingerprint != null) cache.put(source.originalPathOrUri, "$fingerprint:rejected-v1")
                     rejected++
                     continue

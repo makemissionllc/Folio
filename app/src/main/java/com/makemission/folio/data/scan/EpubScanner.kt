@@ -11,10 +11,11 @@ import android.provider.MediaStore
 import android.provider.Settings
 import androidx.documentfile.provider.DocumentFile
 import com.makemission.folio.data.logging.FolioLogger
+import com.makemission.folio.data.epub.BookFileParser
 import java.io.File
 
 /**
- * Representation of an EPUB or MOBI found during storage scanning.
+ * Representation of an EPUB, MOBI or FB2 found during storage scanning.
  * Supports both direct [File] references (from raw filesystem walk or MediaStore DATA column)
  * and [Uri] references (from Storage Access Framework tree grants or MediaStore ID).
  */
@@ -45,7 +46,7 @@ data class ScanResult(
 }
 
 /**
- * Automatic shared-storage discovery for EPUB and MOBI files. All-files access enables
+ * Automatic shared-storage discovery for EPUB, MOBI and FB2 files. All-files access enables
  * walking mounted shared volumes; SAF folder grants provide an optional narrower path.
  *
  * Handles permission denial gracefully (returns empty, no crash).
@@ -83,7 +84,7 @@ object EpubScanner {
         return result
     }
 
-    /** Scan mounted shared volumes, optional SAF folders, and MediaStore for EPUB/MOBI files. */
+    /** Scan mounted shared volumes, optional SAF folders, and MediaStore for supported ebook files. */
     fun scan(
         context: Context,
         configuredTreeUri: Uri? = null,
@@ -301,8 +302,8 @@ object EpubScanner {
             MediaStore.Files.FileColumns.DISPLAY_NAME,
             MediaStore.Files.FileColumns.SIZE,
         )
-        val selection = "(${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ? OR ${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?)"
-        val args = arrayOf("%.epub", "%.mobi")
+        val selection = "(${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ? OR ${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ? OR ${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?)"
+        val args = arrayOf("%.epub", "%.mobi", "%.fb2")
         val uri = MediaStore.Files.getContentUri("external")
         try {
             context.contentResolver.query(uri, projection, selection, args, null)?.use { cursor ->
@@ -361,6 +362,5 @@ object EpubScanner {
         } catch (_: Exception) {}
     }
 
-    private fun isBookName(name: String): Boolean =
-        name.endsWith(".epub", ignoreCase = true) || name.endsWith(".mobi", ignoreCase = true)
+    private fun isBookName(name: String): Boolean = BookFileParser.isDeviceScanFileName(name)
 }

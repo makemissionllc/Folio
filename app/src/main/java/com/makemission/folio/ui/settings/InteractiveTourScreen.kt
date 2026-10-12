@@ -75,13 +75,13 @@ private val tourStops = listOf(
     TourStop(
         "01 · YOUR LIBRARY", "Everything starts on one calm shelf",
         "Keep reading, find a book, or decide what to read next without digging through menus.",
-        listOf("All, Reading, Want to Read and Finished shelves", "Move a book between shelves with a quick Undo", "Continue Reading, book details and simple sorting"),
+        listOf("All, Reading, Want to Read and Finished shelves", "Move a book between shelves with a quick Undo", "Your shelf and sort choices stay saved between visits"),
         TourDemo.LIBRARY,
     ),
     TourStop(
         "02 · ADD BOOKS", "Bring your books in your way",
-        "Pick one or several EPUB/MOBI files, open a book from another app, or enable a device scan when you want Folio to find them.",
-        listOf("Whole-device and optional folder scanning", "Scanning and indexing wait for idle conditions", "File caching skips unchanged books"),
+        "Pick one or several EPUB, MOBI, FB2 or plain-text files, open a book from another app, or enable a device scan when you want Folio to find them.",
+        listOf("Whole-device discovery includes EPUB, MOBI and FB2; plain text stays manual so notes are not swept in", "Scanning and chapter indexing wait for idle time and pause on a warm device", "File caching skips unchanged books; you can read as soon as import finishes"),
         TourDemo.IMPORT,
     ),
     TourStop(
@@ -99,7 +99,7 @@ private val tourStops = listOf(
     TourStop(
         "05 · MARK THE MARGINS", "Keep a thought beside the words",
         "Use a finger or stylus to mark a passage, then leave a note that saves as you type.",
-        listOf("Five highlight colors with Fill or Underline", "Notes auto-save; share a note or jump back to its passage", "Lasso diagrams to expand or copy them"),
+        listOf("Long-press text and choose Highlight, or mark with a stylus", "Five highlight colors with Fill or Underline", "Notes auto-save; share, revisit or remove a note or mark"),
         TourDemo.NOTES,
     ),
     TourStop(
@@ -123,7 +123,7 @@ private val tourStops = listOf(
     TourStop(
         "09 · TABLETS", "Use the space around the story",
         "Folio reshapes its library and reader for a wider screen. Drag the divider beside Quick look to give the book grid or details more room.",
-        listOf("Landscape two-page reading and a resizable Contents rail", "Split-pane notes, compact reader controls and keyboard shortcuts", "Resizable quick-look details and a saved compact or roomy grid"),
+        listOf("Landscape two-page reading and a resizable Contents rail", "Page Up/Down turn pages; Ctrl+F searches inside a book", "Ctrl+K searches the library; Escape clears or closes search"),
         TourDemo.TABLET,
     ),
     TourStop(
@@ -255,12 +255,14 @@ private fun TourDemoCard(demo: TourDemo, key: Int) {
 private fun LibraryDemo(key: Int) {
     var selected by remember(key) { mutableStateOf("All Books") }
     var shelfChanged by remember(key) { mutableStateOf(false) }
+    var sortByTitle by remember(key) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Text("Your library", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            listOf("All Books", "Reading", "Want to Read").forEach { shelf ->
+            listOf("All Books", "Reading", "Want to Read", "Finished").forEach { shelf ->
                 DemoChip(shelf, selected == shelf) { selected = shelf }
             }
+            DemoChip(if (sortByTitle) "Title A–Z" else "Recent", sortByTitle) { sortByTitle = !sortByTitle }
         }
         AnimatedContent(targetState = selected, label = "library_shelf_preview") { shelf ->
             DemoBookLine(title = if (shelf == "Want to Read") "A book for later" else "Continue Reading", subtitle = if (shelf == "Reading") "Your place is saved" else "A quiet shelf, ready for you")
@@ -272,6 +274,7 @@ private fun LibraryDemo(key: Int) {
                 TextButton(onClick = { shelfChanged = false }) { Text("Undo") }
             }
         }
+        Text("Your shelf and sort stay saved between visits.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -283,7 +286,7 @@ private fun ImportDemo() {
             DemoAction("Choose books", "Select several files")
             DemoAction("Scan device", "Wait for idle time")
         }
-        Text("EPUB  ·  MOBI  ·  Optional folder", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("EPUB  ·  MOBI  ·  FB2  ·  TXT  ·  Optional folder", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -426,7 +429,7 @@ private fun TabletDemo(key: Int) {
             Text("Resize quick look", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Slider(value = previewFraction, onValueChange = { previewFraction = it }, valueRange = 0.28f..0.52f, modifier = Modifier.weight(1f))
         }
-        Text("Two-page reader · Contents rail · split notes · keyboard controls", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("Two-page reader · Contents rail · split notes · Ctrl+K / Esc search", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

@@ -92,8 +92,8 @@ class EpubScannerTest {
     fun walkDir_countsDeepFoldersExceedingMaxDepth() {
         val root = tempFolder.newFolder("deep_root")
         var current = root
-        // Create 10 levels of directories
-        for (i in 1..10) {
+        // Place the file beyond the production safety limit, whatever it is set to.
+        for (i in 1..(EpubScanner.MAX_DEPTH + 2)) {
             current = File(current, "level_$i").apply { mkdir() }
         }
         val deepEpub = File(current, "too_deep.epub")
@@ -105,7 +105,7 @@ class EpubScannerTest {
 
         EpubScanner.walkDir(root, 0, out, seen) { skippedCount++ }
 
-        // level_9 is at depth 9, level_10 is at depth 10 -> depth > MAX_DEPTH (8)
+        // The scan must stop before reaching a file deeper than MAX_DEPTH.
         assertEquals(0, out.size)
         assertTrue("Skipped deep folders should be > 0", skippedCount > 0)
     }
@@ -113,5 +113,18 @@ class EpubScannerTest {
     @Test
     fun maxDepth_isAtLeast8() {
         assertTrue(EpubScanner.MAX_DEPTH >= 8)
+    }
+
+    @Test
+    fun walkDirFindsFb2ButLeavesPlainTextForManualImport() {
+        val root = tempFolder.newFolder("format_filter")
+        File(root, "storybook.fb2").writeText("fb2")
+        File(root, "book.epub").writeText("epub")
+        File(root, "notes.txt").writeText("plain text")
+
+        val found = mutableListOf<ScannedBookSource>()
+        EpubScanner.walkDir(root, 0, found, mutableSetOf())
+
+        assertEquals(setOf("book.epub", "storybook.fb2"), found.map { it.displayName }.toSet())
     }
 }

@@ -1,6 +1,7 @@
 package com.makemission.folio
 
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 
 import org.junit.Test
@@ -20,5 +21,14 @@ class ExampleInstrumentedTest {
         // Context of the app under test.
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.makemission.folio", appContext.packageName)
+    }
+
+    @Test
+    fun mainActivityLaunchesOnDevice() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                assertTrue(activity.window.decorView.isAttachedToWindow)
+            }
+        }
     }
 }

@@ -66,6 +66,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -98,9 +99,11 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.derivedStateOf
 import com.makemission.folio.ui.reader.components.BottomReadingFade
 import com.makemission.folio.ui.reader.components.TopReadingFade
+import com.makemission.folio.ui.reader.ReaderPageTurnHandler
 import com.makemission.folio.data.search.SearchRepository
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.makemission.folio.data.model.Book
+import com.makemission.folio.data.epub.BookFileParser
 import com.makemission.folio.data.model.ShelfStatus
 import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.data.work.DeviceScanScheduler
@@ -146,12 +149,24 @@ fun LibraryScreen(
     val searchResults by viewModel.searchResults.collectAsState()
     val isSearching by viewModel.isSearching.collectAsState()
     var isSearchRevealed by remember { mutableStateOf(true) }
-    var selectedFilter by rememberSaveable { mutableStateOf(LibraryFilter.ALL) }
-    var sortOrder by rememberSaveable { mutableStateOf(LibrarySort.RECENT) }
     var showAddBooks by remember { mutableStateOf(false) }
     var searchFocusRequest by remember { mutableIntStateOf(0) }
     val isTablet = LocalConfiguration.current.screenWidthDp >= 600
     val isWideTablet = LocalConfiguration.current.screenWidthDp >= 840
+    val context = LocalContext.current
+    val settingsRepo = remember { SettingsRepository.get(context) }
+    val settingsScope = rememberCoroutineScope()
+    val selectedShelfKey by settingsRepo.libraryShelf.collectAsState(initial = LibraryFilter.ALL.name)
+    val selectedSortKey by settingsRepo.librarySort.collectAsState(initial = LibrarySort.RECENT.name)
+    val selectedFilter = LibraryFilter.values().firstOrNull { it.name == selectedShelfKey } ?: LibraryFilter.ALL
+    val sortOrder = LibrarySort.values().firstOrNull { it.name == selectedSortKey } ?: LibrarySort.RECENT
+    val selectFilter: (LibraryFilter) -> Unit = { filter ->
+        settingsScope.launch { settingsRepo.setLibraryShelf(filter.name) }
+    }
+    val toggleSort: () -> Unit = {
+        val next = if (sortOrder == LibrarySort.RECENT) LibrarySort.TITLE else LibrarySort.RECENT
+        settingsScope.launch { settingsRepo.setLibrarySort(next.name) }
+    }
     val readBookIds by viewModel.readBookIds.collectAsState()
     val continueBookId by viewModel.continueBookId.collectAsState()
     val filteredBooks = books.filter { book ->
@@ -165,17 +180,34 @@ fun LibraryScreen(
     val visibleBooks = if (sortOrder == LibrarySort.TITLE) filteredBooks.sortedBy { it.title.lowercase() } else filteredBooks
     val continueBook = books.firstOrNull { it.id == continueBookId && it.shelfStatus != ShelfStatus.FINISHED }
     var pullOffset by remember { mutableFloatStateOf(0f) }
-    val context = LocalContext.current
     val bookPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) viewModel.importEpubs(uris, context)
     }
     val snackbarHostState = remember { SnackbarHostState() }
-    val settingsRepo = remember { SettingsRepository.get(context) }
     val autoScanEnabled by settingsRepo.autoScanEnabled.collectAsState(initial = null)
     val compactTabletGrid by settingsRepo.tabletCompactLibraryGrid.collectAsState(initial = false)
-    val settingsScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val hapticsEnabled by settingsRepo.hapticsEnabled.collectAsState(initial = true)
+    DisposableEffect(isTablet) {
+        if (isTablet) {
+            ReaderPageTurnHandler.onKeyboardLibrarySearch = {
+                isSearchRevealed = true
+                searchFocusRequest++
+            }
+            ReaderPageTurnHandler.onKeyboardLibraryEscape = {
+                viewModel.clearSearch()
+                isSearchRevealed = false
+            }
+        }
+        onDispose {
+            if (ReaderPageTurnHandler.onKeyboardLibrarySearch != null) {
+                ReaderPageTurnHandler.onKeyboardLibrarySearch = null
+            }
+            if (ReaderPageTurnHandler.onKeyboardLibraryEscape != null) {
+                ReaderPageTurnHandler.onKeyboardLibraryEscape = null
+            }
+        }
+    }
     val changeShelfStatus: (Book, ShelfStatus) -> Unit = { book, newStatus ->
         val previousStatus = book.shelfStatus
         if (previousStatus != newStatus) settingsScope.launch {
@@ -362,7 +394,7 @@ fun LibraryScreen(
                 if (isTablet) {
                     LibraryFilterRail(
                         selectedFilter = selectedFilter,
-                        onSelect = { selectedFilter = it },
+                        onSelect = selectFilter,
                         onInsightsClick = onInsightsClick,
                         onSettingsClick = onSettingsClick,
                     )
@@ -420,11 +452,11 @@ fun LibraryScreen(
                                 continueBook = if (isTablet) null else continueBook,
                                 onContinue = { continueBook?.let(onBookClick) },
                                 selectedFilter = selectedFilter,
-                                onSelectFilter = { selectedFilter = it },
+                                onSelectFilter = selectFilter,
                                 isTablet = isTablet,
                                 hasVisibleBooks = visibleBooks.isNotEmpty(),
                                 sortOrder = sortOrder,
-                                onToggleSort = { sortOrder = if (sortOrder == LibrarySort.RECENT) LibrarySort.TITLE else LibrarySort.RECENT },
+                                onToggleSort = toggleSort,
                                 compactTabletGrid = compactTabletGrid,
                                 onToggleGridDensity = {
                                     settingsScope.launch { settingsRepo.setTabletCompactLibraryGrid(!compactTabletGrid) }
@@ -482,7 +514,7 @@ fun LibraryScreen(
                 }
             if (!isTablet) {
                 LibraryBottomBar(
-                    onLibraryClick = { selectedFilter = LibraryFilter.ALL; viewModel.clearSearch() },
+                    onLibraryClick = { selectFilter(LibraryFilter.ALL); viewModel.clearSearch() },
                     onSearchClick = { isSearchRevealed = true; searchFocusRequest++ },
                     onInsightsClick = onInsightsClick,
                     onSettingsClick = onSettingsClick,
@@ -525,10 +557,10 @@ fun LibraryScreen(
         ) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Add Books", style = MaterialTheme.typography.headlineSmall)
-                Text("Bring EPUB and MOBI books into Folio.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                AddBookAction("Choose books", "Select one or more EPUB or MOBI files") {
+                Text("Bring EPUB, MOBI, FB2 or TXT books into Folio.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                AddBookAction("Choose books", "Select one or more supported book files") {
                     showAddBooks = false
-                    bookPicker.launch(arrayOf("application/epub+zip", "application/x-mobipocket-ebook", "application/octet-stream"))
+                    bookPicker.launch(BookFileParser.pickerMimeTypes)
                 }
                 AddBookAction("Scan this device", "Find books in shared storage") {
                     showAddBooks = false
