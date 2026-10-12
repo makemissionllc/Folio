@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="widget_card_fill">#FF20262D</color>
+    <color name="widget_card_stroke">#FF39434E</color>
+    <color name="widget_eyebrow">#FFBAC7D4</color>
+    <color name="widget_title">#FFF2F5F8</color>
+    <color name="widget_subtitle">#FFBDC7D1</color>
+    <color name="widget_progress_track">#FF45505D</color>
+    <color name="widget_progress">#FF78AEF2</color>
+    <color name="widget_library_action">#FFBAC7D4</color>
+    <color name="widget_cover_surface">#FF354656</color>
+    <color name="widget_cover_glyph">#FFDCEBFA</color>
+</resources>
