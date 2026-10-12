@@ -1,12 +1,14 @@
 package com.makemission.folio.data.work
 
 import android.content.Context
+import android.os.PowerManager
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.makemission.folio.data.cache.ParsedBookCache
 import com.makemission.folio.data.db.FolioDatabase
 import com.makemission.folio.data.epub.EpubParser
+import com.makemission.folio.data.epub.BookFileParser
 import com.makemission.folio.data.logging.FolioLogger
 import com.makemission.folio.data.xray.XRayCache
 import com.makemission.folio.data.xray.XRayExtractor
@@ -61,11 +63,15 @@ class BookProcessingWorker(
                 return@withContext Result.failure()
             }
 
+            val startingThermal = applicationContext.getSystemService(PowerManager::class.java)?.currentThermalStatus
+                ?: PowerManager.THERMAL_STATUS_NONE
+            if (startingThermal >= PowerManager.THERMAL_STATUS_MODERATE) return@withContext Result.retry()
+
             // 1) Parsed text cache — full parse only if not already cached for this hash
             var book = ParsedBookCache.load(applicationContext, bookId, entity.fileHash ?: fileHash)
             if (book == null) {
                 FolioLogger.i("BookWorker", "Parsing full book for cache bookId=$bookId")
-                val parsed = EpubParser.parse(file)
+                val parsed = BookFileParser.parse(file)
                 if (parsed != null && parsed.chapters.isNotEmpty()) {
                     ParsedBookCache.save(applicationContext, bookId, entity.fileHash ?: fileHash, parsed)
                     book = parsed
@@ -88,7 +94,13 @@ class BookProcessingWorker(
                 // Cooperative cancellation
                 if (isStopped) {
                     FolioLogger.i("BookWorker", "Stopped mid-loop at $chIdx for $bookId")
-                    return@withContext Result.success()
+                    return@withContext Result.retry()
+                }
+                val thermal = applicationContext.getSystemService(PowerManager::class.java)?.currentThermalStatus
+                    ?: PowerManager.THERMAL_STATUS_NONE
+                if (thermal >= PowerManager.THERMAL_STATUS_MODERATE) {
+                    FolioLogger.i("BookWorker", "Pausing warm device at chapter $chIdx for $bookId")
+                    return@withContext Result.retry()
                 }
                 // Skip if already cached for this hash
                 val existing = XRayCache.loadChapter(applicationContext, bookId, chIdx, entity.fileHash ?: fileHash)

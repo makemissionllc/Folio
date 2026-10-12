@@ -6,10 +6,12 @@ import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
 import java.io.File
 import java.io.InputStream
+import java.io.ByteArrayOutputStream
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipFile
 
 /**
  * Minimal native EPUB3 parser — no network, no AI.
@@ -273,7 +275,15 @@ object EpubParser {
     /** Quick metadata-only extraction (title/author) without parsing chapters — for minimal import. */
     data class EpubMetadata(val title: String, val author: String)
     fun extractMetadata(file: File): EpubMetadata? = try {
-        file.inputStream().use { extractMetadata(it) }
+        ZipFile(file).use { zip ->
+            val opf = findOpfEntry(zip) ?: return null
+            val xml = readEntry(zip, opf, 2 * 1024 * 1024) ?: return null
+            val doc = Jsoup.parse(xml.toString(StandardCharsets.UTF_8), Parser.xmlParser())
+            EpubMetadata(
+                title = doc.selectFirst("dc|title, title")?.text()?.trim().orEmpty().ifEmpty { "Untitled" },
+                author = doc.selectFirst("dc|creator, creator")?.text()?.trim().orEmpty(),
+            )
+        }
     } catch (e: Exception) {
         FolioLogger.w("EpubParser", "extractMetadata file failed: ${file.name.take(80)} ${e.message}", e)
         null
@@ -378,7 +388,33 @@ object EpubParser {
 
     fun extractCoverToFile(file: File, context: Context, bookId: String): String? {
         return try {
-            file.inputStream().use { extractCoverToFile(it, context, bookId) }
+            ZipFile(file).use { zip ->
+                val opf = findOpfEntry(zip) ?: return null
+                val opfBytes = readEntry(zip, opf, 2 * 1024 * 1024) ?: return null
+                val doc = Jsoup.parse(opfBytes.toString(StandardCharsets.UTF_8), Parser.xmlParser())
+                val coverId = doc.selectFirst("meta[name=cover]")?.attr("content")?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: doc.selectFirst("item[properties~=cover-image]")?.attr("id")
+                    ?: doc.select("manifest > item").firstOrNull { it.attr("id").contains("cover", true) }?.attr("id")
+                    ?: return null
+                val href = doc.select("manifest > item").firstOrNull { it.attr("id") == coverId }
+                    ?.attr("href") ?: return null
+                val resolved = resolveHref(opf.name.substringBeforeLast('/', ""), href)
+                val coverEntry = zip.getEntry(resolved) ?: run {
+                    val entries = zip.entries()
+                    var match: ZipEntry? = null
+                    while (entries.hasMoreElements() && match == null) {
+                        val candidate = entries.nextElement()
+                        if (candidate.name.substringAfterLast('/').equals(resolved.substringAfterLast('/'), true)) match = candidate
+                    }
+                    match
+                } ?: return null
+                val bytes = readEntry(zip, coverEntry, 10 * 1024 * 1024) ?: return null
+                if (bytes.size < 100) return null
+                val ext = if (bytes[0] == 0x89.toByte() && bytes.size >= 8) "png" else "jpg"
+                val coverDir = File(context.filesDir, "covers").apply { mkdirs() }
+                File(coverDir, "$bookId.$ext").apply { writeBytes(bytes) }.absolutePath
+            }
         } catch (e: Exception) {
             FolioLogger.w("EpubParser", "Cover extract (file) failed for $bookId: ${e.message}", e)
             null
@@ -388,6 +424,39 @@ object EpubParser {
         } catch (e: Throwable) {
             FolioLogger.w("EpubParser", "Cover extract (file) throwable for $bookId: ${e.message}", e)
             null
+        }
+    }
+
+    private fun findOpfEntry(zip: ZipFile): ZipEntry? {
+        val container = zip.getEntry("META-INF/container.xml")
+        if (container != null) {
+            val xml = readEntry(zip, container, 256 * 1024)
+            val path = xml?.let {
+                Jsoup.parse(it.toString(StandardCharsets.UTF_8), Parser.xmlParser())
+                    .selectFirst("rootfile")?.attr("full-path")
+            }
+            if (!path.isNullOrBlank()) zip.getEntry(path)?.let { return it }
+        }
+        val entries = zip.entries()
+        while (entries.hasMoreElements()) {
+            val entry = entries.nextElement()
+            if (entry.name.endsWith(".opf", true)) return entry
+        }
+        return null
+    }
+
+    private fun readEntry(zip: ZipFile, entry: ZipEntry, limit: Int): ByteArray? {
+        if (entry.size > limit || entry.size < -1) return null
+        return zip.getInputStream(entry).use { input ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(16 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                if (output.size() + count > limit) return null
+                output.write(buffer, 0, count)
+            }
+            output.toByteArray()
         }
     }
 
@@ -411,7 +480,7 @@ object EpubParser {
             title = "Your Library",
             paragraphs = listOf(
                 "The Library is an editorial grid of covers (2:3, 16dp rounded, memoized 440×660 with Coil). Pull down from the very top (a deliberate 180px drag when already at the top, not during normal scrolling) to reveal search — Folio looks only inside your own books, ranking highlights and bookmarks first, then titles and text. Your search never leaves the device. A subtle Library-wide search and a contextual in-book search (from the reading menu) share the same on-device ranking.",
-                "Books find themselves: when enabled in Settings → Library, Folio auto-scans on launch for EPUBs in Downloads, Documents, external storage, or a folder you choose via Storage Access Framework (SAF) — pick it with Choose books folder, change or clear it anytime, and see the chosen name reflected in Settings. Discovery uses hash and path dedup so nothing duplicates. You can also tap a book’s cover to open it, long-press for Remove / Info / Reset progress, or add one manually via Settings → Library → Add book manually (a quiet fallback, not a prominent button). If you open an EPUB from Files, email, or browser, Folio appears as a handler and imports with the same pipeline.",
+                "Books find themselves: when enabled in Settings → Library, Folio waits for an idle, battery-safe moment to find EPUB and supported MOBI books across shared storage after you allow access. You can also choose a narrower folder in Settings. Discovery caches unchanged files so repeat scans stay light. You can also tap a book’s cover to open it, long-press for Remove / Info / Reset progress, or add one manually via Settings → Library → Add book manually (a quiet fallback, not a prominent button). If you open a supported book from Files, email, or browser, Folio appears as a handler and imports it.",
                 "Swipe right anywhere on the grid to open Settings, swipe left to see Insights — your reading journal. Need more? Pull down for search or use the menu in a book to jump to chapters, highlights, or bookmarks.",
             ),
         ),
@@ -419,8 +488,8 @@ object EpubParser {
             title = "Reading, Your Way",
             paragraphs = listOf(
                 "Open any book to find a clean serif body (17/27) and heavy sans titles, squared-off paragraphs (Knuth-Plass micro-kerning, no orphans or widows), and true page numbers (Page X of Y) measured for your screen and cached per configuration — so Page 47 means the same tomorrow as today.",
-                "At the top you’ll see only Back and a menu (☰). Tap the text to hide chrome for distraction-free reading; a thin amber progress lets you seek. If you prefer, keep the bar always visible via Settings → Reading → Always show progress bar. Volume keys turn pages, even one-handed.",
-                "Two navigation styles live under Settings → Reading (and remember across restarts): Continuous (whole-book vertical scroll) and Chapter swipe (vertical within a chapter, horizontal swipe between chapters; tablet shows spreads). Folio remembers your choice and jump logic works in both.",
+                "At the top you’ll see only Back and a menu (☰). Tap the text to hide chrome for distraction-free reading; a thin amber progress lets you seek. If you prefer, keep the bar always visible via Settings → Reading → Always show progress bar. Volume keys turn pages, even one-handed. If you read without touching the screen for a while, Keep screen awake in the menu or Settings can prevent the display from dimming until you leave the reader.",
+                "Two navigation styles live under Settings → Reading (and remember across restarts): Continuous (whole-book vertical scroll) and Chapter swipe (vertical within a chapter, horizontal swipe between chapters; tablet shows spreads). In landscape on a tablet, tap Contents in the top bar to keep a chapter list beside the pages. Folio remembers your navigation choice and chapter jumps work in both modes.",
                 "Open the menu (☰) to jump quickly: Chapters lists every chapter for instant jumps; Highlights lists your inked passages (tap to jump, parallel to Bookmarks); Bookmarks list saved spots (tap to jump, distinct from highlights); Search in book looks within this book only (highlights and bookmarks first); People & Topics (X-Ray) maps characters and ideas; Guided Reading (Bionic) bolds the first syllable to guide scanning; Comfort Contrast (Adaptive 7:1) eases colors with ambient light. All toggles in the menu are the same ones in Settings → Reading, and they persist across restarts.",
                 "Make the page yours from the same menu — Typography lets you pick font (Serif Default, Sans, Literary Serif, Monospace), size (Small/Normal/Large/XL), line spacing (Compact/Normal/Relaxed/Loose), and margins (Narrow/Normal/Wide/Extra Wide) — Kindle and Apple Books–like. Folio re-measures true pages and line breaking as you change them, so pagination and orphan control stay true to what you see.",
             ),
@@ -440,7 +509,7 @@ object EpubParser {
             paragraphs = listOf(
                 "Folio’s help stays on device: People & Topics (X-Ray, TF-IDF per chapter, progressive and prioritized for the chapter you’re on), True Pages, line breaking, LCS re-anchoring, Comfort Contrast (WCAG 7:1 via AdaptiveContrastEngine + AmbientLightSensor, throttled and animated gradually), Evening warmth (TimeTintEngine, system clock, gradual and palette-coordinated, in Light/Dark/Auto), bounding-box diagrams, search (library-wide pull-down and in-book contextual, highlights first), dictionary, and velocity-based time-left (Rolling-Weight EMA) — all without a network. Heavy work (full parse + X-Ray) runs in WorkManager chapter-by-chapter (semaphore 2 for 50+ imports) with atomic cache writes, so it never blocks your reading and doesn’t crash while you search.",
                 "Polish is editorial, not flashy: haptics tick at chapter boundaries and for bookmarks, highlights, vocabulary and settings (respecting your toggle), scroll fades feather the top (36dp) and bottom (40dp) with a 3-stop gradient so text never hard-cuts (reused for Library, Settings, Insights, Vocabulary), micro-animations stagger the grid and sheets, and navigation slides and Crossfades (360ms) feel premium. Appearance lives in Settings → Appearance: Light / Dark / Auto (Auto follows the system, Cool Slate is the dark default) plus four dark palettes — Folio Green, OLED True Black, Warm Sepia, Cool Slate — and Evening warmth that drifts warmer after sunset.",
-                "Try it: change Typography and Highlights in the reading menu, swipe between Continuous and Chapter swipe, search from the Library pull-down and inside this book, highlight with finger and stylus in different colors, bookmark a spot, open Chapters or Highlights from the menu, and pick a dark palette in Settings → Appearance. When you’re ready for your own books, choose a folder or let Auto-scan find them. For help, see Settings → Smart Features for a plain-English guide to Folio’s quiet helpers. Happy reading — \"$bookTitle\" is just the start.",
+                "Try it: change Typography and Highlights in the reading menu, swipe between Continuous and Chapter swipe, search from the Library pull-down and inside this book, highlight with finger and stylus in different colors, bookmark a spot, open Chapters or Highlights from the menu, and pick a dark palette in Settings → Appearance. When you’re ready for your own books, allow device access or let an idle scan find them. For help, see Settings → Smart Features for a plain-English guide to Folio’s quiet helpers. Happy reading — \"$bookTitle\" is just the start.",
             ),
         ),
     )

@@ -30,6 +30,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import com.makemission.folio.ui.reader.components.BottomReadingFade
 import com.makemission.folio.ui.reader.components.TopReadingFade
+import com.makemission.folio.ui.theme.FolioDoodle
+import com.makemission.folio.ui.theme.FolioDoodleKind
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -374,11 +376,14 @@ private fun InsightsHeader(
         ) {
             Text("← Back", style = MaterialTheme.typography.labelLarge)
         }
-        Text(
-            text = "Insights",
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "Insights",
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            FolioDoodle(kind = FolioDoodleKind.SPARK, modifier = Modifier.size(22.dp), color = MaterialTheme.colorScheme.tertiary)
+        }
         Text(
             text = "A quiet ledger — not a dashboard",
             style = MaterialTheme.typography.bodySmall,
@@ -495,6 +500,11 @@ private fun InsightsSection(
                 text = title.uppercase(),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
+            )
+            FolioDoodle(
+                kind = FolioDoodleKind.UNDERLINE,
+                modifier = Modifier.padding(top = 2.dp).size(width = 46.dp, height = 8.dp),
+                color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f),
             )
             Text(
                 text = subtitle,

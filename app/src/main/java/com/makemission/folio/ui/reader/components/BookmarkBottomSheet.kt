@@ -47,7 +47,8 @@ fun BookmarkBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         Column(

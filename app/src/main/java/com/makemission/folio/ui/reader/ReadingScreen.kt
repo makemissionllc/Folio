@@ -1,10 +1,13 @@
 package com.makemission.folio.ui.reader
 
 import android.app.Application
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.res.Configuration
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -17,6 +20,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -50,18 +54,25 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -70,6 +81,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -80,6 +92,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
@@ -87,18 +101,25 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.makemission.folio.data.db.entity.Bookmark
+import com.makemission.folio.data.ai.GeminiNanoAssistant
 import com.makemission.folio.data.db.entity.Highlight
 import com.makemission.folio.data.dictionary.DictionaryRepository
 import com.makemission.folio.data.epub.EpubParser
 import com.makemission.folio.ui.reader.components.BookmarkBottomSheet
 import com.makemission.folio.ui.reader.components.DictionaryPopup
 import com.makemission.folio.ui.reader.components.ExplainSelectionContainer
+import com.makemission.folio.ui.reader.components.FolioAiExplanationDialog
 import com.makemission.folio.ui.reader.components.ExpandableDiagram
 import com.makemission.folio.ui.reader.components.HighlightOverlay
 import com.makemission.folio.ui.reader.components.ReadingProgressBar
@@ -116,6 +137,7 @@ import com.makemission.folio.ui.reader.FolioLineSpacing
 import com.makemission.folio.ui.reader.FolioMargin
 import com.makemission.folio.ui.reader.FolioReadingFont
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -124,6 +146,12 @@ private data class LassoCapture(
     val points: List<Offset>,
     val bounds: Rect,
 )
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
 
 // Reading typography helpers — Kindle/Apple Books-like, persisted via DataStore.
 // Compute scaled body/title styles the same way TruePage/Knuth virtual canvas does,
@@ -268,6 +296,8 @@ fun ReadingScreen(
         onTrackVocabulary = viewModel::trackVocabulary,
         onToggleBookmark = viewModel::toggleBookmark,
         onDeleteBookmark = viewModel::removeBookmark,
+        onSaveHighlightNote = viewModel::saveHighlightNote,
+        onDeleteHighlight = viewModel::deleteHighlight,
         inBookQuery = inBookQuery,
         inBookResults = inBookResults,
         isInBookSearching = isInBookSearching,
@@ -296,6 +326,8 @@ private fun ReadingScreenContent(
     onTrackVocabulary: (String, String?) -> Unit = { _, _ -> },
     onToggleBookmark: (Int, Int) -> Unit = { _, _ -> },
     onDeleteBookmark: (Bookmark) -> Unit = {},
+    onSaveHighlightNote: (Long, String) -> Unit = { _, _ -> },
+    onDeleteHighlight: (Highlight) -> Unit = {},
     inBookQuery: String = "",
     inBookResults: List<com.makemission.folio.data.search.SearchRepository.SearchResult> = emptyList(),
     isInBookSearching: Boolean = false,
@@ -307,10 +339,12 @@ private fun ReadingScreenContent(
     modifier: Modifier = Modifier,
 ) {
     val configuration = LocalConfiguration.current
+    val density = LocalDensity.current.density
     val isTabletLandscape = remember(configuration) {
         configuration.orientation == Configuration.ORIENTATION_LANDSCAPE &&
             configuration.screenWidthDp >= 840
     }
+    val isTabletDevice = configuration.screenWidthDp >= 600
 
     var chromeVisible by remember { mutableStateOf(true) }
     val haptic = LocalHapticFeedback.current
@@ -318,15 +352,60 @@ private fun ReadingScreenContent(
     var showBookmarks by remember { mutableStateOf(false) }
     var showHighlights by remember { mutableStateOf(false) }
     var showChapters by remember { mutableStateOf(false) }
+    var showTabletContents by rememberSaveable { mutableStateOf(true) }
+    var tabletRailWidth by rememberSaveable { mutableStateOf(if (configuration.screenWidthDp >= 1100) 276f else 238f) }
     var showInBookSearch by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    var sleepTimerDeadline by rememberSaveable(uiState.bookId) { mutableLongStateOf(0L) }
+    var sleepTimerExpired by rememberSaveable(uiState.bookId) { mutableStateOf(false) }
+    var sleepTimerMinutesLeft by remember(uiState.bookId) { mutableIntStateOf(0) }
     var lassoCapture by remember { mutableStateOf<LassoCapture?>(null) }
     var dictPopup by remember { mutableStateOf<Pair<String, String?>?>(null) }
+    var aiPassage by remember { mutableStateOf<String?>(null) }
+    var aiAnswer by remember { mutableStateOf<String?>(null) }
+    var aiProgress by remember { mutableStateOf("Checking on-device model…") }
+    var aiLoading by remember { mutableStateOf(false) }
     // Pending jump targets (reuse flatIndex logic from bookmarks for search)
     var pendingBookmarkJump by remember { mutableStateOf<Bookmark?>(null) }
     var pendingSearchJump by remember { mutableStateOf<com.makemission.folio.data.search.SearchRepository.SearchResult?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val keyboardOverlayVisible = showInBookSearch || showMenu || showBookmarks || showHighlights || showChapters || showXRay || dictPopup != null || lassoCapture != null || aiPassage != null
+    DisposableEffect(isTabletDevice, keyboardOverlayVisible) {
+        if (isTabletDevice && !keyboardOverlayVisible) {
+            ReaderPageTurnHandler.onKeyboardPageKey = { isForward ->
+                ReaderPageTurnHandler.onVolumeKey?.invoke(!isForward)
+            }
+            ReaderPageTurnHandler.onKeyboardSearch = { showInBookSearch = true }
+        } else {
+            ReaderPageTurnHandler.onKeyboardPageKey = null
+            ReaderPageTurnHandler.onKeyboardSearch = null
+        }
+        onDispose {
+            ReaderPageTurnHandler.onKeyboardPageKey = null
+            ReaderPageTurnHandler.onKeyboardSearch = null
+        }
+    }
+
+    LaunchedEffect(sleepTimerDeadline, uiState.bookId) {
+        if (sleepTimerDeadline <= 0L) {
+            sleepTimerMinutesLeft = 0
+            return@LaunchedEffect
+        }
+        while (true) {
+            val remainingMillis = sleepTimerDeadline - System.currentTimeMillis()
+            if (remainingMillis <= 0L) {
+                sleepTimerMinutesLeft = 0
+                sleepTimerDeadline = 0L
+                sleepTimerExpired = true
+                chromeVisible = false
+                Toast.makeText(context, "Sleep timer ended. The screen will turn off soon.", Toast.LENGTH_SHORT).show()
+                break
+            }
+            sleepTimerMinutesLeft = ((remainingMillis + 59_999L) / 60_000L).toInt()
+            delay(minOf(remainingMillis, 30_000L))
+        }
+    }
 
     // Initial jump from Library search (reuse bookmark jump-to-position logic)
     LaunchedEffect(uiState.chapters, initialChapterIndex, initialParagraphIndex) {
@@ -352,6 +431,17 @@ private fun ReadingScreenContent(
     val settingsRepo = remember(context) { com.makemission.folio.data.settings.SettingsRepository.get(context) }
     val alwaysShowProgressBar by settingsRepo.alwaysShowProgressBar.collectAsState(initial = false)
     val hapticsEnabled by settingsRepo.hapticsEnabled.collectAsState(initial = true)
+    val keepScreenAwake by settingsRepo.keepScreenAwake.collectAsState(initial = false)
+    val activity = remember(context) { context.findActivity() }
+    DisposableEffect(activity, keepScreenAwake, sleepTimerExpired) {
+        val window = activity?.window
+        val hadFlag = ((window?.attributes?.flags ?: 0) and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0
+        val addedFlag = keepScreenAwake && !sleepTimerExpired && window != null && !hadFlag
+        if (addedFlag) window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            if (addedFlag) window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
     val navigationMode by settingsRepo.readingNavigationMode.collectAsState(initial = com.makemission.folio.ui.reader.ReadingNavigationMode.CONTINUOUS)
     // Persisted reading toggles (Bionic + Contrast) — DataStore backed so they survive process death / app restart.
     // Replaces previous rememberSaveable (process-death only) with folio_settings persistence.
@@ -366,6 +456,21 @@ private fun ReadingScreenContent(
     val readingFontSize by settingsRepo.readingFontSize.collectAsState(initial = FolioFontSize.NORMAL)
     val readingLineSpacing by settingsRepo.readingLineSpacing.collectAsState(initial = FolioLineSpacing.NORMAL)
     val readingMargin by settingsRepo.readingMargin.collectAsState(initial = FolioMargin.NORMAL)
+    val readerPageStyle by settingsRepo.readerPageStyle.collectAsState(initial = ReaderPageStyle.AUTO)
+    val readerBrightness by settingsRepo.readerBrightness.collectAsState(initial = -1f)
+    val effectiveReaderBrightness = if (sleepTimerExpired) 0.02f else readerBrightness
+    DisposableEffect(activity, effectiveReaderBrightness) {
+        val window = activity?.window
+        val original = window?.attributes?.screenBrightness
+        if (window != null && effectiveReaderBrightness >= 0f) {
+            window.attributes = window.attributes.apply { screenBrightness = effectiveReaderBrightness }
+        }
+        onDispose {
+            if (window != null && original != null) {
+                window.attributes = window.attributes.apply { screenBrightness = original }
+            }
+        }
+    }
     val highlightColorPref by settingsRepo.highlightColor.collectAsState(initial = FolioHighlightColor.AMBER)
     val highlightStylePref by settingsRepo.highlightStyle.collectAsState(initial = FolioHighlightStyle.FILL)
 
@@ -412,15 +517,32 @@ private fun ReadingScreenContent(
     // Time-aware ambient tinting layers on top — see TimeTintEngine; all three
     // (palette via baseBg, adaptive contrast via lux, time tint via warmth) layer
     // sensibly via sequential lerps + final WCAG ensure, not fighting/muddy.
-    val themeMode by settingsRepo.themeMode.collectAsState(initial = com.makemission.folio.ui.theme.ThemeMode.AUTO)
     val systemDark = isSystemInDarkTheme()
-    val isDark = when (themeMode) {
-        com.makemission.folio.ui.theme.ThemeMode.LIGHT -> false
-        com.makemission.folio.ui.theme.ThemeMode.DARK -> true
-        com.makemission.folio.ui.theme.ThemeMode.AUTO -> systemDark
+    val isDark = when (readerPageStyle) {
+        ReaderPageStyle.NIGHT -> true
+        ReaderPageStyle.AUTO -> systemDark
+        else -> false
     }
-    val baseBg = MaterialTheme.colorScheme.background
-    val baseText = MaterialTheme.colorScheme.onBackground
+    DisposableEffect(activity, isDark) {
+        val window = activity?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
+        val previousStatusIcons = controller?.isAppearanceLightStatusBars
+        val previousNavigationIcons = controller?.isAppearanceLightNavigationBars
+        controller?.isAppearanceLightStatusBars = !isDark
+        controller?.isAppearanceLightNavigationBars = !isDark
+        onDispose {
+            if (previousStatusIcons != null) controller?.isAppearanceLightStatusBars = previousStatusIcons
+            if (previousNavigationIcons != null) controller?.isAppearanceLightNavigationBars = previousNavigationIcons
+        }
+    }
+    val baseBg = when (readerPageStyle) {
+        ReaderPageStyle.WHITE -> Color.White
+        ReaderPageStyle.SEPIA -> Color(0xFFE8D9BB)
+        ReaderPageStyle.NIGHT -> Color(0xFF111114)
+        ReaderPageStyle.PAPER -> com.makemission.folio.ui.theme.FolioReadingPaper
+        ReaderPageStyle.AUTO -> if (systemDark) Color(0xFF111114) else com.makemission.folio.ui.theme.FolioReadingPaper
+    }
+    val baseText = if (isDark) Color(0xFFF3F1EE) else com.makemission.folio.ui.theme.FolioInk
     val hasSensor = remember(context) { hasAmbientLightSensor(context) }
     val luxState = rememberAmbientLightLux(enabled = adaptiveEnabled && hasSensor)
     val rawLux = luxState.value
@@ -731,6 +853,16 @@ private fun ReadingScreenContent(
         )
     }
 
+    aiPassage?.let { passage ->
+        FolioAiExplanationDialog(
+            passage = passage,
+            answer = aiAnswer,
+            progress = aiProgress,
+            isLoading = aiLoading,
+            onDismiss = { aiPassage = null },
+        )
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = readingBg,
@@ -742,187 +874,73 @@ private fun ReadingScreenContent(
                     enter = slideInVertically(animationSpec = tween(280, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(220)),
                     exit = slideOutVertically(animationSpec = tween(220, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180)),
                 ) {
-                    TopAppBar(
+                    CenterAlignedTopAppBar(
                     title = {
-                        Text(
-                            text = uiState.bookTitle.ifBlank { "Reading" },
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = uiState.bookTitle.ifBlank { "Reading" },
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                            )
+                            if (!isTabletLandscape) Text(
+                                text = uiState.chapters.getOrNull(currentBookmarkPos.first)?.title.orEmpty(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = readingOnSurface.copy(alpha = 0.62f),
+                                maxLines = 1,
+                            )
+                        }
                     },
                     navigationIcon = {
                         TextButton(
                             onClick = onBack,
                             modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
                         ) {
-                            Text("← Back", style = MaterialTheme.typography.labelLarge)
+                            Text("‹", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
                         }
                     },
                     actions = {
-                        // Single menu icon — 48dp touch target, replaces cluttered individual buttons
+                        if (isTabletLandscape) {
+                            TextButton(
+                                onClick = { showTabletContents = !showTabletContents },
+                                modifier = Modifier.sizeIn(minHeight = 48.dp),
+                            ) {
+                                Text(
+                                    if (showTabletContents) "▣" else "▤",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        } else {
+                            TextButton(onClick = { showChapters = true }, modifier = Modifier.sizeIn(minWidth = 40.dp, minHeight = 48.dp)) {
+                                Text("≡", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        if (isTabletLandscape) {
+                            TextButton(onClick = { showInBookSearch = true }, modifier = Modifier.sizeIn(minWidth = 40.dp, minHeight = 48.dp)) {
+                                Text("⌕", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
                         TextButton(
-                            onClick = { showMenu = true },
-                            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+                            onClick = {
+                                val (ch, para) = currentBookmarkPos
+                                onToggleBookmark(ch, para)
+                            },
+                            modifier = Modifier.sizeIn(minWidth = 40.dp, minHeight = 48.dp),
                         ) {
-                            Text(
-                                "☰",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            ReaderBookmarkIcon(isCurrentBookmarked, MaterialTheme.colorScheme.primary)
+                        }
+                        TextButton(onClick = { showMenu = true }, modifier = Modifier.sizeIn(minWidth = 40.dp, minHeight = 48.dp)) {
+                            Text("aA", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = readingSurface.copy(alpha = 0.92f),
+                        containerColor = readingSurface.copy(alpha = 0.97f),
                         titleContentColor = readingOnSurface,
                     ),
                     windowInsets = WindowInsets.statusBars,
                 )
                 }
-                // In-book pull-to-reveal search bar (on-device, contextual) — subtle premium tween
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = showInBookSearch,
-                    enter = androidx.compose.animation.expandVertically(animationSpec = tween(220, easing = FastOutSlowInEasing)) + fadeIn(tween(180)),
-                    exit = androidx.compose.animation.shrinkVertically(animationSpec = tween(200, easing = FastOutSlowInEasing)) + fadeOut(tween(150)),
-                ) {
-                    androidx.compose.material3.Card(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 1.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            androidx.compose.material3.OutlinedTextField(
-                                value = inBookQuery,
-                                onValueChange = onInBookQueryChange,
-                                placeholder = { Text("Search in this book…", style = MaterialTheme.typography.bodyMedium) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                                ),
-                            )
-                            if (isInBookSearching) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
-                            } else if (inBookQuery.isNotEmpty()) {
-                                TextButton(onClick = onClearInBookSearch) { Text("Clear") }
-                            } else {
-                                TextButton(onClick = { showInBookSearch = false }) { Text("Close") }
-                            }
-                        }
-                        // On-brand helper
-                        androidx.compose.foundation.layout.Column(modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 6.dp)) {
-                            Text(
-                                "On-device — highlights & bookmarks first, then text.",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            )
-                        }
-                    }
-                    // Contextual in-book results (on-device, highlights/bookmarks priority) — subtle
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = inBookQuery.isNotBlank(),
-                        enter = androidx.compose.animation.expandVertically(tween(200, easing = FastOutSlowInEasing)) + fadeIn(tween(180)),
-                        exit = androidx.compose.animation.shrinkVertically(tween(180)) + fadeOut(tween(150)),
-                    ) {
-                        androidx.compose.material3.Card(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 6.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 1.dp),
-                        ) {
-                            if (isInBookSearching) {
-                                androidx.compose.foundation.layout.Row(
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
-                                ) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = MaterialTheme.colorScheme.primary)
-                                    androidx.compose.foundation.layout.Spacer(Modifier.size(10.dp))
-                                    Text("Searching…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            } else if (inBookResults.isEmpty()) {
-                                androidx.compose.foundation.layout.Column(
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                ) {
-                                    Text(
-                                        "No passages found for “$inBookQuery”",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    )
-                                    androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
-                                    Text(
-                                        "Try a different phrase — Folio searches highlights, bookmarks and text, all on-device.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    )
-                                    androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
-                                    TextButton(onClick = onClearInBookSearch) { Text("Clear search") }
-                                }
-                            } else {
-                                androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
-                                    Text(
-                                        "${inBookResults.size} ${if (inBookResults.size == 1) "passage" else "passages"} for “$inBookQuery” — highlights & bookmarks first",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                                    )
-                                    androidx.compose.foundation.lazy.LazyColumn(
-                                        modifier = Modifier.fillMaxWidth().height(220.dp),
-                                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
-                                    ) {
-                                        items(
-                                            count = inBookResults.size,
-                                            key = { idx -> "${inBookResults[idx].chapterIndex}-${inBookResults[idx].paragraphIndex}-${inBookResults[idx].matchType}-${inBookResults[idx].snippet.hashCode()}" }
-                                        ) { idx ->
-                                            val r = inBookResults[idx]
-                                            androidx.compose.material3.Surface(
-                                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { jumpInBookTo(r.chapterIndex, r.paragraphIndex) },
-                                                color = if (r.matchType == com.makemission.folio.data.search.SearchRepository.MatchType.HIGHLIGHT || r.matchType == com.makemission.folio.data.search.SearchRepository.MatchType.BOOKMARK)
-                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                                                shape = RoundedCornerShape(12.dp),
-                                                tonalElevation = 1.dp,
-                                            ) {
-                                                androidx.compose.foundation.layout.Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                                                    androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                                        Text(
-                                                            "Ch ${r.chapterIndex + 1} · ¶ ${r.paragraphIndex + 1}",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                            modifier = Modifier.weight(1f),
-                                                        )
-                                                        val badge = when (r.matchType) {
-                                                            com.makemission.folio.data.search.SearchRepository.MatchType.HIGHLIGHT -> "Highlight"
-                                                            com.makemission.folio.data.search.SearchRepository.MatchType.BOOKMARK -> "Bookmark"
-                                                            else -> "Text"
-                                                        }
-                                                        androidx.compose.material3.Surface(
-                                                            color = if (r.matchType == com.makemission.folio.data.search.SearchRepository.MatchType.HIGHLIGHT || r.matchType == com.makemission.folio.data.search.SearchRepository.MatchType.BOOKMARK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                                            shape = RoundedCornerShape(8.dp),
-                                                        ) {
-                                                            Text(badge, style = MaterialTheme.typography.labelSmall, color = if (r.matchType == com.makemission.folio.data.search.SearchRepository.MatchType.HIGHLIGHT || r.matchType == com.makemission.folio.data.search.SearchRepository.MatchType.BOOKMARK) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
-                                                        }
-                                                    }
-                                                    androidx.compose.foundation.layout.Spacer(Modifier.height(4.dp))
-                                                    Text(r.snippet, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+
             }
         },
     ) { paddingValues ->
@@ -1027,6 +1045,26 @@ private fun ReadingScreenContent(
             } else {
                 // Selection "Explain" — extends double-tap flow, same popup/backing dataset, fully offline
                 ExplainSelectionContainer(
+                    onAskFolioRequested = { selected ->
+                        val excerpt = selected.trim().replace(Regex("\\s+"), " ").take(2_400)
+                        if (excerpt.isNotBlank()) {
+                            aiPassage = excerpt
+                            aiAnswer = null
+                            aiLoading = true
+                            aiProgress = "Checking on-device model…"
+                            scope.launch {
+                                try {
+                                    aiAnswer = GeminiNanoAssistant.explainPassage(excerpt) { progress ->
+                                        aiProgress = progress
+                                    }
+                                } catch (error: Exception) {
+                                    aiAnswer = error.message ?: "Gemini Nano could not explain this passage."
+                                } finally {
+                                    aiLoading = false
+                                }
+                            }
+                        }
+                    },
                     onExplainRequested = { selected ->
                         val phrase = selected.trim().replace(Regex("\\s+"), " ").take(140)
                         if (phrase.isNotBlank()) {
@@ -1068,7 +1106,37 @@ private fun ReadingScreenContent(
                         }
                     }
                 ) {
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        if (isTabletLandscape && showTabletContents) {
+                            TabletContentsRail(
+                                chapters = uiState.chapters,
+                                currentChapterIndex = currentBookmarkPos.first,
+                                onChapterClick = { chapterIndex ->
+                                    if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    pendingBookmarkJump = Bookmark(
+                                        bookId = uiState.bookId,
+                                        chapterIndex = chapterIndex,
+                                        paragraphIndex = 0,
+                                    )
+                                },
+                                onMarksClick = { showBookmarks = true },
+                                onHighlightsClick = { showHighlights = true },
+                                background = if (isDark) Color(0xFF242428) else Color(0xFFF2EBD9),
+                                foreground = readingText,
+                                modifier = Modifier
+                                    .width(tabletRailWidth.dp)
+                                    .fillMaxHeight(),
+                            )
+                            TabletRailResizeHandle(
+                                color = readingText.copy(alpha = 0.18f),
+                                onDragBy = { deltaPx ->
+                                    tabletRailWidth = (tabletRailWidth + deltaPx / density).coerceIn(180f, 360f)
+                                },
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                     androidx.compose.animation.AnimatedContent(
+                        modifier = Modifier.fillMaxSize(),
                         targetState = navigationMode,
                         transitionSpec = {
                             fadeIn(animationSpec = tween(durationMillis = 220, easing = LinearOutSlowInEasing)) togetherWith
@@ -1202,11 +1270,13 @@ private fun ReadingScreenContent(
                             }
                         }
                     }
+                        }
                     }
                 }
             }
             }
         }
+    }
     }
 
     if (showMenu) {
@@ -1217,6 +1287,19 @@ private fun ReadingScreenContent(
             contrastEnabled = adaptiveEnabled,
             hasSensor = hasSensor,
             onToggleContrast = { if (hasSensor) { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { settingsRepo.setAdaptiveContrastEnabled(!adaptiveEnabled) } } },
+            keepScreenAwake = keepScreenAwake,
+            onToggleKeepScreenAwake = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { settingsRepo.setKeepScreenAwake(!keepScreenAwake) } },
+            sleepTimerMinutesLeft = sleepTimerMinutesLeft,
+            onSetSleepTimer = { minutes ->
+                sleepTimerExpired = false
+                sleepTimerDeadline = if (minutes > 0) System.currentTimeMillis() + minutes * 60_000L else 0L
+            },
+            pageStyle = readerPageStyle,
+            onSelectPageStyle = { style -> scope.launch { settingsRepo.setReaderPageStyle(style) } },
+            brightness = readerBrightness,
+            onBrightnessChange = { value -> scope.launch { settingsRepo.setReaderBrightness(value) } },
+            navigationMode = navigationMode,
+            onSelectNavigationMode = { mode -> scope.launch { settingsRepo.setReadingNavigationMode(mode) } },
             bookmarksCount = bookmarks.size,
             isCurrentBookmarked = isCurrentBookmarked,
             onToggleBookmark = {
@@ -1225,7 +1308,7 @@ private fun ReadingScreenContent(
                 onToggleBookmark(ch, para)
             },
             onOpenBookmarks = { showBookmarks = true },
-            onToggleSearch = { showInBookSearch = !showInBookSearch },
+            onToggleSearch = { showInBookSearch = true },
             chaptersCount = uiState.chapters.size,
             onOpenChapters = { showChapters = true },
             highlightsCount = highlights.size,
@@ -1242,7 +1325,18 @@ private fun ReadingScreenContent(
             onSelectHighlightColor = { c -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { settingsRepo.setHighlightColor(c) } },
             highlightStyle = highlightStylePref,
             onSelectHighlightStyle = { s -> if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); scope.launch { settingsRepo.setHighlightStyle(s) } },
+            isTablet = isTabletLandscape,
             onDismiss = { showMenu = false },
+        )
+    }
+    if (showInBookSearch) {
+        com.makemission.folio.ui.reader.components.InBookSearchDialog(
+            query = inBookQuery,
+            results = inBookResults,
+            isSearching = isInBookSearching,
+            onQueryChange = onInBookQueryChange,
+            onResultClick = { result -> jumpInBookTo(result.chapterIndex, result.paragraphIndex) },
+            onDismiss = { showInBookSearch = false },
         )
     }
     if (showXRay) {
@@ -1286,6 +1380,8 @@ private fun ReadingScreenContent(
                 )
                 pendingBookmarkJump = synthetic
             },
+            onSaveNote = onSaveHighlightNote,
+            onDeleteHighlight = onDeleteHighlight,
             onDismiss = { showHighlights = false },
         )
     }
@@ -1303,8 +1399,110 @@ private fun ReadingScreenContent(
                 )
                 pendingBookmarkJump = synthetic
             },
+            onOpenBookmarks = { showChapters = false; showBookmarks = true },
+            onOpenHighlights = { showChapters = false; showHighlights = true },
             onDismiss = { showChapters = false },
         )
+    }
+}
+
+@Composable
+private fun ReaderBookmarkIcon(filled: Boolean, color: Color) {
+    Canvas(Modifier.size(22.dp)) {
+        val mark = Path().apply {
+            moveTo(size.width * 0.2f, size.height * 0.08f)
+            lineTo(size.width * 0.8f, size.height * 0.08f)
+            lineTo(size.width * 0.8f, size.height * 0.92f)
+            lineTo(size.width * 0.5f, size.height * 0.72f)
+            lineTo(size.width * 0.2f, size.height * 0.92f)
+            close()
+        }
+        drawPath(mark, color, style = if (filled) androidx.compose.ui.graphics.drawscope.Fill else Stroke(width = 2.dp.toPx()))
+    }
+}
+
+/** A tablet-only table of contents that stays beside the reading spread. */
+@Composable
+private fun TabletContentsRail(
+    chapters: List<EpubParser.EpubChapter>,
+    currentChapterIndex: Int,
+    onChapterClick: (Int) -> Unit,
+    onMarksClick: () -> Unit,
+    onHighlightsClick: () -> Unit,
+    background: Color,
+    foreground: Color,
+    modifier: Modifier = Modifier,
+) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(chapters.size, currentChapterIndex) {
+        if (chapters.isNotEmpty()) {
+            listState.animateScrollToItem(currentChapterIndex.coerceIn(chapters.indices))
+        }
+    }
+    Surface(modifier = modifier, color = background) {
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 16.dp)) {
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(foreground.copy(alpha = 0.08f)).padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                listOf("Contents", "Marks", "Notes").forEachIndexed { index, title ->
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable {
+                            when (index) {
+                                1 -> onMarksClick()
+                                2 -> onHighlightsClick()
+                            }
+                        },
+                        color = if (index == 0) MaterialTheme.colorScheme.surfaceContainerLowest else Color.Transparent,
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Box(Modifier.padding(vertical = 9.dp), contentAlignment = Alignment.Center) {
+                            Text(title, style = MaterialTheme.typography.labelSmall, color = if (index == 0) MaterialTheme.colorScheme.primary else foreground)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                itemsIndexed(chapters, key = { index, _ -> index }) { index, chapter ->
+                    val selected = index == currentChapterIndex
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .semantics {
+                                contentDescription = "Chapter ${index + 1}: ${chapter.title}" +
+                                    if (selected) ", current chapter" else ""
+                            }
+                            .clickable { onChapterClick(index) },
+                        color = if (selected) MaterialTheme.colorScheme.surfaceContainerLowest else Color.Transparent,
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = "${index + 1}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (selected) MaterialTheme.colorScheme.primary else foreground.copy(alpha = 0.54f),
+                            )
+                            Text(
+                                text = chapter.title,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (selected) MaterialTheme.colorScheme.primary else foreground,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1755,6 +1953,31 @@ private fun SingleColumnReadingContent(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun TabletRailResizeHandle(
+    color: Color,
+    onDragBy: (Float) -> Unit,
+) {
+    val currentOnDragBy by rememberUpdatedState(onDragBy)
+    Box(
+        modifier = Modifier
+            .width(18.dp)
+            .fillMaxHeight()
+            .semantics { contentDescription = "Resize table of contents panel" }
+            .pointerInput(Unit) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    currentOnDragBy(dragAmount.x)
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.width(3.dp).fillMaxHeight(0.16f).clip(CircleShape).background(color),
+        )
     }
 }
 

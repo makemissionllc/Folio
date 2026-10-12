@@ -74,6 +74,8 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.documentfile)
     implementation(libs.androidx.splashscreen)
+    implementation(libs.androidx.health.connect)
+    implementation(libs.mlkit.genai.prompt)
 
     ksp(libs.androidx.room.compiler)
 

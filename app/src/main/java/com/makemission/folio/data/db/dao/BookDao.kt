@@ -22,6 +22,9 @@ interface BookDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(book: BookEntity)
 
+    @Query("UPDATE books SET shelfStatus = :status WHERE id = :id")
+    suspend fun setShelfStatus(id: String, status: String)
+
     @Query("DELETE FROM books WHERE id = :id")
     suspend fun delete(id: String)
 }

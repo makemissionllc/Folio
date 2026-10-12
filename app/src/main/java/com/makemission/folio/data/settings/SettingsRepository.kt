@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.documentfile.provider.DocumentFile
@@ -14,6 +15,7 @@ import com.makemission.folio.ui.reader.FolioLineSpacing
 import com.makemission.folio.ui.reader.FolioMargin
 import com.makemission.folio.ui.reader.FolioReadingFont
 import com.makemission.folio.ui.reader.ReadingNavigationMode
+import com.makemission.folio.ui.reader.ReaderPageStyle
 import com.makemission.folio.ui.theme.FolioPalette
 import com.makemission.folio.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.Flow
@@ -33,6 +35,7 @@ class SettingsRepository(private val context: Context) {
         private val KEY_HAS_SEEN_ONBOARDING = booleanPreferencesKey("has_seen_onboarding")
         private val KEY_AUTO_SCAN_ENABLED = booleanPreferencesKey("auto_scan_enabled")
         private val KEY_HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
+        private val KEY_KEEP_SCREEN_AWAKE = booleanPreferencesKey("keep_screen_awake")
         private val KEY_DARK_PALETTE = stringPreferencesKey("dark_palette")
         private val KEY_TIME_TINT_ENABLED = booleanPreferencesKey("time_tint_enabled")
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
@@ -44,8 +47,11 @@ class SettingsRepository(private val context: Context) {
         private val KEY_READING_FONT_SIZE = stringPreferencesKey("reading_font_size")
         private val KEY_READING_LINE_SPACING = stringPreferencesKey("reading_line_spacing")
         private val KEY_READING_MARGIN = stringPreferencesKey("reading_margin")
+        private val KEY_READER_PAGE_STYLE = stringPreferencesKey("reader_page_style")
+        private val KEY_READER_BRIGHTNESS = floatPreferencesKey("reader_brightness")
         private val KEY_HIGHLIGHT_COLOR = stringPreferencesKey("highlight_color")
         private val KEY_HIGHLIGHT_STYLE = stringPreferencesKey("highlight_style")
+        private val KEY_TABLET_COMPACT_LIBRARY_GRID = booleanPreferencesKey("tablet_compact_library_grid")
 
         @Volatile
         private var INSTANCE: SettingsRepository? = null
@@ -97,6 +103,18 @@ class SettingsRepository(private val context: Context) {
     suspend fun setHapticsEnabled(value: Boolean) {
         context.folioSettingsDataStore.edit { prefs ->
             prefs[KEY_HAPTICS_ENABLED] = value
+        }
+    }
+
+    /** Keep the display awake only while the reader is visible. */
+    val keepScreenAwake: Flow<Boolean> =
+        context.folioSettingsDataStore.data.map { prefs ->
+            prefs[KEY_KEEP_SCREEN_AWAKE] ?: false
+        }
+
+    suspend fun setKeepScreenAwake(value: Boolean) {
+        context.folioSettingsDataStore.edit { prefs ->
+            prefs[KEY_KEEP_SCREEN_AWAKE] = value
         }
     }
 
@@ -214,6 +232,21 @@ class SettingsRepository(private val context: Context) {
         context.folioSettingsDataStore.edit { prefs -> prefs[KEY_READING_MARGIN] = margin.name }
     }
 
+    val readerPageStyle: Flow<ReaderPageStyle> =
+        context.folioSettingsDataStore.data.map { prefs -> ReaderPageStyle.fromKey(prefs[KEY_READER_PAGE_STYLE]) }
+
+    suspend fun setReaderPageStyle(style: ReaderPageStyle) {
+        context.folioSettingsDataStore.edit { prefs -> prefs[KEY_READER_PAGE_STYLE] = style.name }
+    }
+
+    /** -1 delegates to the system; otherwise this is a reader-only window override. */
+    val readerBrightness: Flow<Float> =
+        context.folioSettingsDataStore.data.map { prefs -> prefs[KEY_READER_BRIGHTNESS] ?: -1f }
+
+    suspend fun setReaderBrightness(value: Float) {
+        context.folioSettingsDataStore.edit { prefs -> prefs[KEY_READER_BRIGHTNESS] = value.coerceIn(0.05f, 1f) }
+    }
+
     val highlightColor: Flow<FolioHighlightColor> =
         context.folioSettingsDataStore.data.map { prefs ->
             FolioHighlightColor.fromKey(prefs[KEY_HIGHLIGHT_COLOR])
@@ -228,6 +261,14 @@ class SettingsRepository(private val context: Context) {
         }
     suspend fun setHighlightStyle(style: FolioHighlightStyle) {
         context.folioSettingsDataStore.edit { prefs -> prefs[KEY_HIGHLIGHT_STYLE] = style.name }
+    }
+
+    /** Tablet library density preference; roomy covers remain the default. */
+    val tabletCompactLibraryGrid: Flow<Boolean> =
+        context.folioSettingsDataStore.data.map { prefs -> prefs[KEY_TABLET_COMPACT_LIBRARY_GRID] ?: false }
+
+    suspend fun setTabletCompactLibraryGrid(compact: Boolean) {
+        context.folioSettingsDataStore.edit { prefs -> prefs[KEY_TABLET_COMPACT_LIBRARY_GRID] = compact }
     }
 
     fun getFolderDisplayName(uriString: String?): String? {

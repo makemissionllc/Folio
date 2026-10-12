@@ -1,10 +1,12 @@
 package com.makemission.folio.ui.settings
 
 import android.content.Intent
+import android.provider.Settings
 import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.health.connect.client.HealthConnectClient
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -74,12 +76,17 @@ import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.makemission.folio.data.logging.FolioLogger
+import com.makemission.folio.data.ai.GeminiNanoAssistant
 import com.makemission.folio.data.scan.EpubScanner
+import com.makemission.folio.data.work.DeviceScanScheduler
 import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.ui.library.LibraryViewModel
 import com.makemission.folio.ui.reader.ReadingNavigationMode
 import com.makemission.folio.ui.theme.ThemeMode
+import com.makemission.folio.ui.theme.FolioDoodle
+import com.makemission.folio.ui.theme.FolioDoodleKind
 import com.makemission.folio.ui.theme.hasAmbientLightSensor
+import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.launch
 
 /**
@@ -96,6 +103,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onInsightsClick: () -> Unit = {},
     onSmartFeaturesClick: () -> Unit = {},
+    onWhatsNewClick: () -> Unit = {},
+    onInteractiveTourClick: () -> Unit = {},
     onLogsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -103,10 +112,22 @@ fun SettingsScreen(
     val repo = SettingsRepository.get(context)
     val alwaysShow by repo.alwaysShowProgressBar.collectAsState(initial = false)
     val hapticsEnabled by repo.hapticsEnabled.collectAsState(initial = true)
+    val keepScreenAwake by repo.keepScreenAwake.collectAsState(initial = false)
     val autoScanEnabled by repo.autoScanEnabled.collectAsState(initial = true)
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    var nanoAvailability by remember { mutableStateOf<Int?>(null) }
+    val healthConnectStatus = remember(context) {
+        runCatching {
+            HealthConnectClient.getSdkStatus(context, "com.google.android.apps.healthdata")
+        }.getOrDefault(HealthConnectClient.SDK_UNAVAILABLE)
+    }
+
+    LaunchedEffect(Unit) {
+        nanoAvailability = runCatching { GeminiNanoAssistant.availability() }
+            .getOrDefault(FeatureStatus.UNAVAILABLE)
+    }
 
     // Share LibraryViewModel (activity-scoped) so scan progress/snackbar are unified with Library screen
     val activity = context as? ComponentActivity
@@ -117,7 +138,20 @@ fun SettingsScreen(
     }
     val isScanning by libraryViewModel.isScanning.collectAsState()
     val scanProgress by libraryViewModel.scanProgress.collectAsState()
-    val hasPermission = EpubScanner.hasStoragePermission(context)
+    var hasPermission by remember { mutableStateOf(EpubScanner.hasStoragePermission(context)) }
+    var hasWholeDeviceAccess by remember { mutableStateOf(EpubScanner.hasWholeDeviceAccess()) }
+    val allFilesLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        hasWholeDeviceAccess = EpubScanner.hasWholeDeviceAccess()
+        hasPermission = EpubScanner.hasStoragePermission(context)
+        if (hasWholeDeviceAccess && autoScanEnabled) DeviceScanScheduler.enable(context)
+    }
+    val openAllFilesAccess = {
+        try {
+            allFilesLauncher.launch(EpubScanner.allFilesAccessIntent(context))
+        } catch (_: Exception) {
+            allFilesLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+        }
+    }
     val booksFolderUriString by repo.booksFolderUri.collectAsState(initial = null)
     val folderDisplayName = remember(booksFolderUriString) {
         if (!booksFolderUriString.isNullOrBlank()) {
@@ -142,6 +176,8 @@ fun SettingsScreen(
                     val name = DocumentFile.fromTreeUri(context, uri)?.name ?: "Books"
                     snackbarHostState.showSnackbar("Folder selected: $name")
                 }
+                hasPermission = EpubScanner.hasStoragePermission(context)
+                if (autoScanEnabled) DeviceScanScheduler.enable(context)
                 FolioLogger.i("Settings", "Persisted SAF tree permission: $uri")
             } catch (e: Exception) {
                 FolioLogger.w("Settings", "takePersistableUriPermission error: ${e.message}", e)
@@ -153,16 +189,12 @@ fun SettingsScreen(
     // Manual fallback import — ACTION_OPEN_DOCUMENT reusing existing persistParsedEpub pipeline
     // Visually minor (text row, not FAB) since auto-scan / VIEW intent are primary.
     val epubPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri != null) {
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
             try {
-                // Take persistable read permission so we can re-read if needed (best-effort)
-                try {
-                    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                } catch (_: Exception) {}
-                libraryViewModel.importEpub(uri, context)
-                FolioLogger.i("Settings", "Manual add book picked: $uri")
+                libraryViewModel.importEpubs(uris, context)
+                FolioLogger.i("Settings", "Manual batch add picked ${uris.size} books")
             } catch (e: Exception) {
                 FolioLogger.w("Settings", "Manual add book error: ${e.message}", e)
                 scope.launch { snackbarHostState.showSnackbar("Could not add book: ${e.message}") }
@@ -237,6 +269,16 @@ fun SettingsScreen(
                             },
                         )
                         Spacer(modifier = Modifier.height(8.dp))
+                        SettingsToggleRow(
+                            title = "Keep screen awake",
+                            subtitle = "Only while a book is open",
+                            checked = keepScreenAwake,
+                            onCheckedChange = { checked ->
+                                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                scope.launch { repo.setKeepScreenAwake(checked) }
+                            },
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
                         val bionicEnabled by repo.bionicEnabled.collectAsState(initial = false)
                         val adaptiveContrastEnabled by repo.adaptiveContrastEnabled.collectAsState(initial = false)
                         val hasSensor = remember { hasAmbientLightSensor(context) }
@@ -274,22 +316,24 @@ fun SettingsScreen(
                         title = "Library",
                         subtitle = "",
                     ) {
+                        AllFilesAccessRow(hasWholeDeviceAccess, openAllFilesAccess)
                         SettingsToggleRow(
-                            title = "Auto-scan on launch",
+                            title = "Scan while device is idle",
                             subtitle = when {
+                                hasWholeDeviceAccess -> "Searches shared storage"
                                 folderDisplayName != null -> "Searches $folderDisplayName (SAF)"
-                                hasPermission -> "Downloads & Documents"
-                                else -> "Needs permission or folder grant — pick a folder below"
+                                else -> "Allow device access or choose a folder below"
                             },
                             checked = autoScanEnabled,
                             onCheckedChange = { checked ->
                                 if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 scope.launch { repo.setAutoScanEnabled(checked) }
+                                if (checked) DeviceScanScheduler.enable(context) else DeviceScanScheduler.disable(context)
                             },
                         )
                         if (!hasPermission) {
                             Text(
-                                text = "Choose a books folder below or grant storage access in system settings.",
+                                text = "Allow access to search shared storage, or choose a folder below.",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 modifier = Modifier.padding(top = 4.dp),
@@ -328,6 +372,7 @@ fun SettingsScreen(
                                                     } catch (_: Exception) {}
                                                 }
                                                 repo.setBooksFolderUri(null)
+                                                hasPermission = EpubScanner.hasStoragePermission(context)
                                                 snackbarHostState.showSnackbar("Folder grant cleared.")
                                             }
                                         }
@@ -369,8 +414,8 @@ fun SettingsScreen(
                                 )
                                 Text(
                                     text = if (isScanning) (scanProgress ?: "Scanning…")
-                                    else if (folderDisplayName != null) "Search $folderDisplayName & device"
-                                    else "Find new EPUBs",
+                                    else if (folderDisplayName != null) "Search $folderDisplayName during idle time"
+                                    else "Find EPUB and MOBI books during idle time",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 )
@@ -393,7 +438,7 @@ fun SettingsScreen(
                                     ),
                                     shape = RoundedCornerShape(20.dp),
                                 ) {
-                                    Text("Scan", style = MaterialTheme.typography.labelLarge)
+                                    Text("Queue", style = MaterialTheme.typography.labelLarge)
                                 }
                             }
                         }
@@ -406,18 +451,18 @@ fun SettingsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                                 Text(
-                                    text = "Add book manually",
+                                    text = "Add books manually",
                                     style = MaterialTheme.typography.titleSmall,
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
                                 Text(
-                                    text = "Pick an EPUB if scan missed it",
+                                    text = "Pick one or more EPUB or MOBI files",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 )
                             }
                             TextButton(
-                                onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); epubPickerLauncher.launch(arrayOf("application/epub+zip", "application/octet-stream", "*/*")) },
+                                onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); epubPickerLauncher.launch(arrayOf("application/epub+zip", "application/x-mobipocket-ebook", "application/octet-stream", "*/*")) },
                                 modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 36.dp),
                             ) {
                                 Text("Add…", style = MaterialTheme.typography.labelLarge)
@@ -449,6 +494,12 @@ fun SettingsScreen(
                         title = "Smart Features",
                         subtitle = "",
                     ) {
+                        Text(
+                            text = nanoStatusLabel(nanoAvailability),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
                         Button(
                             onClick = onSmartFeaturesClick,
                             colors = ButtonDefaults.buttonColors(
@@ -459,6 +510,21 @@ fun SettingsScreen(
                         ) {
                             Text("Explore", style = MaterialTheme.typography.labelLarge)
                         }
+                    }
+                }
+
+                item {
+                    SettingsSection(title = "What’s New", subtitle = "See the latest Folio features") {
+                        Button(
+                            onClick = onWhatsNewClick,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                        ) { Text("Explore update", style = MaterialTheme.typography.labelLarge) }
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = onInteractiveTourClick) { Text("Take the interactive tour") }
                     }
                 }
 
@@ -551,6 +617,11 @@ fun SettingsScreen(
                         SettingsInfoRow(
                             title = "Caches",
                             subtitle = "Cleared with app data",
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        HealthConnectConnectionCard(
+                            status = healthConnectStatus,
+                            context = context,
                         )
                     }
                 }
@@ -700,6 +771,16 @@ fun SettingsScreen(
                                                     },
                                                 )
                                                 Spacer(Modifier.height(8.dp))
+                                                SettingsToggleRow(
+                                                    title = "Keep screen awake",
+                                                    subtitle = "Only while a book is open",
+                                                    checked = keepScreenAwake,
+                                                    onCheckedChange = { checked ->
+                                                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        scope.launch { repo.setKeepScreenAwake(checked) }
+                                                    },
+                                                )
+                                                Spacer(Modifier.height(8.dp))
                                                 val bionicEnabled by repo.bionicEnabled.collectAsState(initial = false)
                                                 val adaptiveContrastEnabled by repo.adaptiveContrastEnabled.collectAsState(initial = false)
                                                 val hasSensor = remember { hasAmbientLightSensor(context) }
@@ -733,22 +814,24 @@ fun SettingsScreen(
                                         }
                                         SettingsTabletSection.LIBRARY -> {
                                             SettingsSection(title = "Library", subtitle = "") {
+                                                AllFilesAccessRow(hasWholeDeviceAccess, openAllFilesAccess)
                                                 SettingsToggleRow(
-                                                    title = "Auto-scan on launch",
+                                                    title = "Scan while device is idle",
                                                     subtitle = when {
+                                                        hasWholeDeviceAccess -> "Searches shared storage"
                                                         folderDisplayName != null -> "Searches $folderDisplayName (SAF)"
-                                                        hasPermission -> "Downloads & Documents"
-                                                        else -> "Needs permission or folder grant — pick a folder below"
+                                                        else -> "Allow device access or choose a folder below"
                                                     },
                                                     checked = autoScanEnabled,
                                                     onCheckedChange = { checked ->
                                                         if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                         scope.launch { repo.setAutoScanEnabled(checked) }
+                                if (checked) DeviceScanScheduler.enable(context) else DeviceScanScheduler.disable(context)
                                                     },
                                                 )
                                                 if (!hasPermission) {
                                                     Text(
-                                                        text = "Choose a books folder below or grant storage access in system settings.",
+                                                        text = "Allow access to search shared storage, or choose a folder below.",
                                                         style = MaterialTheme.typography.labelSmall,
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                                         modifier = Modifier.padding(top = 4.dp),
@@ -768,6 +851,7 @@ fun SettingsScreen(
                                                                         try { context.contentResolver.releasePersistableUriPermission(Uri.parse(uriStr), Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
                                                                     }
                                                                     repo.setBooksFolderUri(null)
+                                                                    hasPermission = EpubScanner.hasStoragePermission(context)
                                                                     snackbarHostState.showSnackbar("Folder grant cleared.")
                                                                 }
                                                             }) { Text(text = "Clear", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -784,7 +868,7 @@ fun SettingsScreen(
                                                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                                                     Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                                                         Text(text = "Scan device", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
-                                                        Text(text = if (isScanning) (scanProgress ?: "Scanning…") else if (folderDisplayName != null) "Search $folderDisplayName & device" else "Find new EPUBs", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                                                        Text(text = if (isScanning) (scanProgress ?: "Scanning…") else if (folderDisplayName != null) "Search $folderDisplayName during idle time" else "Find EPUB and MOBI books during idle time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                                                     }
                                                     if (isScanning) {
                                                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
@@ -794,16 +878,16 @@ fun SettingsScreen(
                                                             enabled = hasPermission,
                                                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary, disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant, disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                                                             shape = RoundedCornerShape(20.dp),
-                                                        ) { Text("Scan", style = MaterialTheme.typography.labelLarge) }
+                                                        ) { Text("Queue", style = MaterialTheme.typography.labelLarge) }
                                                     }
                                                 }
                                                 Spacer(Modifier.height(4.dp))
                                                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                                                     Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                                                        Text(text = "Add book manually", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
-                                                        Text(text = "Pick an EPUB if scan missed it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                                                        Text(text = "Add books manually", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+                                                        Text(text = "Pick one or more EPUB or MOBI files", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                                                     }
-                                                    TextButton(onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); epubPickerLauncher.launch(arrayOf("application/epub+zip", "application/octet-stream", "*/*")) }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 36.dp)) {
+                                                    TextButton(onClick = { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); epubPickerLauncher.launch(arrayOf("application/epub+zip", "application/x-mobipocket-ebook", "application/octet-stream", "*/*")) }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 36.dp)) {
                                                         Text("Add…", style = MaterialTheme.typography.labelLarge)
                                                     }
                                                 }
@@ -820,11 +904,26 @@ fun SettingsScreen(
                                         }
                                         SettingsTabletSection.SMART -> {
                                             SettingsSection(title = "Smart Features", subtitle = "") {
+                                                Text(text = nanoStatusLabel(nanoAvailability), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                Spacer(Modifier.height(8.dp))
                                                 Button(
                                                     onClick = onSmartFeaturesClick,
                                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary),
                                                     shape = RoundedCornerShape(20.dp),
                                                 ) { Text("Explore", style = MaterialTheme.typography.labelLarge) }
+                                            }
+                                        }
+                                        SettingsTabletSection.WHATS_NEW -> {
+                                            SettingsSection(title = "What’s New", subtitle = "") {
+                                                Text("See the latest reading, library and tablet features.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                Spacer(Modifier.height(8.dp))
+                                                Button(
+                                                    onClick = onWhatsNewClick,
+                                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary),
+                                                    shape = RoundedCornerShape(20.dp),
+                                                ) { Text("Explore update", style = MaterialTheme.typography.labelLarge) }
+                                                Spacer(Modifier.height(8.dp))
+                                                TextButton(onClick = onInteractiveTourClick) { Text("Take the interactive tour") }
                                             }
                                         }
                                         SettingsTabletSection.APPEARANCE -> {
@@ -862,6 +961,8 @@ fun SettingsScreen(
                                                     SettingsInfoRow(title = "Local-only reading", subtitle = "No cloud sync")
                                                     Spacer(Modifier.height(8.dp))
                                                     SettingsInfoRow(title = "Caches", subtitle = "Cleared with app data")
+                                                    Spacer(Modifier.height(14.dp))
+                                                    HealthConnectConnectionCard(status = healthConnectStatus, context = context)
                                                 }
                                                 SettingsSection(title = "Content Disclaimer", subtitle = "") {
                                                     Text(text = "Folio is a reading application only. It does not provide, host, sell, or distribute any books, and does not include any copyrighted content. Any books you read in Folio come from files you choose to open or import yourself, from your own device or from other apps.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -891,6 +992,7 @@ private enum class SettingsTabletSection(val title: String) {
     LIBRARY("Library"),
     INSIGHTS("Insights"),
     SMART("Smart Features"),
+    WHATS_NEW("What’s New"),
     APPEARANCE("Appearance"),
     SUPPORT("Support"),
     PRIVACY("Privacy"),
@@ -912,13 +1014,16 @@ private fun SettingsHeader(
             onClick = onBack,
             modifier = Modifier.padding(bottom = 4.dp).sizeIn(minWidth = 48.dp, minHeight = 48.dp),
         ) {
-            Text("← Back", style = MaterialTheme.typography.labelLarge)
+            Text("‹  Library", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
-        Text(
-            text = "Settings",
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "Settings",
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            FolioDoodle(kind = FolioDoodleKind.SPARK, modifier = Modifier.size(22.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
+        }
     }
 }
 
@@ -967,6 +1072,23 @@ private fun SettingsHero(modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun AllFilesAccessRow(granted: Boolean, onGrant: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text("Whole-device books", style = MaterialTheme.typography.titleSmall)
+            Text(if (granted) "Shared storage access enabled" else "Find books without choosing a folder",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (!granted) Button(onClick = onGrant, shape = RoundedCornerShape(20.dp)) {
+            Text("Allow access")
+        }
+    }
+    Spacer(Modifier.height(12.dp))
+}
+
+@Composable
 private fun SettingsSection(
     title: String,
     subtitle: String,
@@ -976,9 +1098,14 @@ private fun SettingsSection(
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(modifier = Modifier.padding(horizontal = 4.dp)) {
             Text(
-                text = title.uppercase(),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            FolioDoodle(
+                kind = FolioDoodleKind.UNDERLINE,
+                modifier = Modifier.padding(top = 2.dp).size(width = 46.dp, height = 8.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.38f),
             )
             if (subtitle.isNotBlank()) {
                 Text(
@@ -992,13 +1119,66 @@ private fun SettingsSection(
             modifier = Modifier
                 .fillMaxWidth()
                 .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing)),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 content()
             }
+        }
+    }
+}
+
+private fun nanoStatusLabel(status: Int?): String = when (status) {
+    null -> "Checking for on-device Gemini Nano…"
+    FeatureStatus.AVAILABLE -> "Gemini Nano is ready on this device. Ask Folio about a passage while reading."
+    FeatureStatus.DOWNLOADABLE -> "Gemini Nano is supported. Folio prepares it only when you ask for a passage explanation."
+    FeatureStatus.DOWNLOADING -> "Gemini Nano is downloading in Android system services."
+    else -> "Gemini Nano isn’t available on this device. Folio’s existing offline reading tools still work."
+}
+
+@Composable
+private fun HealthConnectConnectionCard(
+    status: Int,
+    context: android.content.Context,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Health Connect",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = when (status) {
+                HealthConnectClient.SDK_AVAILABLE -> "Ready to open when you’re ready. Folio does not request or read health data yet."
+                HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> "Health Connect needs to be installed or updated. Folio does not request or read health data yet."
+                else -> "Health Connect is unavailable here. Folio does not request or read health data yet."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(
+            enabled = status != HealthConnectClient.SDK_UNAVAILABLE,
+            onClick = {
+                runCatching {
+                    if (status == HealthConnectClient.SDK_AVAILABLE) {
+                        context.startActivity(Intent(HealthConnectClient.ACTION_HEALTH_CONNECT_SETTINGS))
+                    } else {
+                        val uri = Uri.parse("market://details?id=com.google.android.apps.healthdata&url=healthconnect%3A%2F%2Fonboarding")
+                        context.startActivity(Intent(Intent.ACTION_VIEW, uri).setPackage("com.android.vending"))
+                    }
+                }
+            },
+        ) {
+            Text(
+                text = when (status) {
+                    HealthConnectClient.SDK_AVAILABLE -> "Open Health Connect settings"
+                    HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> "Install or update Health Connect"
+                    else -> "Unavailable on this device"
+                },
+                style = MaterialTheme.typography.labelLarge,
+            )
         }
     }
 }

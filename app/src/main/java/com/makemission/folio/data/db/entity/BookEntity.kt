@@ -1,6 +1,7 @@
 package com.makemission.folio.data.db.entity
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.PrimaryKey
 
 /**
@@ -25,4 +26,6 @@ data class BookEntity(
     val fileHash: String? = null,
     /** Original display name or device path at import time — for filename/path dedup fallback. */
     val importedFromPath: String? = null,
+    /** Explicit shelf placement. AUTO follows reading progress; WANT and FINISHED are user choices. */
+    @ColumnInfo(defaultValue = "'AUTO'") val shelfStatus: String = "AUTO",
 )

@@ -120,25 +120,25 @@ val FolioSepiaColorScheme: ColorScheme = darkColorScheme(
 )
 
 // Cool Slate — dark blue-slate background, desaturated slate surfaces.
-private val SlateBackground = Color(0xFF0F1A20)
-private val SlateSurface = Color(0xFF14202B)
-private val SlateSurfaceVariant = Color(0xFF233241)
-private val SlateContainerLowest = Color(0xFF080F14)
-private val SlateContainerLow = Color(0xFF0F1A20)
-private val SlateContainer = Color(0xFF233241)
-private val SlateContainerHigh = Color(0xFF2E3E4F)
-private val SlateContainerHighest = Color(0xFF3A4B5E)
+private val SlateBackground = Color(0xFF111114)
+private val SlateSurface = Color(0xFF1B1B1F)
+private val SlateSurfaceVariant = Color(0xFF2A2A30)
+private val SlateContainerLowest = Color(0xFF0D0D10)
+private val SlateContainerLow = Color(0xFF18181C)
+private val SlateContainer = Color(0xFF252529)
+private val SlateContainerHigh = Color(0xFF303036)
+private val SlateContainerHighest = Color(0xFF3B3B42)
 
 val FolioSlateColorScheme: ColorScheme = darkColorScheme(
-    primary = FolioAmber,
-    onPrimary = Color(0xFF0F1A20),
-    primaryContainer = FolioBurgundy,
+    primary = Color(0xFF60A5FA),
+    onPrimary = Color(0xFF071321),
+    primaryContainer = Color(0xFF174579),
     onPrimaryContainer = FolioOffWhite,
-    secondary = FolioAmber,
-    onSecondary = Color(0xFF0F1A20),
-    secondaryContainer = FolioBurgundyContainer,
+    secondary = Color(0xFF60A5FA),
+    onSecondary = Color(0xFF071321),
+    secondaryContainer = Color(0xFF174579),
     onSecondaryContainer = FolioOffWhite,
-    tertiary = FolioAmber,
+    tertiary = Color(0xFFFFD980),
     onTertiary = Color(0xFF0F1A20),
     background = SlateBackground,
     onBackground = FolioOffWhite,
@@ -151,12 +151,12 @@ val FolioSlateColorScheme: ColorScheme = darkColorScheme(
     surfaceContainer = SlateContainer,
     surfaceContainerHigh = SlateContainerHigh,
     surfaceContainerHighest = SlateContainerHighest,
-    outline = FolioAmber.copy(alpha = 0.45f),
+    outline = Color(0xFF60A5FA).copy(alpha = 0.45f),
     outlineVariant = FolioOffWhite.copy(alpha = 0.20f),
     scrim = Color.Black,
     inverseSurface = FolioOffWhite,
     inverseOnSurface = SlateBackground,
-    inversePrimary = FolioBurgundy,
+    inversePrimary = FolioBlue,
 )
 
 /** Resolve dark ColorScheme for [palette]; DEFAULT reuses existing [FolioDarkColorScheme]. */

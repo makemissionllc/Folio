@@ -4,4 +4,14 @@
     <color name="white">#FFFFFFFF</color>
     <!-- Folio splash — deep green brand background (matches FolioDarkColorScheme.background #004F39) -->
     <color name="folio_splash_background">#FF004F39</color>
+    <color name="widget_card_fill">#FFF5F7FA</color>
+    <color name="widget_card_stroke">#FFE1E7EF</color>
+    <color name="widget_eyebrow">#FF536171</color>
+    <color name="widget_title">#FF182638</color>
+    <color name="widget_subtitle">#FF596779</color>
+    <color name="widget_progress_track">#FFD9E1EA</color>
+    <color name="widget_progress">#FF0969DA</color>
+    <color name="widget_library_action">#FF536171</color>
+    <color name="widget_cover_surface">#FFDCE8F5</color>
+    <color name="widget_cover_glyph">#FF315D72</color>
 </resources>

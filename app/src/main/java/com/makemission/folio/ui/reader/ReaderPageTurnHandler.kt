@@ -8,4 +8,7 @@ package com.makemission.folio.ui.reader
  */
 object ReaderPageTurnHandler {
     var onVolumeKey: ((isVolumeUp: Boolean) -> Unit)? = null
+    /** Tablet keyboard bridge: true moves forward; false moves back. */
+    var onKeyboardPageKey: ((isForward: Boolean) -> Unit)? = null
+    var onKeyboardSearch: (() -> Unit)? = null
 }

@@ -5,22 +5,28 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.Observer
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import com.makemission.folio.data.db.FolioDatabase
 import com.makemission.folio.data.db.entity.BookEntity
 import com.makemission.folio.data.epub.EpubParser
+import com.makemission.folio.data.epub.BookFileParser
 import com.makemission.folio.data.logging.FolioLogger
 import com.makemission.folio.data.cache.ParsedBookCache
 import com.makemission.folio.data.cache.TruePageCache
 import com.makemission.folio.data.model.Book
+import com.makemission.folio.data.model.ShelfStatus
 import com.makemission.folio.data.model.FolioCoverPalette
 import com.makemission.folio.data.model.curatedSampleBooks
 import com.makemission.folio.data.scan.EpubScanner
 import com.makemission.folio.data.search.SearchRepository
-import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.data.work.BookProcessingScheduler
+import com.makemission.folio.data.work.DeviceScanScheduler
 import com.makemission.folio.data.xray.XRayCache
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,7 +37,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -40,13 +45,13 @@ import java.io.File
 import java.io.InputStream
 import java.security.MessageDigest
 import java.util.UUID
+import com.makemission.folio.widget.ContinueReadingWidgetProvider
 
 class LibraryViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = FolioDatabase.get(application)
     private val bookDao = db.bookDao()
     private val vocabularyDao = db.vocabularyDao()
-    private val settingsRepo = SettingsRepository.get(application)
 
     private val _importError = MutableSharedFlow<String>(replay = 0)
     val importError = _importError.asSharedFlow()
@@ -54,7 +59,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     private val _isImporting = MutableStateFlow(false)
     val isImporting: StateFlow<Boolean> = _isImporting
 
-    // --- Auto-scan state (subtle loading on Library screen, non-blocking) ---
+    // WorkManager scan state for the Settings progress indicator.
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
@@ -63,6 +68,18 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     private val _scanResult = MutableSharedFlow<String>(replay = 0)
     val scanResult = _scanResult.asSharedFlow()
+
+    private val scanWork = WorkManager.getInstance(application).getWorkInfosByTagLiveData(DeviceScanScheduler.TAG)
+    private val scanObserver = Observer<List<WorkInfo>> { work ->
+        val active = work.firstOrNull { it.state == WorkInfo.State.RUNNING }
+        _isScanning.value = active != null
+        _scanProgress.value = active?.let {
+            val total = it.progress.getInt("found", 0)
+            val checked = it.progress.getInt("checked", 0)
+            val added = it.progress.getInt("added", 0)
+            if (total > 0) "Checking $checked/$total · $added added" else "Finding books…"
+        }
+    }
 
     val dueVocabularyCount = vocabularyDao.observeDueCount()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
@@ -79,6 +96,12 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         observeLibrarySearch()
+        scanWork.observeForever(scanObserver)
+    }
+
+    override fun onCleared() {
+        scanWork.removeObserver(scanObserver)
+        super.onCleared()
     }
 
     @OptIn(FlowPreview::class)
@@ -122,6 +145,14 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
      * Adapted from reference app's COALESCE(NULLIF(last_open_date,0),group_added_date) DESC pattern.
      */
     private val readingProgressDao = db.readingProgressDao()
+    val readBookIds: StateFlow<Set<String>> = readingProgressDao.observeAll()
+        .map { progress -> progress.map { it.bookId }.toSet() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    val continueBookId: StateFlow<String?> = readingProgressDao.observeAll()
+        .map { progress -> progress.maxByOrNull { it.lastReadMillis }?.bookId }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     val books: StateFlow<List<Book>> = combine(
         bookDao.observeAll(),
         readingProgressDao.observeAll()
@@ -135,6 +166,9 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 coverColor = pickCoverColor(e.id),
                 filePath = e.filePath,
                 coverImagePath = e.coverImagePath,
+                shelfStatus = ShelfStatus.fromStored(e.shelfStatus),
+                progressFraction = progressById[e.id]?.progressFraction ?: 0f,
+                lastReadMillis = progressById[e.id]?.lastReadMillis ?: 0L,
             )
         }.sortedWith(
             compareByDescending<Book> { progressById[it.id]?.lastReadMillis ?: 0L }
@@ -165,7 +199,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         hasHandledInitialGridScroll = true
     }
 
-    // ---- Manual SAF import (unchanged flow, now with hash tracking) ----
+    // ---- Manual SAF import ----
 
     fun importEpub(uri: Uri, context: Context) {
         viewModelScope.launch {
@@ -174,14 +208,45 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             try {
                 val result = withContext(Dispatchers.IO) { importInternal(uri, context) }
                 if (result == null) {
-                    FolioLogger.w("Import", "Import parse failed — not an EPUB or corrupted: uri=${uri.toString().take(80)}")
-                    _importError.emit("Could not parse EPUB — file may be corrupted or not an EPUB.")
+                    FolioLogger.w("Import", "Import parse failed: uri=${uri.toString().take(80)}")
+                    _importError.emit("Could not parse this EPUB or MOBI file.")
                 } else {
                     FolioLogger.i("Import", "Import success id=${result.id} title='${result.title.take(60)}'")
                 }
             } catch (e: Exception) {
                 FolioLogger.e("Import", "Import exception: ${e.message}", e)
-                _importError.emit(e.message ?: "Failed to import EPUB.")
+                _importError.emit(e.message ?: "Failed to import book.")
+            } finally {
+                _isImporting.value = false
+            }
+        }
+    }
+
+    /** Imports a multi-selection in order and reports one concise result when complete. */
+    fun importEpubs(uris: List<Uri>, context: Context) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            _isImporting.value = true
+            var imported = 0
+            var failed = 0
+            try {
+                uris.forEachIndexed { index, uri ->
+                    try {
+                        val result = withContext(Dispatchers.IO) { importInternal(uri, context) }
+                        if (result == null) failed++ else imported++
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (e: Exception) {
+                        failed++
+                        FolioLogger.w("Import", "Batch item ${index + 1}/${uris.size} failed: ${e.message}", e)
+                    }
+                }
+                val message = when {
+                    imported > 0 && failed > 0 -> "Added $imported books. $failed file${if (failed == 1) "" else "s"} couldn't be read."
+                    imported > 0 -> "Added $imported book${if (imported == 1) "" else "s"}."
+                    else -> "Couldn't read any of the selected books."
+                }
+                _scanResult.emit(message)
             } finally {
                 _isImporting.value = false
             }
@@ -195,7 +260,15 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             if (c.moveToFirst() && idx >= 0) c.getString(idx) else null
         } ?: "book_${System.currentTimeMillis()}.epub"
 
-        val safeName = displayName.takeIf { it.endsWith(".epub", ignoreCase = true) } ?: "$displayName.epub"
+        val cleanName = displayName.substringAfterLast('/').substringAfterLast('\\')
+            .replace(Regex("[^A-Za-z0-9._ -]"), "_")
+        val extension = when {
+            cleanName.endsWith(".mobi", true) -> ".mobi"
+            cleanName.endsWith(".epub", true) -> ".epub"
+            resolver.getType(uri)?.contains("mobipocket", true) == true -> ".mobi"
+            else -> ".epub"
+        }
+        val safeName = cleanName.substringBeforeLast('.').take(90).ifBlank { "book" } + extension
         val booksDir = File(context.filesDir, "books").apply { mkdirs() }
 
         // Copy to a temp file first so we can parse without yet committing to DB
@@ -213,8 +286,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
      * Shared import pipeline — MINIMAL at import time (copy + title/author/cover for grid).
      * Does NOT run full X-Ray extraction or heavy indexing here. Those are scheduled
      * via WorkManager to run in the background (chapter-by-chapter) so import feels instant.
-     * Title/author are extracted via lightweight OPF metadata parse (no full chapter HTMl parse).
-     * Reused by both manual SAF import and device auto-scan.
+     * EPUB title/author and cover are read directly from ZIP entries without parsing chapters.
      */
     private suspend fun persistParsedEpub(
         tmpFile: File,
@@ -225,19 +297,23 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     ): BookEntity? {
         // Quick validation: ensure file looks like a ZIP/EPUB (has OPF) via lightweight metadata
         // We still need a title — use fast metadata extraction, not full chapter parse
-        val metadata = EpubParser.extractMetadata(tmpFile)
+        val metadata = BookFileParser.metadata(tmpFile)
         // Fallback: if metadata extraction fails (no OPF), try quick full parse as validation
         // but only to check emptiness; heavy X-Ray etc is still deferred.
         val resolvedMetadata = metadata ?: run {
             // Last resort: attempt full parse to get title/author, but this is still lighter than X-Ray
-            val epub = EpubParser.parse(tmpFile)
+            val epub = BookFileParser.parse(tmpFile)
             if (epub == null || epub.chapters.isEmpty()) {
                 tmpFile.delete()
                 return null
             }
             EpubParser.EpubMetadata(title = epub.title, author = epub.author)
         }
-        val title = resolvedMetadata.title.ifBlank { safeName.removeSuffix(".epub") }
+        if (tmpFile.extension.equals("mobi", true) && BookFileParser.parse(tmpFile) == null) {
+            tmpFile.delete()
+            return null
+        }
+        val title = resolvedMetadata.title.ifBlank { safeName.substringBeforeLast('.') }
         val author = resolvedMetadata.author
 
         // Check for re-import: same title already exists → reuse its id so highlights can be LCS-reanchored
@@ -269,7 +345,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         val finalHash = sourceHash ?: computeSha256(destFile)
 
         // Extract cover image if present (saved under covers/<id>.jpg) — lightweight, needed for grid
-        val coverPath = EpubParser.extractCoverToFile(destFile, context, id)
+        val coverPath = if (destFile.extension.equals("epub", true)) EpubParser.extractCoverToFile(destFile, context, id) else null
 
         // If this was a reimport, delete old file if path changed (we already moved)
         if (existing != null && existing.filePath != destFile.absolutePath) {
@@ -284,6 +360,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             coverImagePath = coverPath,
             fileHash = finalHash,
             importedFromPath = originalPathOrName,
+            shelfStatus = existing?.shelfStatus ?: ShelfStatus.AUTO.name,
         )
         withContext(Dispatchers.IO) {
             bookDao.insert(entity)
@@ -292,6 +369,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             try { ParsedBookCache.invalidate(context, id) } catch (_: Exception) {}
             try { TruePageCache.invalidate(context, id) } catch (_: Exception) {}
         }
+        ContinueReadingWidgetProvider.refresh(context)
         // Schedule background heavy processing (X-Ray chapter-by-chapter, full parse caching) — soon but not blocking
         try { BookProcessingScheduler.schedule(context, id, finalHash) } catch (_: Exception) {}
         return entity
@@ -301,152 +379,15 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     fun hasStoragePermission(context: Context): Boolean = EpubScanner.hasStoragePermission(context)
 
-    /**
-     * Scan device storage for EPUBs (Downloads, Documents, general external storage, and SAF folder grant)
-     * and import any not already in the library. Uses [EpubScanner.scan] and reuses [persistParsedEpub] so
-     * the private-storage copy + EpubParser + Room path is identical to manual import (don't duplicate logic).
-     * Skips duplicates by file content hash or filename/path tracking. Runs off the UI thread and updates
-     * [isScanning]/[scanProgress]. If permission denied and no SAF grant, does nothing.
-     */
+    /** Queues a shared-storage scan for the next battery-safe idle period. */
     fun scanDevice(context: Context) {
-        if (_isScanning.value) return
         viewModelScope.launch {
-            FolioLogger.i("Scan", "scanDevice started")
             if (!EpubScanner.hasStoragePermission(context)) {
-                FolioLogger.w("Scan", "scanDevice permission denied")
-                _scanResult.emit("Storage permission or books folder grant required — auto-scan unavailable.")
+                _scanResult.emit("Allow all-files access, or choose a books folder, to scan books.")
                 return@launch
             }
-            _isScanning.value = true
-            _scanProgress.value = "Scanning..."
-            try {
-                val configuredFolder = settingsRepo.booksFolderUri.firstOrNull()?.let {
-                    try { Uri.parse(it) } catch (_: Exception) { null }
-                }
-                val scanResult = withContext(Dispatchers.IO) {
-                    EpubScanner.scan(context, configuredFolder)
-                }
-                val found = scanResult.items
-                val deepFoldersSkipped = scanResult.deepFoldersSkipped
-                val isTruncated = scanResult.isTruncated
-                val tooDeepSuffix = if (deepFoldersSkipped > 0) {
-                    val folderWord = if (deepFoldersSkipped == 1) "1 folder was" else "$deepFoldersSkipped folders were"
-                    " ($folderWord too deep to search)"
-                } else ""
-                val truncatedSuffix = if (isTruncated) {
-                    " — showing first ${found.size} (safety cap ${EpubScanner.MAX_FILES}; folder contains more — narrow your books folder if needed)"
-                } else ""
-
-                if (found.isEmpty()) {
-                    _scanProgress.value = null
-                    _scanResult.emit("No EPUB files found on device$tooDeepSuffix.")
-                    return@launch
-                }
-                // Load existing for deduplication (hash + path)
-                val existing = withContext(Dispatchers.IO) { try { bookDao.getAll() } catch (_: Exception) { emptyList() } }
-                // Build existing hash set (compute missing legacy hashes lazily)
-                // Hash is primary (content), exact path is secondary, displayName only as fallback when hash unavailable.
-                val existingHashes = mutableSetOf<String>()
-                val existingPaths = mutableSetOf<String>()
-                for (e in existing) {
-                    e.fileHash?.let { existingHashes.add(it) }
-                    e.importedFromPath?.let { existingPaths.add(it) }
-                    // Also add de-prefixed private filename (books/<id>_<name> -> <name>) for fallback
-                    try {
-                        val name = File(e.filePath).name
-                        existingPaths.add(name)
-                        val dePrefixed = if ("_" in name) name.substringAfter("_") else name
-                        existingPaths.add(dePrefixed)
-                        existingPaths.add(dePrefixed.lowercase())
-                    } catch (_: Exception) {}
-                    // Legacy rows with null hash: compute from private file for accurate dedup
-                    if (e.fileHash == null) {
-                        try {
-                            val pf = File(e.filePath)
-                            if (pf.exists() && pf.isFile) {
-                                computeSha256(pf)?.let { existingHashes.add(it) }
-                            }
-                        } catch (_: Exception) {}
-                    }
-                }
-
-                var imported = 0
-                var skipped = 0
-                for ((idx, item) in found.withIndex()) {
-                    _scanProgress.value = "Scanning ${idx + 1}/${found.size} · ${imported} new"
-                    // --- Deduplication: hash primary, exact path secondary, displayName fallback ---
-                    // Compute hash first (content-accurate, handles same file via SAF vs file-walk vs MediaStore)
-                    val foundHash = withContext(Dispatchers.IO) {
-                        item.file?.let { computeSha256(it) } ?: item.uri?.let { computeSha256(context, it) }
-                    }
-                    val isHashDuplicate = foundHash != null && existingHashes.contains(foundHash)
-                    val isExactPathDuplicate = existingPaths.contains(item.originalPathOrUri)
-                    // DisplayName fallback only when hash unavailable (e.g., read failed) — avoids false positive for distinct books same name
-                    val isNameFallbackDuplicate = foundHash == null && (
-                        existingPaths.contains(item.displayName) || existingPaths.contains(item.displayName.lowercase())
-                    )
-                    val isDuplicate = isHashDuplicate || isExactPathDuplicate || isNameFallbackDuplicate
-                    if (isDuplicate) {
-                        skipped++
-                        continue
-                    }
-                    // Copy to private storage temp and reuse import pipeline
-                    val safeName = item.displayName.takeIf { it.endsWith(".epub", ignoreCase = true) } ?: "${item.displayName}.epub"
-                    val booksDir = File(context.filesDir, "books").apply { mkdirs() }
-                    val tmpScan = File(booksDir, "scan_tmp_${UUID.randomUUID()}_$safeName")
-                    try {
-                        withContext(Dispatchers.IO) {
-                            if (item.file != null) {
-                                item.file.copyTo(tmpScan, overwrite = true)
-                            } else if (item.uri != null) {
-                                context.contentResolver.openInputStream(item.uri)?.use { input ->
-                                    tmpScan.outputStream().use { outStream -> input.copyTo(outStream) }
-                                } ?: throw IllegalStateException("Cannot read stream for ${item.uri}")
-                            } else {
-                                throw IllegalStateException("Both file and uri are null for ${item.displayName}")
-                            }
-                        }
-                    } catch (e: Exception) {
-                        FolioLogger.w("Scan", "Failed to copy ${item.displayName}: ${e.message}", e)
-                        try { tmpScan.delete() } catch (_: Exception) {}
-                        continue
-                    }
-                    // Reuse shared pipeline (same private copy + EpubParser + Room as manual import)
-                    val result = withContext(Dispatchers.IO) {
-                        persistParsedEpub(tmpScan, safeName, context, originalPathOrName = item.originalPathOrUri, sourceHash = foundHash)
-                    }
-                    if (result != null) {
-                        foundHash?.let { existingHashes.add(it) }
-                        existingPaths.add(item.originalPathOrUri)
-                        existingPaths.add(item.displayName)
-                        imported++
-                    } else {
-                        // Parse failed or empty
-                        skipped++
-                    }
-                    // Cooperative yield: loop processes one file at a time (copy → lightweight
-                    // OPF metadata → cover → Room) on Dispatchers.IO, so holding 300
-                    // ScannedBookSource refs in memory is trivial (KBs, not parsed books).
-                    // Heavy parse + X-Ray are deferred per-book to BookProcessingWorker,
-                    // which throttles to 2 concurrent via Semaphore(2) and queues the rest
-                    // — 300 queued is a queue, not a burst, so no OOM/ANR (Session 43 fixes).
-                    // No artificial 80-item cap: all found files are processed in batches,
-                    // updating scanProgress each iteration so the UI stays responsive.
-                }
-                _scanProgress.value = null
-                FolioLogger.i("Scan", "Scan done found=${found.size} imported=$imported skipped=$skipped deepFoldersSkipped=$deepFoldersSkipped truncated=$isTruncated")
-                when {
-                    imported > 0 -> _scanResult.emit("Scan complete: $imported new book(s) added${if (skipped > 0) ", $skipped already in library" else ""}$tooDeepSuffix$truncatedSuffix.")
-                    else -> _scanResult.emit("Scan complete: no new books (${found.size} found, all already imported)$tooDeepSuffix$truncatedSuffix.")
-                }
-            } catch (e: Exception) {
-                FolioLogger.e("Scan", "Scan failed: ${e.message}", e)
-                _scanProgress.value = null
-                _scanResult.emit(e.message ?: "Scan failed.")
-            } finally {
-                _isScanning.value = false
-                _scanProgress.value = null
-            }
+            DeviceScanScheduler.requestScan(context, manual = true)
+            _scanResult.emit("EPUB and MOBI scan queued for when your device is idle.")
         }
     }
 
@@ -475,6 +416,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                     try { TruePageCache.invalidate(context, book.id) } catch (_: Exception) {}
                     try { BookProcessingScheduler.cancel(context, book.id) } catch (_: Exception) {}
                 }
+                ContinueReadingWidgetProvider.refresh(context, force = true)
                 FolioLogger.i("Library", "Removed book ${book.id} ${book.title.take(60)}")
                 _scanResult.emit("Removed \"${book.title}\"")
             } catch (e: Exception) {
@@ -494,6 +436,34 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 FolioLogger.w("Library", "Reset progress failed $bookId: ${e.message}", e)
                 _scanResult.emit("Could not reset progress")
             }
+        }
+    }
+
+    fun setShelfStatus(book: Book, status: ShelfStatus) {
+        if (isCuratedBook(book)) return
+        viewModelScope.launch {
+            if (updateShelfStatus(book, status)) {
+                _scanResult.emit(when (status) {
+                    ShelfStatus.WANT -> "Moved to Want to Read"
+                    ShelfStatus.FINISHED -> "Marked Finished"
+                    ShelfStatus.AUTO -> "Moved back to All Books"
+                })
+            } else {
+                _scanResult.emit("Could not update book status")
+            }
+        }
+    }
+
+    /** Apply a shelf change without a transient message so the screen can offer Undo. */
+    suspend fun updateShelfStatus(book: Book, status: ShelfStatus): Boolean {
+        if (isCuratedBook(book)) return false
+        return try {
+            withContext(Dispatchers.IO) { bookDao.setShelfStatus(book.id, status.name) }
+            ContinueReadingWidgetProvider.refresh(getApplication<Application>(), force = true)
+            true
+        } catch (e: Exception) {
+            FolioLogger.w("Library", "Could not update shelf for ${book.id}: ${e.message}", e)
+            false
         }
     }
 

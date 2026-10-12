@@ -1,6 +1,7 @@
 package com.makemission.folio.data.db.entity
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.PrimaryKey
 
 /**
@@ -52,10 +53,12 @@ data class Highlight(
     /** Highlight style — FILL (Multiply fill, default) or UNDERLINE, persisted per highlight. */
     val style: String = "FILL",
     /** Text-attached: paragraph index within chapter, -1 = legacy stroke-only. */
-    val paragraphIndex: Int = -1,
+    @ColumnInfo(defaultValue = "-1") val paragraphIndex: Int = -1,
     /** Text-attached: start character offset within paragraph (inclusive), -1 = legacy. */
-    val startOffset: Int = -1,
+    @ColumnInfo(defaultValue = "-1") val startOffset: Int = -1,
     /** Text-attached: end character offset within paragraph (exclusive), -1 = legacy. */
-    val endOffset: Int = -1,
+    @ColumnInfo(defaultValue = "-1") val endOffset: Int = -1,
+    /** Reader-authored note attached to this highlighted passage. */
+    @ColumnInfo(defaultValue = "''") val note: String = "",
     val createdAt: Long = System.currentTimeMillis(),
 )

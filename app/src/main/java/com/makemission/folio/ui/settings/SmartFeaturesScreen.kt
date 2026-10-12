@@ -36,6 +36,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
+import com.makemission.folio.ui.theme.FolioDoodle
+import com.makemission.folio.ui.theme.FolioDoodleKind
 
 private data class SmartFeature(
     val number: String,
@@ -194,11 +196,14 @@ private fun SmartFeaturesHeader(
         TextButton(onClick = onBack, modifier = Modifier.padding(bottom = 4.dp)) {
             Text("← Back", style = MaterialTheme.typography.labelLarge)
         }
-        Text(
-            text = "Smart Features",
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "Smart Features",
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            FolioDoodle(kind = FolioDoodleKind.SPARK, modifier = Modifier.size(22.dp), color = MaterialTheme.colorScheme.tertiary)
+        }
         Text(
             text = "A thoughtful guide to Folio’s quiet intelligence",
             style = MaterialTheme.typography.bodySmall,

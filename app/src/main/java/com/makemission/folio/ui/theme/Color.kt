@@ -19,10 +19,14 @@ val FolioAmber = Color(0xFFF7B538)
 val FolioDeepGreenDark = Color(0xFF003325)
 val FolioDeepGreenContainer = Color(0xFF0B5C45)
 val FolioBurgundyContainer = Color(0xFF9A1B26)
-val FolioPaper = Color(0xFFFBF6EC)
-val FolioPaperContainer = Color(0xFFF1E8D2)
-val FolioInk = Color(0xFF1C1B17)
+// Neutral, system-like surfaces keep the reading brand present without
+// tinting every screen cream or green.
+val FolioPaper = Color(0xFFF5F5F7)
+val FolioPaperContainer = Color(0xFFE9E9ED)
+val FolioInk = Color(0xFF1D1D1F)
 val FolioOffWhite = Color(0xFFFFF8E7)
+val FolioBlue = Color(0xFF0969DA)
+val FolioReadingPaper = Color(0xFFFBF6EA)
 
 /**
  * Dark scheme is the Folio default: deep-green surfaces with amber accents.
@@ -63,14 +67,14 @@ val FolioDarkColorScheme = darkColorScheme(
  * primary, burgundy for active states, amber reserved for highlights.
  */
 val FolioLightColorScheme = lightColorScheme(
-    primary = FolioDeepGreen,
+    primary = FolioBlue,
     onPrimary = Color.White,
-    primaryContainer = FolioDeepGreenContainer,
-    onPrimaryContainer = Color.White,
-    secondary = FolioBurgundy,
+    primaryContainer = Color(0xFFDDEBFF),
+    onPrimaryContainer = Color(0xFF06468E),
+    secondary = FolioBlue,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFF3D9C8),
-    onSecondaryContainer = FolioBurgundy,
+    secondaryContainer = Color(0xFFDDEBFF),
+    onSecondaryContainer = Color(0xFF06468E),
     tertiary = Color(0xFF9A6B0A),
     onTertiary = Color.White,
     tertiaryContainer = FolioAmber,
@@ -84,10 +88,10 @@ val FolioLightColorScheme = lightColorScheme(
     surfaceContainerLowest = Color.White,
     surfaceContainerLow = FolioPaper,
     surfaceContainer = FolioPaperContainer,
-    surfaceContainerHigh = Color(0xFFE7DCC2),
-    surfaceContainerHighest = Color(0xFFDCD0B4),
-    outline = FolioDeepGreen.copy(alpha = 0.4f),
-    outlineVariant = FolioDeepGreen.copy(alpha = 0.16f),
+    surfaceContainerHigh = Color(0xFFE1E1E6),
+    surfaceContainerHighest = Color(0xFFD6D6DC),
+    outline = Color(0xFF8E8E93).copy(alpha = 0.42f),
+    outlineVariant = Color(0xFF8E8E93).copy(alpha = 0.18f),
     scrim = Color.Black,
     inverseSurface = FolioDeepGreen,
     inverseOnSurface = FolioOffWhite,

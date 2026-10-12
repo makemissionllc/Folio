@@ -1,10 +1,5 @@
 package com.makemission.folio.ui.onboarding
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import android.content.res.Configuration
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -44,7 +39,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import com.makemission.folio.data.settings.SettingsRepository
 import kotlinx.coroutines.launch
 
@@ -65,30 +59,6 @@ fun OnboardingScreen(
     val repo = remember { SettingsRepository.get(context) }
 
     val pagerState = rememberPagerState(pageCount = { 5 })
-    // Permission state tracking
-    var storageGranted by remember {
-        mutableStateOf(checkStorageGranted(context))
-    }
-    var notificationsGranted by remember {
-        mutableStateOf(checkNotificationsGranted(context))
-    }
-    var storageRequested by remember { mutableStateOf(false) }
-    var notificationsRequested by remember { mutableStateOf(false) }
-
-    val storageLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        storageRequested = true
-        // If any granted, consider granted
-        storageGranted = results.values.any { it } || checkStorageGranted(context)
-    }
-    val notificationsLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        notificationsRequested = true
-        notificationsGranted = granted || checkNotificationsGranted(context)
-    }
-
     val configuration = LocalConfiguration.current
     val isTablet = remember(configuration) {
         configuration.screenWidthDp >= 840 && configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -139,25 +109,7 @@ fun OnboardingScreen(
                     0 -> OnboardingPageWelcome()
                     1 -> OnboardingPageStylus()
                     2 -> OnboardingPageSmart()
-                    3 -> OnboardingPagePrivacy(
-                        storageGranted = storageGranted,
-                        storageRequested = storageRequested,
-                        notificationsGranted = notificationsGranted,
-                        notificationsRequested = notificationsRequested,
-                        onRequestStorage = {
-                            val perms = storagePermissions()
-                            if (perms.isNotEmpty()) storageLauncher.launch(perms)
-                            else storageRequested = true
-                        },
-                        onRequestNotifications = {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                notificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            } else {
-                                notificationsRequested = true
-                                notificationsGranted = true
-                            }
-                        },
-                    )
+                    3 -> OnboardingPagePrivacy()
                     4 -> OnboardingPageDisclaimer()
                 }
             }
@@ -313,15 +265,7 @@ private fun OnboardingPageSmart(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun OnboardingPagePrivacy(
-    storageGranted: Boolean,
-    storageRequested: Boolean,
-    notificationsGranted: Boolean,
-    notificationsRequested: Boolean,
-    onRequestStorage: () -> Unit,
-    onRequestNotifications: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+private fun OnboardingPagePrivacy(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier.fillMaxSize().padding(horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -337,7 +281,7 @@ private fun OnboardingPagePrivacy(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Books, progress, highlights and vocabulary stay on-device via Room. No account, no tracking. Permissions below help Folio find books and keep you updated — but you can always import manually.",
+            text = "Your books, notes and reading progress stay on this device. Folio works offline, with no account or tracking. Add a few books when you’re ready; whole-device scanning is optional.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -350,36 +294,17 @@ private fun OnboardingPagePrivacy(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                PermissionRow(
-                    title = "Files & storage",
-                    subtitle = "Find EPUBs automatically on your device (for auto-scanning). Without this, use Settings → Library → Add book manually or choose a folder via SAF.",
-                    granted = storageGranted,
-                    requested = storageRequested,
-                    onRequest = onRequestStorage,
-                )
-                PermissionRow(
-                    title = "Notifications",
-                    subtitle = "For future reading reminders and vocabulary due alerts. Optional.",
-                    granted = notificationsGranted,
-                    requested = notificationsRequested,
-                    onRequest = onRequestNotifications,
-                )
-                if (storageRequested && !storageGranted) {
-                    Text(
-                        text = "Storage permission denied — you can still import books manually via Settings → Library → Add book manually or pick a folder via SAF.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (notificationsRequested && !notificationsGranted) {
-                    Text(
-                        text = "Notifications denied — Folio will remain silent. You can enable later in system settings.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                OnboardingChoiceRow("Start simply", "Use Add Books to choose EPUB or MOBI files. No extra access is needed.")
+                OnboardingChoiceRow("Scan when you want", "Enable whole-device scanning later in Settings → Library. Folio waits for idle conditions.")
             }
         }
+        Spacer(Modifier.height(14.dp))
+        Text(
+            "After setup, open Settings → What’s New → Take the interactive tour for hands-on previews.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -419,38 +344,16 @@ private fun OnboardingPageDisclaimer(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun PermissionRow(
-    title: String,
-    subtitle: String,
-    granted: Boolean,
-    requested: Boolean,
-    onRequest: () -> Unit,
-) {
+private fun OnboardingChoiceRow(title: String, description: String) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
     ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(text = title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
-            Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (granted) {
-                Text(text = "✓ Granted", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-            } else if (requested) {
-                Text(text = "Not granted — manual import still works", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        if (!granted) {
-            TextButton(onClick = onRequest) {
-                Text("Allow")
-            }
-        } else {
-            Text(
-                text = "Done",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 12.dp),
-            )
+        Text("✓", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -549,28 +452,5 @@ private fun OnboardingIllustrationPrivacy(modifier: Modifier = Modifier) {
             // lock
             drawRoundRect(color = burgundy, topLeft = center.copy(x = center.x - 6f, y = center.y + 8f), size = androidx.compose.ui.geometry.Size(12f, 10f))
         }
-    }
-}
-
-private fun storagePermissions(): Array<String> {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        arrayOf(
-            Manifest.permission.READ_MEDIA_IMAGES,
-        )
-    } else {
-        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-    }
-}
-
-private fun checkStorageGranted(context: android.content.Context): Boolean {
-    val perms = storagePermissions()
-    return perms.any { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
-}
-
-private fun checkNotificationsGranted(context: android.content.Context): Boolean {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-    } else {
-        true // not applicable pre-33
     }
 }

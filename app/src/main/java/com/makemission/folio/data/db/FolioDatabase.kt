@@ -25,9 +25,17 @@ private val MIGRATION_10_11 = object : Migration(10, 11) {
     }
 }
 
+private val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE books ADD COLUMN shelfStatus TEXT NOT NULL DEFAULT 'AUTO'")
+        db.execSQL("ALTER TABLE highlights ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE reading_progress ADD COLUMN progressFraction REAL NOT NULL DEFAULT 0")
+    }
+}
+
 @Database(
     entities = [ReadingProgress::class, Highlight::class, BookEntity::class, VocabularyCard::class, Bookmark::class],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 abstract class FolioDatabase : RoomDatabase() {
@@ -49,7 +57,7 @@ abstract class FolioDatabase : RoomDatabase() {
                     FolioDatabase::class.java,
                     "folio.db",
                 )
-                    .addMigrations(MIGRATION_10_11)
+                    .addMigrations(MIGRATION_10_11, MIGRATION_11_12)
                     .fallbackToDestructiveMigration(true)
                     .build().also { INSTANCE = it }
             }

@@ -21,6 +21,10 @@ import com.makemission.folio.ui.reader.ReaderPageTurnHandler
 import com.makemission.folio.ui.theme.FolioPalette
 import com.makemission.folio.ui.theme.FolioTheme
 import com.makemission.folio.ui.theme.ThemeMode
+import com.makemission.folio.widget.WidgetNavigation
+import com.makemission.folio.widget.WidgetNavigationRequest
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Single-activity Compose entry point — navigation host lives here.
@@ -30,6 +34,7 @@ import com.makemission.folio.ui.theme.ThemeMode
  * to the Reader for one-handed page turns when it is visible.
  */
 class MainActivity : ComponentActivity() {
+    private val widgetNavigation = MutableStateFlow<WidgetNavigationRequest?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Modern SplashScreen API — no hand-rolled delay; system shows
@@ -38,11 +43,13 @@ class MainActivity : ComponentActivity() {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         handleEpubViewIntent(intent)
+        handleWidgetIntent(intent)
         enableEdgeToEdge()
         setContent {
             val repo = SettingsRepository.get(this)
             val palette by repo.darkPalette.collectAsState(initial = FolioPalette.SLATE)
             val themeMode by repo.themeMode.collectAsState(initial = ThemeMode.AUTO)
+            val widgetRequest by widgetNavigation.asStateFlow().collectAsState()
             val systemDark = isSystemInDarkTheme()
             val isDark = when (themeMode) {
                 ThemeMode.LIGHT -> false
@@ -56,7 +63,10 @@ class MainActivity : ComponentActivity() {
                 label = "theme_crossfade",
             ) { (dark, pal) ->
                 FolioTheme(darkTheme = dark, palette = pal) {
-                    FolioNavHost()
+                    FolioNavHost(
+                        widgetNavigationRequest = widgetRequest,
+                        onWidgetNavigationHandled = { widgetNavigation.value = null },
+                    )
                 }
             }
         }
@@ -66,16 +76,30 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleEpubViewIntent(intent)
+        handleWidgetIntent(intent)
+    }
+
+    private fun handleWidgetIntent(intent: Intent?) {
+        when (intent?.action) {
+            WidgetNavigation.ACTION_OPEN_READER -> {
+                val id = intent.getStringExtra(WidgetNavigation.EXTRA_BOOK_ID) ?: return
+                val title = intent.getStringExtra(WidgetNavigation.EXTRA_BOOK_TITLE).orEmpty()
+                widgetNavigation.value = WidgetNavigationRequest(id, title)
+            }
+            WidgetNavigation.ACTION_OPEN_LIBRARY -> {
+                widgetNavigation.value = WidgetNavigationRequest()
+            }
+        }
     }
 
     private fun handleEpubViewIntent(intent: Intent?) {
         if (intent?.action != Intent.ACTION_VIEW) return
         val uri = intent.data ?: return
-        // Only handle epub-like intents (mime or extension) — reuse existing import pipeline, no duplication
-        val isEpub = intent.type?.contains("epub", ignoreCase = true) == true ||
-            intent.type == "application/octet-stream" && uri.toString().contains(".epub", ignoreCase = true) ||
-            uri.toString().contains(".epub", ignoreCase = true)
-        if (!isEpub && intent.type != "*/*") return
+        val isBook = intent.type?.contains("epub", ignoreCase = true) == true ||
+            intent.type?.contains("mobipocket", ignoreCase = true) == true ||
+            uri.toString().endsWith(".epub", ignoreCase = true) ||
+            uri.toString().endsWith(".mobi", ignoreCase = true)
+        if (!isBook && intent.type != "*/*" && intent.type != "application/octet-stream") return
         try {
             val vm = ViewModelProvider(this)[LibraryViewModel::class.java]
             vm.importEpub(uri, this)
@@ -83,6 +107,18 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (event?.isCtrlPressed == true && keyCode == KeyEvent.KEYCODE_F) {
+            ReaderPageTurnHandler.onKeyboardSearch?.let { openSearch ->
+                openSearch()
+                return true
+            }
+        }
+        if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_PAGE_DOWN) {
+            ReaderPageTurnHandler.onKeyboardPageKey?.let { turnPage ->
+                turnPage(keyCode == KeyEvent.KEYCODE_PAGE_DOWN)
+                return true
+            }
+        }
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
             ReaderPageTurnHandler.onVolumeKey?.let { handler ->
                 handler(keyCode == KeyEvent.KEYCODE_VOLUME_UP)

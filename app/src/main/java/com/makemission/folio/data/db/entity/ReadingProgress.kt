@@ -1,6 +1,7 @@
 package com.makemission.folio.data.db.entity
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.PrimaryKey
 
 /**
@@ -12,5 +13,7 @@ data class ReadingProgress(
     @PrimaryKey val bookId: String,
     val chapterIndex: Int = 0,
     val paragraphIndex: Int = 0,
+    /** Approximate whole-book position, 0..1, captured while reading. */
+    @ColumnInfo(defaultValue = "0") val progressFraction: Float = 0f,
     val lastReadMillis: Long = System.currentTimeMillis(),
 )

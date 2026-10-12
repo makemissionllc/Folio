@@ -3,6 +3,7 @@ package com.makemission.folio.ui.reader.components
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,6 +33,8 @@ fun ChaptersBottomSheet(
     chapters: List<EpubParser.EpubChapter>,
     currentChapterIndex: Int,
     onChapterClick: (Int) -> Unit,
+    onOpenBookmarks: () -> Unit = {},
+    onOpenHighlights: () -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -40,7 +43,8 @@ fun ChaptersBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         Column(
@@ -49,22 +53,43 @@ fun ChaptersBottomSheet(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
             Text(
-                text = "Chapters",
+                text = "Contents",
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onSurface,
             )
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                listOf("Contents", "Bookmarks", "Notes").forEachIndexed { index, title ->
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable {
+                            when (index) {
+                                1 -> onOpenBookmarks()
+                                2 -> onOpenHighlights()
+                            }
+                        },
+                        color = if (index == 0) MaterialTheme.colorScheme.surfaceContainerLowest else androidx.compose.ui.graphics.Color.Transparent,
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Text(
+                            title,
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (index == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
             Text(
                 text = "${chapters.size} chapters · tap to jump",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Jump directly to any chapter instead of scrolling or swiping one at a time.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp),

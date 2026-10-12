@@ -1,20 +1,20 @@
 package com.makemission.folio.data.scan
 
-import android.Manifest
 import android.content.ContentUris
 import android.content.Context
-import android.content.pm.PackageManager
 import android.net.Uri
+import android.content.Intent
 import android.os.Build
 import android.os.Environment
+import android.os.storage.StorageManager
 import android.provider.MediaStore
-import androidx.core.content.ContextCompat
+import android.provider.Settings
 import androidx.documentfile.provider.DocumentFile
 import com.makemission.folio.data.logging.FolioLogger
 import java.io.File
 
 /**
- * Representation of an EPUB found during storage scanning.
+ * Representation of an EPUB or MOBI found during storage scanning.
  * Supports both direct [File] references (from raw filesystem walk or MediaStore DATA column)
  * and [Uri] references (from Storage Access Framework tree grants or MediaStore ID).
  */
@@ -23,34 +23,30 @@ data class ScannedBookSource(
     val displayName: String,
     val originalPathOrUri: String,
     val file: File? = null,
-    /** File size in bytes when known — used for cross-source dedup to avoid false positives on same name different content. */
+    /** File size in bytes when known, used with modification time for change detection. */
     val fileSize: Long = -1L,
+    val lastModifiedMillis: Long = -1L,
 )
 
 /**
  * Result of a device storage scan.
  * Includes discovered book sources and a count of folders skipped due to exceeding [MAX_DEPTH].
  * [isTruncated] is true only if the scan hit the generous [MAX_FILES] safety cap and
- * stopped early — callers must surface this to the user instead of silently dropping files.
+ * stopped early. Background work reports this flag in its result data.
  */
 data class ScanResult(
     val items: List<ScannedBookSource>,
     val deepFoldersSkipped: Int = 0,
     val isTruncated: Boolean = false,
+    val wasInterrupted: Boolean = false,
 ) {
     /** Files found directly on disk (raw files only). Kept for backward compatibility. */
     val files: List<File> get() = items.mapNotNull { it.file }
 }
 
 /**
- * Automatic device storage scanning for EPUB files (§6).
- *
- * Discovery hierarchy:
- * 1. Primary: Storage Access Framework (SAF) folder grant(s) (via ACTION_OPEN_DOCUMENT_TREE),
- *    searched recursively using [DocumentFile] APIs (bypasses scoped-storage restrictions).
- * 2. Fallback: Raw filesystem walk of common locations (Downloads, Documents, external root)
- *    up to [MAX_DEPTH] (8) for deeply nested collections.
- * 3. Fallback: [MediaStore.Files] query for `.epub` entries.
+ * Automatic shared-storage discovery for EPUB and MOBI files. All-files access enables
+ * walking mounted shared volumes; SAF folder grants provide an optional narrower path.
  *
  * Handles permission denial gracefully (returns empty, no crash).
  * Tracks folders that exceed [MAX_DEPTH] so the user can be informed.
@@ -62,68 +58,37 @@ data class ScanResult(
  */
 object EpubScanner {
 
-    /**
-     * Safety cap — generous enough that a normal library (even 300 EPUBs) never hits it,
-     * but prevents a truly pathological folder (e.g. 10k files) from exhausting memory.
-     * Previously 80, which silently hid books. Now 5000 and *visible*: [ScanResult.isTruncated]
-     * is true when hit, so the UI can inform the user instead of silently dropping files.
-     * The scan collects only lightweight [ScannedBookSource] refs (path/Uri + displayName),
-     * not parsed book contents, so holding 300 (or even 2000) in memory is trivial (~KBs).
-     * Heavy work (full ZIP/Jsoup parse + X-Ray) is *not* done during scan — it is
-     * deferred per-book to [com.makemission.folio.data.work.BookProcessingWorker],
-     * which throttles to 2 concurrent parses via Semaphore(2) and queues the rest
-     * (300 queued = queue, not burst — verified for 300-book scenario, see Worker docs).
-     */
-    const val MAX_FILES = 5000
-    const val MAX_DEPTH = 8
+    /** Safety limits for pathological directory trees; a capped result is reported explicitly. */
+    const val MAX_FILES = 50000
+    const val MAX_DEPTH = 128
     private const val TAG = "EpubScanner"
 
-    /**
-     * Whether Folio can attempt storage scan.
-     *
-     * Priority: SAF persisted tree URI grant (primary, no media permission needed) > legacy
-     * READ_EXTERNAL_STORAGE (pre-33) > READ_MEDIA_IMAGES best-effort fallback on 13+.
-     *
-     * READ_MEDIA_VIDEO/AUDIO intentionally not checked: .epub files are not video/audio,
-     * so those grants never enable epub discovery, and declaring them triggers Play
-     * Photo & Video policy scrutiny without benefit. See AndroidManifest and README/PROJECT.md.
-     *
-     * READ_MEDIA_IMAGES is retained as a single fallback token: on Android 13+,
-     * MediaStore.Files queries for non-media types (like .epub) are not actually gated
-     * by READ_MEDIA_IMAGES per docs (epub is not image/video/audio, SAF is the sanctioned
-     * path for non-media), so the permission is of limited value. It is kept narrowly
-     * as a best-effort gate for legacy fallback paths (file-walk/MediaStore) on devices
-     * where such queries still return results when any media permission is granted, and
-     * can be removed entirely if Folio decides to rely solely on SAF + ACTION_OPEN_DOCUMENT.
-     */
+    /** A tree grant supports a partial scan; all-files access supports shared-storage volumes. */
+    fun hasWholeDeviceAccess(): Boolean = Environment.isExternalStorageManager()
+
+    fun allFilesAccessIntent(context: Context): Intent =
+        Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+            data = Uri.parse("package:${context.packageName}")
+        }
+
     fun hasStoragePermission(context: Context): Boolean {
-        val hasLegacy = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.READ_EXTERNAL_STORAGE
-        ) == PackageManager.PERMISSION_GRANTED
-        val hasImages = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.READ_MEDIA_IMAGES
-        ) == PackageManager.PERMISSION_GRANTED
+        val hasAllFiles = Environment.isExternalStorageManager()
         val hasSaf = try {
             context.contentResolver.persistedUriPermissions.any { it.isReadPermission }
         } catch (_: Exception) { false }
 
-        val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            hasSaf || hasLegacy || hasImages
-        } else {
-            hasLegacy || hasSaf
-        }
+        val result = hasAllFiles || hasSaf
 
-        FolioLogger.i(TAG, "hasStoragePermission check: legacy=$hasLegacy images=$hasImages saf=$hasSaf -> $result (SDK ${Build.VERSION.SDK_INT})")
+        FolioLogger.i(TAG, "hasStoragePermission check: allFiles=$hasAllFiles saf=$hasSaf -> $result (SDK ${Build.VERSION.SDK_INT})")
         return result
     }
 
-    /**
-     * Scan device storage for EPUB files.
-     * Searches SAF tree grant first (primary), then file walk and MediaStore as fallbacks.
-     */
-    fun scan(context: Context, configuredTreeUri: Uri? = null): ScanResult {
+    /** Scan mounted shared volumes, optional SAF folders, and MediaStore for EPUB/MOBI files. */
+    fun scan(
+        context: Context,
+        configuredTreeUri: Uri? = null,
+        shouldStop: () -> Boolean = { false },
+    ): ScanResult {
         FolioLogger.i(TAG, "scan start: hasPermission=${hasStoragePermission(context)} maxFiles=$MAX_FILES maxDepth=$MAX_DEPTH")
 
         if (!hasStoragePermission(context)) {
@@ -133,15 +98,31 @@ object EpubScanner {
 
         val out = mutableListOf<ScannedBookSource>()
         val seenKeys = mutableSetOf<String>()
-        // Cross-source dedup: same physical file may appear via SAF (uri), file-walk (path) and MediaStore.
-        // Exact keys differ (uri string vs absolute path), so also track displayName+size as secondary key.
-        val seenNameSizeKeys = mutableSetOf<String>()
+        val seenDirectories = mutableSetOf<String>()
+        // Exact source keys avoid losing distinct books with the same name and size.
         var deepFoldersSkipped = 0
 
-        fun nameSizeKey(displayName: String, size: Long): String =
-            "${displayName.lowercase()}|$size"
+        // 1) Shared-storage volumes
+        if (out.size < MAX_FILES) {
+            val volumes = try {
+                context.getSystemService(StorageManager::class.java).storageVolumes.mapNotNull { it.directory }
+            } catch (_: Exception) { emptyList() }
+            val dirs = (volumes + Environment.getExternalStorageDirectory()).distinctBy { it.absolutePath }
 
-        // 1) PRIMARY: SAF grants (DocumentFile APIs)
+            val beforeFileWalk = out.size
+            for (dir in dirs) {
+                if (out.size >= MAX_FILES || shouldStop()) break
+                try {
+                    if (!dir.exists() || !dir.isDirectory || !dir.canRead()) continue
+                    walkDir(dir, 0, out, seenKeys, seenDirectories, shouldStop) { deepFoldersSkipped++ }
+                } catch (e: Exception) {
+                    FolioLogger.w(TAG, "walkDir error for ${dir.absolutePath}: ${e.message}", e)
+                }
+            }
+            FolioLogger.i(TAG, "scan: file walk added ${out.size - beforeFileWalk} items (total ${out.size})")
+        }
+
+        // 2) Persisted SAF folder grants (DocumentFile APIs)
         val safUris = mutableListOf<Uri>()
         if (configuredTreeUri != null) {
             safUris.add(configuredTreeUri)
@@ -159,9 +140,9 @@ object EpubScanner {
         }
 
         if (safUris.isNotEmpty()) {
-            FolioLogger.i(TAG, "scan: primary SAF search with ${safUris.size} folder grant(s)")
+            FolioLogger.i(TAG, "scan: SAF search with ${safUris.size} folder grant(s)")
             for (uri in safUris) {
-                if (out.size >= MAX_FILES) break
+                if (out.size >= MAX_FILES || shouldStop()) break
                 try {
                     val docFile = DocumentFile.fromTreeUri(context, uri)
                     if (docFile == null || !docFile.exists() || !docFile.canRead()) {
@@ -169,7 +150,7 @@ object EpubScanner {
                         continue
                     }
                     val before = out.size
-                    walkSafDoc(context, docFile, 0, out, seenKeys, seenNameSizeKeys) { deepFoldersSkipped++ }
+                    walkSafDoc(context, docFile, 0, out, seenKeys, shouldStop) { deepFoldersSkipped++ }
                     FolioLogger.i(TAG, "SAF walk for $uri added ${out.size - before} items (total ${out.size})")
                 } catch (e: Exception) {
                     FolioLogger.w(TAG, "SAF walk error for $uri: ${e.message}", e)
@@ -179,32 +160,11 @@ object EpubScanner {
             FolioLogger.i(TAG, "scan: no SAF grants present, proceeding to fallbacks")
         }
 
-        // 2) FALLBACK: Raw filesystem walk
-        if (out.size < MAX_FILES) {
-            val dirs = listOfNotNull(
-                Environment.getExternalStorageDirectory(),
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-            ).distinctBy { it.absolutePath }
-
-            val beforeFileWalk = out.size
-            for (dir in dirs) {
-                if (out.size >= MAX_FILES) break
-                try {
-                    if (!dir.exists() || !dir.isDirectory || !dir.canRead()) continue
-                    walkDir(dir, 0, out, seenKeys, seenNameSizeKeys) { deepFoldersSkipped++ }
-                } catch (e: Exception) {
-                    FolioLogger.w(TAG, "walkDir error for ${dir.absolutePath}: ${e.message}", e)
-                }
-            }
-            FolioLogger.i(TAG, "scan: file walk fallback added ${out.size - beforeFileWalk} items (total ${out.size})")
-        }
-
         // 3) FALLBACK: MediaStore query
-        if (out.size < MAX_FILES) {
+        if (out.size < MAX_FILES && !shouldStop()) {
             val beforeMedia = out.size
             try {
-                queryMediaStore(context, out, seenKeys, seenNameSizeKeys)
+                queryMediaStore(context, out, seenKeys, shouldStop)
                 FolioLogger.i(TAG, "scan: MediaStore query added ${out.size - beforeMedia} items (total ${out.size})")
             } catch (e: Exception) {
                 FolioLogger.w(TAG, "queryMediaStore error: ${e.message}", e)
@@ -217,7 +177,7 @@ object EpubScanner {
         } else {
             FolioLogger.i(TAG, "scan final: ${out.size} items found, $deepFoldersSkipped folders too deep")
         }
-        return ScanResult(out, deepFoldersSkipped, isTruncated)
+        return ScanResult(out, deepFoldersSkipped, isTruncated, shouldStop())
     }
 
     /**
@@ -230,7 +190,8 @@ object EpubScanner {
         depth: Int,
         out: MutableList<ScannedBookSource>,
         seenKeys: MutableSet<String>,
-        seenNameSizeKeys: MutableSet<String> = mutableSetOf(),
+        seenDirectories: MutableSet<String> = mutableSetOf(),
+        shouldStop: () -> Boolean = { false },
         onDepthExceeded: () -> Unit = {},
     ) {
         if (depth > MAX_DEPTH) {
@@ -239,6 +200,7 @@ object EpubScanner {
             return
         }
         if (out.size >= MAX_FILES) return
+        if (!seenDirectories.add(dir.canonicalPath)) return
 
         val files = try { dir.listFiles() } catch (e: Exception) {
             FolioLogger.w(TAG, "walkDir listFiles failed for ${dir.absolutePath}: ${e.message}", e)
@@ -246,25 +208,17 @@ object EpubScanner {
         } ?: return
 
         for (f in files) {
-            if (out.size >= MAX_FILES) break
+            if (out.size >= MAX_FILES || shouldStop()) break
             try {
-                if (f.isDirectory && f.canRead() && !f.name.startsWith(".")) {
-                    if (f.name == "Android" && depth == 0) {
+                if (f.isDirectory && f.canRead()) {
+                    if (dir.name == "Android" && (f.name == "data" || f.name == "obb")) {
                         continue
                     }
-                    walkDir(f, depth + 1, out, seenKeys, seenNameSizeKeys, onDepthExceeded)
-                } else if (f.isFile && f.extension.equals("epub", ignoreCase = true)) {
+                    walkDir(f, depth + 1, out, seenKeys, seenDirectories, shouldStop, onDepthExceeded)
+                } else if (f.isFile && isBookName(f.name)) {
                     val path = f.absolutePath
                     val size = try { f.length() } catch (_: Exception) { -1L }
-                    val nsKey = "${f.name.lowercase()}|$size"
-                    // Deduplicate across sources: exact path OR same name+size via SAF/MediaStore
-                    val isCrossSourceDuplicate = seenNameSizeKeys.contains(nsKey)
-                    if (isCrossSourceDuplicate) {
-                        FolioLogger.i(TAG, "walkDir cross-source duplicate skipped: ${f.name} size=$size")
-                        continue
-                    }
                     if (seenKeys.add(path)) {
-                        seenNameSizeKeys.add(nsKey)
                         out.add(
                             ScannedBookSource(
                                 uri = null,
@@ -272,6 +226,7 @@ object EpubScanner {
                                 originalPathOrUri = path,
                                 file = f,
                                 fileSize = size,
+                                lastModifiedMillis = f.lastModified(),
                             )
                         )
                     }
@@ -288,7 +243,7 @@ object EpubScanner {
         depth: Int,
         out: MutableList<ScannedBookSource>,
         seenKeys: MutableSet<String>,
-        seenNameSizeKeys: MutableSet<String> = mutableSetOf(),
+        shouldStop: () -> Boolean = { false },
         onDepthExceeded: () -> Unit = {},
     ) {
         if (depth > MAX_DEPTH) {
@@ -304,25 +259,18 @@ object EpubScanner {
         } ?: return
 
         for (child in children) {
-            if (out.size >= MAX_FILES) break
+            if (out.size >= MAX_FILES || shouldStop()) break
             try {
                 val name = child.name.orEmpty()
-                if (child.isDirectory && child.canRead() && !name.startsWith(".")) {
-                    if (name == "Android" && depth == 0) {
+                if (child.isDirectory && child.canRead()) {
+                    if (doc.name == "Android" && (name == "data" || name == "obb")) {
                         continue
                     }
-                    walkSafDoc(context, child, depth + 1, out, seenKeys, seenNameSizeKeys, onDepthExceeded)
-                } else if (child.isFile && name.endsWith(".epub", ignoreCase = true)) {
+                    walkSafDoc(context, child, depth + 1, out, seenKeys, shouldStop, onDepthExceeded)
+                } else if (child.isFile && isBookName(name)) {
                     val uriKey = child.uri.toString()
                     val size = try { child.length() } catch (_: Exception) { -1L }
-                    val nsKey = "${name.lowercase()}|$size"
-                    val isCrossSourceDuplicate = seenNameSizeKeys.contains(nsKey)
-                    if (isCrossSourceDuplicate) {
-                        FolioLogger.i(TAG, "walkSafDoc cross-source duplicate skipped: $name size=$size")
-                        continue
-                    }
                     if (seenKeys.add(uriKey)) {
-                        seenNameSizeKeys.add(nsKey)
                         out.add(
                             ScannedBookSource(
                                 uri = child.uri,
@@ -330,6 +278,7 @@ object EpubScanner {
                                 originalPathOrUri = uriKey,
                                 file = null,
                                 fileSize = size,
+                                lastModifiedMillis = child.lastModified(),
                             )
                         )
                     }
@@ -344,7 +293,7 @@ object EpubScanner {
         context: Context,
         out: MutableList<ScannedBookSource>,
         seenKeys: MutableSet<String>,
-        seenNameSizeKeys: MutableSet<String> = mutableSetOf(),
+        shouldStop: () -> Boolean = { false },
     ) {
         val projection = arrayOf(
             MediaStore.Files.FileColumns._ID,
@@ -352,8 +301,8 @@ object EpubScanner {
             MediaStore.Files.FileColumns.DISPLAY_NAME,
             MediaStore.Files.FileColumns.SIZE,
         )
-        val selection = "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?"
-        val args = arrayOf("%.epub")
+        val selection = "(${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ? OR ${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?)"
+        val args = arrayOf("%.epub", "%.mobi")
         val uri = MediaStore.Files.getContentUri("external")
         try {
             context.contentResolver.query(uri, projection, selection, args, null)?.use { cursor ->
@@ -362,32 +311,20 @@ object EpubScanner {
                 val nameIdx = cursor.getColumnIndex(MediaStore.Files.FileColumns.DISPLAY_NAME)
                 val sizeIdx = cursor.getColumnIndex(MediaStore.Files.FileColumns.SIZE)
 
-                while (cursor.moveToNext() && out.size < MAX_FILES) {
+                while (cursor.moveToNext() && out.size < MAX_FILES && !shouldStop()) {
                     val displayName = if (nameIdx >= 0) cursor.getString(nameIdx) else null
                     val path = if (dataIdx >= 0) cursor.getString(dataIdx) else null
                     val id = if (idIdx >= 0) cursor.getLong(idIdx) else -1L
                     val size = if (sizeIdx >= 0) try { cursor.getLong(sizeIdx) } catch (_: Exception) { -1L } else -1L
 
-                    if (displayName == null || !displayName.endsWith(".epub", ignoreCase = true)) {
+                    if (displayName == null || !isBookName(displayName)) {
                         continue
                     }
-                    val nsKey = "${displayName.lowercase()}|$size"
-                    if (seenNameSizeKeys.contains(nsKey)) {
-                        FolioLogger.i(TAG, "MediaStore cross-source duplicate skipped: $displayName size=$size")
-                        continue
-                    }
-
-                    if (path != null && path.endsWith(".epub", ignoreCase = true)) {
+                    if (path != null && isBookName(path)) {
                         val file = File(path)
                         if (file.exists() && file.canRead()) {
                             val actualSize = try { file.length() } catch (_: Exception) { size }
-                            val actualNsKey = "${displayName.lowercase()}|$actualSize"
-                            if (seenNameSizeKeys.contains(actualNsKey)) {
-                                FolioLogger.i(TAG, "MediaStore cross-source duplicate skipped (file path): $displayName size=$actualSize")
-                                continue
-                            }
                             if (seenKeys.add(file.absolutePath)) {
-                                seenNameSizeKeys.add(actualNsKey)
                                 out.add(
                                     ScannedBookSource(
                                         uri = null,
@@ -395,6 +332,7 @@ object EpubScanner {
                                         originalPathOrUri = file.absolutePath,
                                         file = file,
                                         fileSize = actualSize,
+                                        lastModifiedMillis = file.lastModified(),
                                     )
                                 )
                             }
@@ -406,7 +344,6 @@ object EpubScanner {
                         val contentUri = ContentUris.withAppendedId(uri, id)
                         val uriStr = contentUri.toString()
                         if (seenKeys.add(uriStr)) {
-                            seenNameSizeKeys.add(nsKey)
                             out.add(
                                 ScannedBookSource(
                                     uri = contentUri,
@@ -414,6 +351,7 @@ object EpubScanner {
                                     originalPathOrUri = uriStr,
                                     file = null,
                                     fileSize = size,
+                                    lastModifiedMillis = -1L,
                                 )
                             )
                         }
@@ -422,4 +360,7 @@ object EpubScanner {
             }
         } catch (_: Exception) {}
     }
+
+    private fun isBookName(name: String): Boolean =
+        name.endsWith(".epub", ignoreCase = true) || name.endsWith(".mobi", ignoreCase = true)
 }

@@ -6,6 +6,14 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.makemission.folio.ui.theme.FolioAmber
 
+enum class ReaderPageStyle {
+    AUTO, PAPER, WHITE, SEPIA, NIGHT;
+
+    companion object {
+        fun fromKey(key: String?): ReaderPageStyle = entries.firstOrNull { it.name == key } ?: AUTO
+    }
+}
+
 /**
  * Reading typography & highlight appearance — Kindle / Apple Books–comparable
  * customization, adapted for Folio's editorial serif. Ideas adapted from the

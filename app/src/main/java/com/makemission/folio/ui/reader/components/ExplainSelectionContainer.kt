@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.TextToolbarStatus
 private const val MENU_ITEM_COPY = 0
 private const val MENU_ITEM_EXPLAIN = 1
 private const val MENU_ITEM_HIGHLIGHT = 2
+private const val MENU_ITEM_ASK_FOLIO = 3
 
 private class FolioTextActionModeCallback(
     private val context: Context,
@@ -32,6 +33,7 @@ private class FolioTextActionModeCallback(
     var onCopyRequested: (() -> Unit)? = null,
     var onExplainRequested: (() -> Unit)? = null,
     var onHighlightRequested: (() -> Unit)? = null,
+    var onFolioRequested: (() -> Unit)? = null,
 ) : ActionMode.Callback {
     override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {
         requireNotNull(menu)
@@ -48,6 +50,10 @@ private class FolioTextActionModeCallback(
             menu.add(0, MENU_ITEM_HIGHLIGHT, 2, "Highlight")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
         }
+        onFolioRequested?.let {
+            menu.add(0, MENU_ITEM_ASK_FOLIO, 3, "Ask Folio")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+        }
         return true
     }
 
@@ -60,6 +66,11 @@ private class FolioTextActionModeCallback(
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
             return true
         }
+        if (menu != null && menu.findItem(MENU_ITEM_ASK_FOLIO) == null && onFolioRequested != null) {
+            menu.add(0, MENU_ITEM_ASK_FOLIO, 3, "Ask Folio")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+            return true
+        }
         return false
     }
 
@@ -68,6 +79,7 @@ private class FolioTextActionModeCallback(
             MENU_ITEM_COPY -> onCopyRequested?.invoke()
             MENU_ITEM_EXPLAIN -> onExplainRequested?.invoke()
             MENU_ITEM_HIGHLIGHT -> onHighlightRequested?.invoke()
+            MENU_ITEM_ASK_FOLIO -> onFolioRequested?.invoke()
             else -> return false
         }
         mode?.finish()
@@ -113,6 +125,7 @@ private class FolioSelectionToolbar(
     var onCopyRequest: (() -> Unit)?,
     var onExplainRequest: ((String) -> Unit)?,
     var onHighlightRequest: ((String) -> Unit)?,
+    var onFolioRequest: ((String) -> Unit)?,
 ) : TextToolbar {
     private var actionMode: ActionMode? = null
     private val callback = FolioTextActionModeCallback(context = context)
@@ -163,6 +176,18 @@ private class FolioSelectionToolbar(
             } catch (_: Exception) {}
             if (selected.isNotBlank()) onHighlightRequest?.invoke(selected)
         }
+        callback.onFolioRequested = {
+            val previousClip = clipboardManager.primaryClip
+            onCopyRequested?.invoke()
+            val selected = try {
+                clipboardManager.primaryClip?.getItemAt(0)?.text?.toString()?.take(2_400) ?: ""
+            } catch (_: Exception) { "" }
+            try {
+                if (previousClip != null) clipboardManager.setPrimaryClip(previousClip)
+                else clipboardManager.setPrimaryClip(ClipData.newPlainText(null, ""))
+            } catch (_: Exception) {}
+            if (selected.isNotBlank()) onFolioRequest?.invoke(selected)
+        }
 
         if (actionMode == null) {
             status = TextToolbarStatus.Shown
@@ -191,6 +216,7 @@ private class FolioSelectionToolbar(
 @Composable
 fun ExplainSelectionContainer(
     onExplainRequested: (String) -> Unit,
+    onAskFolioRequested: (String) -> Unit = {},
     onHighlightRequested: (String) -> Unit = {},
     onCopyRequested: (() -> Unit)? = null,
     content: @Composable () -> Unit,
@@ -207,6 +233,7 @@ fun ExplainSelectionContainer(
     val currentExplain by androidx.compose.runtime.rememberUpdatedState(onExplainRequested)
     val currentHighlight by androidx.compose.runtime.rememberUpdatedState(onHighlightRequested)
     val currentCopy by androidx.compose.runtime.rememberUpdatedState(onCopyRequested)
+    val currentAskFolio by androidx.compose.runtime.rememberUpdatedState(onAskFolioRequested)
 
     val toolbar = remember(view, context) {
         FolioSelectionToolbar(
@@ -214,14 +241,16 @@ fun ExplainSelectionContainer(
             context = context,
             onCopyRequest = { currentCopy?.invoke() },
             onExplainRequest = { selected -> currentExplain(selected) },
-            onHighlightRequest = { selected -> currentHighlight(selected) }
+            onHighlightRequest = { selected -> currentHighlight(selected) },
+            onFolioRequest = { selected -> currentAskFolio(selected) },
         )
     }
     // Keep toolbar's callbacks up-to-date when the upstream lambdas change (highlight color/style, chapter).
-    androidx.compose.runtime.LaunchedEffect(currentExplain, currentHighlight, currentCopy) {
+    androidx.compose.runtime.LaunchedEffect(currentExplain, currentHighlight, currentCopy, currentAskFolio) {
         toolbar.onExplainRequest = { selected -> currentExplain(selected) }
         toolbar.onHighlightRequest = { selected -> currentHighlight(selected) }
         toolbar.onCopyRequest = { currentCopy?.invoke() }
+        toolbar.onFolioRequest = { selected -> currentAskFolio(selected) }
     }
     val isHidden by remember { derivedStateOf { toolbar.status == TextToolbarStatus.Hidden } }
 

@@ -284,7 +284,7 @@ object SearchRepository {
             val f = File(entity.filePath)
             // If file is huge and still being processed, parsing could OOM; catch Throwable.
             val epub = try {
-                if (f.exists() && f.canRead()) EpubParser.parse(f) else null
+                if (f.exists() && f.canRead()) com.makemission.folio.data.epub.BookFileParser.parse(f) else null
             } catch (_: Exception) { null } catch (_: OutOfMemoryError) { null } catch (_: Throwable) { null }
             val chapters = epub?.chapters ?: emptyList()
             if (chapters.isNotEmpty()) {

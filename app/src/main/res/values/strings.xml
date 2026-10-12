@@ -1,5 +1,7 @@
 <resources>
     <string name="app_name">Folio</string>
+    <string name="continue_reading_widget_name">Continue Reading</string>
+    <string name="continue_reading_widget_description">Pick up your most recently opened book.</string>
     <string name="action_settings">Settings</string>
     <!-- Strings used for fragments for navigation -->
     <string name="first_fragment_label">First Fragment</string>

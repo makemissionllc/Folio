@@ -19,6 +19,7 @@ import com.makemission.folio.data.xray.XRayCache
 import com.makemission.folio.data.xray.XRayExtractor
 import com.makemission.folio.data.xray.XRayTerm
 import com.makemission.folio.data.search.SearchRepository
+import com.makemission.folio.widget.ContinueReadingWidgetProvider
 import com.makemission.folio.ui.reader.components.encodeFloats
 import com.makemission.folio.ui.reader.components.encodePoints
 import kotlinx.coroutines.CancellationException
@@ -121,7 +122,7 @@ class ReadingViewModel(
                 val f = java.io.File(stored.filePath)
                 if (f.exists() && f.canRead()) {
                     FolioLogger.i("Reading", "Parsing stored file for $bookId: ${stored.filePath?.take(80)}")
-                    val parsed = withContext(Dispatchers.IO) { EpubParser.parse(f) }
+                    val parsed = withContext(Dispatchers.IO) { com.makemission.folio.data.epub.BookFileParser.parse(f) }
                     if (parsed != null && fileHash != null) {
                         withContext(Dispatchers.IO) {
                             try { ParsedBookCache.save(app, bookId, fileHash, parsed) } catch (_: Exception) {}
@@ -173,6 +174,7 @@ class ReadingViewModel(
                         ReadingProgress(bookId = bookId, chapterIndex = chapterIdx, paragraphIndex = paraIdx, lastReadMillis = now)
                     }
                     dao.upsert(toSave)
+                    ContinueReadingWidgetProvider.refresh(app, force = true)
                 }
             } catch (e: Exception) {
                 FolioLogger.w("Reading", "Failed to bump lastRead on open for $bookId: ${e.message}", e)
@@ -437,6 +439,10 @@ class ReadingViewModel(
     fun saveProgress(chapterIndex: Int, paragraphIndex: Int) {
         viewModelScope.launch {
             try {
+                val chapters = _uiState.value.chapters
+                val totalParagraphs = chapters.sumOf { it.paragraphs.size.coerceAtLeast(1) }.coerceAtLeast(1)
+                val completedBefore = chapters.take(chapterIndex.coerceIn(0, chapters.size)).sumOf { it.paragraphs.size.coerceAtLeast(1) }
+                val fraction = ((completedBefore + paragraphIndex.coerceAtLeast(0)).toFloat() / totalParagraphs).coerceIn(0f, 1f)
                 // Use NonCancellable so the save completes even if the ViewModel is being cleared
                 // (e.g., user navigates away quickly) — prevents JobCancellationException
                 withContext(NonCancellable + Dispatchers.IO) {
@@ -445,10 +451,12 @@ class ReadingViewModel(
                             bookId = bookId,
                             chapterIndex = chapterIndex,
                             paragraphIndex = paragraphIndex,
+                            progressFraction = fraction,
                             lastReadMillis = System.currentTimeMillis(),
                         ),
                     )
                 }
+                ContinueReadingWidgetProvider.refresh(getApplication<Application>())
             } catch (e: CancellationException) {
                 // ViewModel is being cleared — re-throw to allow cancellation, but DAO already completed due to NonCancellable
                 throw e
@@ -593,6 +601,20 @@ class ReadingViewModel(
             try { highlightDao.clearForBook(bookId) } catch (e: Exception) {
                 FolioLogger.w("Highlight", "clearHighlights failed $bookId: ${e.message}", e)
             }
+        }
+    }
+
+    fun saveHighlightNote(highlightId: Long, note: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try { highlightDao.setNote(highlightId, note.trim().take(5_000)) }
+            catch (e: Exception) { FolioLogger.w("Notes", "Could not save note $highlightId: ${e.message}", e) }
+        }
+    }
+
+    fun deleteHighlight(highlight: Highlight) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try { highlightDao.delete(highlight) }
+            catch (e: Exception) { FolioLogger.w("Notes", "Could not delete highlight ${highlight.id}: ${e.message}", e) }
         }
     }
 

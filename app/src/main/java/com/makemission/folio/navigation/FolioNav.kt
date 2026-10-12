@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -30,6 +31,8 @@ import com.makemission.folio.ui.library.LibraryScreen
 import com.makemission.folio.ui.onboarding.OnboardingScreen
 import com.makemission.folio.ui.reader.ReadingScreen
 import com.makemission.folio.ui.vocabulary.VocabularyScreen
+import com.makemission.folio.widget.WidgetNavigationRequest
+import com.makemission.folio.ui.settings.InteractiveTourScreen
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -48,12 +51,17 @@ sealed class FolioRoute(val route: String) {
     data object Settings : FolioRoute("settings")
     data object Insights : FolioRoute("insights")
     data object SmartFeatures : FolioRoute("smart_features")
+    data object WhatsNew : FolioRoute("whats_new")
+    data object InteractiveTour : FolioRoute("interactive_tour")
     data object Logs : FolioRoute("logs")
     data object Onboarding : FolioRoute("onboarding")
 }
 
 @Composable
-fun FolioNavHost() {
+fun FolioNavHost(
+    widgetNavigationRequest: WidgetNavigationRequest? = null,
+    onWidgetNavigationHandled: () -> Unit = {},
+) {
     val context = LocalContext.current
     val repo = remember { SettingsRepository.get(context) }
     val hasSeenOnboarding by repo.hasSeenOnboarding.collectAsState(initial = null)
@@ -76,6 +84,19 @@ fun FolioNavHost() {
     }
 
     val navController = rememberNavController()
+
+    LaunchedEffect(widgetNavigationRequest, hasSeenOnboarding) {
+        val request = widgetNavigationRequest ?: return@LaunchedEffect
+        if (hasSeenOnboarding != true) return@LaunchedEffect
+        if (request.bookId != null) {
+            navController.navigate(FolioRoute.Reader.create(request.bookId, request.bookTitle)) {
+                launchSingleTop = true
+            }
+        } else {
+            navController.popBackStack(FolioRoute.Library.route, inclusive = false)
+        }
+        onWidgetNavigationHandled()
+    }
 
     NavHost(
         navController = navController,
@@ -165,6 +186,8 @@ fun FolioNavHost() {
                 onBack = { navController.popBackStack() },
                 onInsightsClick = { navController.navigate(FolioRoute.Insights.route) { launchSingleTop = true } },
                 onSmartFeaturesClick = { navController.navigate(FolioRoute.SmartFeatures.route) { launchSingleTop = true } },
+                onWhatsNewClick = { navController.navigate(FolioRoute.WhatsNew.route) { launchSingleTop = true } },
+                onInteractiveTourClick = { navController.navigate(FolioRoute.InteractiveTour.route) { launchSingleTop = true } },
                 onLogsClick = { navController.navigate(FolioRoute.Logs.route) { launchSingleTop = true } },
             )
         }
@@ -205,6 +228,14 @@ fun FolioNavHost() {
             com.makemission.folio.ui.settings.SmartFeaturesScreen(
                 onBack = { navController.popBackStack() },
             )
+        }
+        composable(FolioRoute.WhatsNew.route) {
+            com.makemission.folio.ui.settings.WhatsNewScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(FolioRoute.InteractiveTour.route) {
+            InteractiveTourScreen(onBack = { navController.popBackStack() })
         }
         composable(FolioRoute.Logs.route) {
             com.makemission.folio.ui.settings.LogsScreen(

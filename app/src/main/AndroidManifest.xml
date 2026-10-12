@@ -2,15 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Storage: SAF is primary (persisted tree URI, no permission needed). Fallbacks: direct file-walk
-         (needs no permission on pre-33 via READ_EXTERNAL_STORAGE, blocked by scoped storage on 13+)
-         and MediaStore.Files best-effort. READ_MEDIA_IMAGES is retained as the single best-effort
-         fallback token on Android 13+ — see EpubScanner.hasStoragePermission KDoc.
-         READ_MEDIA_VIDEO / READ_MEDIA_AUDIO removed: not needed for .epub discovery (not video/audio)
-         and unjustifiable under Play Photo & Video policy. Notifications for future reminders. -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Whole-device EPUB/MOBI discovery in shared storage. User may use SAF/manual import instead. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
+    <!-- Health Connect is only checked/opened from Settings for now. No health data permissions are requested. -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
 
     <application
         android:name=".FolioApp"
@@ -31,6 +29,17 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <receiver
+            android:name=".widget.ContinueReadingWidgetProvider"
+            android:exported="true"
+            android:label="@string/continue_reading_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/continue_reading_widget_info" />
+        </receiver>
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -42,7 +51,7 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Open EPUB from Files / browser / email — reuse existing import pipeline (no duplication) -->
+            <!-- Open EPUB or MOBI from Files / browser / email. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
 
@@ -53,10 +62,13 @@
                 <data android:scheme="file" />
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/epub" />
+                <data android:mimeType="application/x-mobipocket-ebook" />
                 <data android:mimeType="application/octet-stream" />
                 <data android:mimeType="*/*" />
                 <data android:pathPattern=".*\\.epub" />
                 <data android:pathPattern=".*\\.EPUB" />
+                <data android:pathPattern=".*\\.mobi" />
+                <data android:pathPattern=".*\\.MOBI" />
                 <data android:host="*" />
             </intent-filter>
         </activity>

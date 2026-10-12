@@ -57,6 +57,29 @@ object BookProcessingScheduler {
         } catch (_: Exception) {}
     }
 
+    /** Scanned books get their heavy chapter/X-Ray pass only during another idle window. */
+    fun scheduleDeferred(context: Context, bookId: String, fileHash: String?) {
+        val request = OneTimeWorkRequestBuilder<BookProcessingWorker>()
+            .setInputData(
+                androidx.work.workDataOf(
+                    BookProcessingWorker.KEY_BOOK_ID to bookId,
+                    BookProcessingWorker.KEY_FILE_HASH to fileHash,
+                )
+            )
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiresDeviceIdle(true)
+                    .setRequiresBatteryNotLow(true)
+                    .setRequiresStorageNotLow(true)
+                    .build()
+            )
+            .addTag("folio_book_$bookId")
+            .build()
+        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+            "folio_process_$bookId", ExistingWorkPolicy.REPLACE, request
+        )
+    }
+
     fun cancel(context: Context, bookId: String) {
         try { WorkManager.getInstance(context.applicationContext).cancelUniqueWork("folio_process_$bookId") } catch (_: Exception) {}
     }
