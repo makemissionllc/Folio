@@ -30,6 +30,7 @@ import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.ui.library.LibraryScreen
 import com.makemission.folio.ui.onboarding.OnboardingScreen
 import com.makemission.folio.ui.reader.ReadingScreen
+import com.makemission.folio.ui.reader.ReaderPageTurnHandler
 import com.makemission.folio.ui.vocabulary.VocabularyScreen
 import com.makemission.folio.widget.WidgetNavigationRequest
 import com.makemission.folio.ui.settings.InteractiveTourScreen
@@ -84,7 +85,6 @@ fun FolioNavHost(
     }
 
     val navController = rememberNavController()
-
     LaunchedEffect(widgetNavigationRequest, hasSeenOnboarding) {
         val request = widgetNavigationRequest ?: return@LaunchedEffect
         if (hasSeenOnboarding != true) return@LaunchedEffect
@@ -94,6 +94,7 @@ fun FolioNavHost(
             }
         } else {
             navController.popBackStack(FolioRoute.Library.route, inclusive = false)
+            if (request.openAddBooks) ReaderPageTurnHandler.requestLibraryAddBooks()
         }
         onWidgetNavigationHandled()
     }

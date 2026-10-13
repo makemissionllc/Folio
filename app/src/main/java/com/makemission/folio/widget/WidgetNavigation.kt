@@ -10,6 +10,7 @@ data class WidgetNavigationRequest(
     val bookId: String? = null,
     val bookTitle: String = "",
     val requestToken: Long = System.nanoTime(),
+    val openAddBooks: Boolean = false,
 )
 
 object WidgetNavigation {
@@ -17,6 +18,7 @@ object WidgetNavigation {
     const val EXTRA_BOOK_ID = "com.makemission.folio.extra.WIDGET_BOOK_ID"
     const val EXTRA_BOOK_TITLE = "com.makemission.folio.extra.WIDGET_BOOK_TITLE"
     const val ACTION_OPEN_LIBRARY = "com.makemission.folio.action.OPEN_LIBRARY_FROM_WIDGET"
+    const val ACTION_OPEN_ADD_BOOKS = "com.makemission.folio.action.OPEN_ADD_BOOKS_FROM_WIDGET"
 
     fun readerPendingIntent(context: Context, appWidgetId: Int, bookId: String, title: String): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -43,6 +45,20 @@ object WidgetNavigation {
         return PendingIntent.getActivity(
             context,
             10_000 + appWidgetId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    fun addBooksPendingIntent(context: Context, appWidgetId: Int): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            action = ACTION_OPEN_ADD_BOOKS
+            data = Uri.parse("folio://widget/add-books/$appWidgetId")
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        return PendingIntent.getActivity(
+            context,
+            20_000 + appWidgetId,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

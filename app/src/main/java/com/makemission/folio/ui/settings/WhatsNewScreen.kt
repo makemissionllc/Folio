@@ -83,7 +83,7 @@ private val updateSections = listOf(
         summary = "Add Folio’s Continue Reading widget for book cover art, saved progress and a direct route back into your library.",
         details = listOf(
             "Long-press the home screen, choose Widgets, then Folio → Continue Reading. Tap the book to return to your saved place; use the Library shortcut to browse.",
-            "The widget follows light and dark appearance and keeps its book artwork small to reduce memory use.",
+            "The widget follows light and dark appearance and keeps its book artwork small to reduce memory use. When the library is empty, tap the card to open Add Books directly; when every book is finished, it says All Caught Up and returns to your shelf.",
         ),
     ),
     UpdateSection(
@@ -125,7 +125,7 @@ private val updateSections = listOf(
         summary = "Landscape tablets get a two-page spread, a collapsible Contents rail, and a compact reader-settings popover.",
         details = listOf(
             "Drag the Contents divider to choose a width; Folio remembers it through rotation. Notes open in a split review layout.",
-            "With a hardware keyboard, Page Up and Page Down move through the book, Ctrl+F opens in-book search, Ctrl+O opens Add Books, Ctrl+K opens library search, and Escape clears or closes it.",
+            "With a hardware keyboard, Page Up and Page Down move through the book, Ctrl+F opens in-book search, Ctrl+1 through Ctrl+4 switch library shelves, Ctrl+O opens Add Books, Ctrl+K opens library search, and Escape clears or closes it.",
         ),
     ),
     UpdateSection(

@@ -1,5 +1,8 @@
 package com.makemission.folio.ui.reader
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+
 /**
  * Bridge for hardware volume-key page turns (§3 Frictionless Navigation).
  *
@@ -13,8 +16,25 @@ object ReaderPageTurnHandler {
     var onKeyboardSearch: (() -> Unit)? = null
     /** Tablet keyboard bridge: opens the library search field. */
     var onKeyboardLibrarySearch: (() -> Unit)? = null
-    /** Tablet keyboard bridge: opens the library's Add Books sheet. */
-    var onKeyboardLibraryAddBooks: (() -> Unit)? = null
+    /** Tablet keyboard bridge: selects All, Reading, Want to Read, or Finished. */
+    var onKeyboardLibraryShelf: ((shortcut: Int) -> Unit)? = null
+    /** Tablet-only keyboard shortcut bridge for Ctrl+O. */
+    var onKeyboardTabletAddBooks: (() -> Unit)? = null
     /** Tablet keyboard bridge: clears the active library query or dismisses search. */
     var onKeyboardLibraryEscape: (() -> Unit)? = null
+
+    private val _libraryAddBooksRequests = MutableStateFlow(0L)
+    val libraryAddBooksRequests: StateFlow<Long> = _libraryAddBooksRequests
+    private var consumedAddBooksRequest = 0L
+
+    /** Emits an Add Books request that the library observes when it is visible. */
+    fun requestLibraryAddBooks() {
+        _libraryAddBooksRequests.value += 1
+    }
+
+    fun consumeLibraryAddBooksRequest(token: Long): Boolean {
+        if (token <= consumedAddBooksRequest) return false
+        consumedAddBooksRequest = token
+        return true
+    }
 }

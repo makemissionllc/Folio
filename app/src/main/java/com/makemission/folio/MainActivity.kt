@@ -89,6 +89,9 @@ class MainActivity : ComponentActivity() {
             WidgetNavigation.ACTION_OPEN_LIBRARY -> {
                 widgetNavigation.value = WidgetNavigationRequest()
             }
+            WidgetNavigation.ACTION_OPEN_ADD_BOOKS -> {
+                widgetNavigation.value = WidgetNavigationRequest(openAddBooks = true)
+            }
         }
     }
 
@@ -113,8 +116,23 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (event?.isCtrlPressed == true) {
+            val shelfShortcut = when (keyCode) {
+                KeyEvent.KEYCODE_1, KeyEvent.KEYCODE_NUMPAD_1 -> 1
+                KeyEvent.KEYCODE_2, KeyEvent.KEYCODE_NUMPAD_2 -> 2
+                KeyEvent.KEYCODE_3, KeyEvent.KEYCODE_NUMPAD_3 -> 3
+                KeyEvent.KEYCODE_4, KeyEvent.KEYCODE_NUMPAD_4 -> 4
+                else -> null
+            }
+            if (shelfShortcut != null) {
+                ReaderPageTurnHandler.onKeyboardLibraryShelf?.let { selectShelf ->
+                    selectShelf(shelfShortcut)
+                    return true
+                }
+            }
+        }
         if (event?.isCtrlPressed == true && keyCode == KeyEvent.KEYCODE_O) {
-            ReaderPageTurnHandler.onKeyboardLibraryAddBooks?.let { openAddBooks ->
+            ReaderPageTurnHandler.onKeyboardTabletAddBooks?.let { openAddBooks ->
                 openAddBooks()
                 return true
             }

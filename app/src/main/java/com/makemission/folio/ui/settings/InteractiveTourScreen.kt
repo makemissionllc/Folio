@@ -117,13 +117,13 @@ private val tourStops = listOf(
     TourStop(
         "08 · HOME SCREEN", "Pick up a book in one tap",
         "Add Folio’s Continue Reading widget for your latest book’s cover and saved progress, with a shortcut back to the library.",
-        listOf("Long-press an empty home-screen area", "Choose Widgets → Folio → Continue Reading", "Tap the book to reopen your saved place"),
+        listOf("Long-press an empty home-screen area", "Choose Widgets → Folio → Continue Reading", "Tap to reopen your saved book; an empty widget starts import, and an all-finished shelf opens your library"),
         TourDemo.WIDGET,
     ),
     TourStop(
         "09 · TABLETS", "Use the space around the story",
         "Folio reshapes its library and reader for a wider screen. Drag the divider beside Quick look to give the book grid or details more room.",
-        listOf("Landscape two-page reading and a resizable Contents rail", "Page Up/Down turn pages; Ctrl+F searches inside a book", "Ctrl+O opens Add Books; Ctrl+K searches the library; Escape clears or closes search"),
+        listOf("Landscape two-page reading and a resizable Contents rail", "Page Up/Down turn pages; Ctrl+F searches inside a book", "Ctrl+1–4 switch library shelves: All, Reading, Want to Read and Finished", "Ctrl+O adds books; Ctrl+K searches the library; Escape clears or closes search"),
         TourDemo.TABLET,
     ),
     TourStop(
@@ -429,7 +429,7 @@ private fun TabletDemo(key: Int) {
             Text("Resize quick look", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Slider(value = previewFraction, onValueChange = { previewFraction = it }, valueRange = 0.28f..0.52f, modifier = Modifier.weight(1f))
         }
-        Text("Two-page reader · Contents rail · Ctrl+O add · Ctrl+K search · Esc close", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("Two-page reader · Contents rail · Ctrl+1–4 shelves · Ctrl+O add · Ctrl+K search", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

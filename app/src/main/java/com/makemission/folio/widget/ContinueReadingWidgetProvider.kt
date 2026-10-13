@@ -68,18 +68,19 @@ class ContinueReadingWidgetProvider : AppWidgetProvider() {
                             if (book.shelfStatus == ShelfStatus.FINISHED.name || progress.progressFraction >= 1f) null
                             else book to progress
                         }
-                        inProgress ?: books.values
+                        val nextBook = inProgress ?: books.values
                             .asSequence()
                             .filter { it.shelfStatus != ShelfStatus.FINISHED.name }
                             .sortedByDescending(BookEntity::addedAt)
                             .firstOrNull()
                             ?.let { it to null }
+                        Triple(nextBook?.first, nextBook?.second, books.isNotEmpty())
                     }.getOrNull()
                     val cover = content?.first?.let { decodeCover(it.coverImagePath) }
 
                     ids.forEach { id ->
                         val views = RemoteViews(appContext.packageName, R.layout.widget_continue_reading)
-                        val (book, progress) = content ?: (null to null)
+                        val (book, progress, hasBooks) = content ?: Triple(null, null, false)
                         if (book != null) {
                             val fraction = progress?.progressFraction?.coerceIn(0f, 1f) ?: 0f
                             val percent = (fraction * 100f).toInt()
@@ -104,16 +105,26 @@ class ContinueReadingWidgetProvider : AppWidgetProvider() {
                                 views.setViewVisibility(R.id.widgetCoverGlyph, android.view.View.VISIBLE)
                             }
                         } else {
-                            views.setTextViewText(R.id.widgetEyebrow, "YOUR READING SPACE")
-                            views.setTextViewText(R.id.widgetTitle, "A good book is close")
-                            views.setTextViewText(R.id.widgetAuthor, "Add a book to your Folio library")
+                            views.setTextViewText(R.id.widgetEyebrow, if (hasBooks) "ALL CAUGHT UP" else "YOUR READING SPACE")
+                            views.setTextViewText(R.id.widgetTitle, if (hasBooks) "Your finished books are safe" else "A good book is close")
+                            views.setTextViewText(
+                                R.id.widgetAuthor,
+                                if (hasBooks) "Your library is ready when you are" else "Add a book to your Folio library",
+                            )
                             views.setProgressBar(R.id.widgetProgress, 100, 0, false)
-                            views.setTextViewText(R.id.widgetProgressLabel, "Open library")
-                            views.setOnClickPendingIntent(R.id.widgetCard, WidgetNavigation.libraryPendingIntent(appContext, id))
+                            views.setTextViewText(R.id.widgetProgressLabel, if (hasBooks) "Open library" else "Add books")
+                            views.setOnClickPendingIntent(
+                                R.id.widgetCard,
+                                if (hasBooks) WidgetNavigation.libraryPendingIntent(appContext, id)
+                                else WidgetNavigation.addBooksPendingIntent(appContext, id),
+                            )
                             views.setOnClickPendingIntent(R.id.widgetLibraryButton, WidgetNavigation.libraryPendingIntent(appContext, id))
                             views.setViewVisibility(R.id.widgetCover, android.view.View.GONE)
                             views.setViewVisibility(R.id.widgetCoverGlyph, android.view.View.VISIBLE)
-                            views.setContentDescription(R.id.widgetCard, "Open your Folio library")
+                            views.setContentDescription(
+                                R.id.widgetCard,
+                                if (hasBooks) "Open your Folio library" else "Add a book to your Folio library",
+                            )
                         }
                         AppWidgetManager.getInstance(appContext).updateAppWidget(id, views)
                     }

@@ -95,6 +95,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.animation.core.tween
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.derivedStateOf
 import com.makemission.folio.ui.reader.components.BottomReadingFade
@@ -150,6 +151,15 @@ fun LibraryScreen(
     val isSearching by viewModel.isSearching.collectAsState()
     var isSearchRevealed by remember { mutableStateOf(true) }
     var showAddBooks by remember { mutableStateOf(false) }
+    val addBooksRequestToken by ReaderPageTurnHandler.libraryAddBooksRequests.collectAsState()
+    LaunchedEffect(addBooksRequestToken) {
+        if (addBooksRequestToken > 0L) {
+            delay(400)
+        }
+        if (ReaderPageTurnHandler.consumeLibraryAddBooksRequest(addBooksRequestToken)) {
+            showAddBooks = true
+        }
+    }
     var searchFocusRequest by remember { mutableIntStateOf(0) }
     val isTablet = LocalConfiguration.current.screenWidthDp >= 600
     val isWideTablet = LocalConfiguration.current.screenWidthDp >= 840
@@ -169,16 +179,20 @@ fun LibraryScreen(
     }
     val readBookIds by viewModel.readBookIds.collectAsState()
     val continueBookId by viewModel.continueBookId.collectAsState()
-    val filteredBooks = books.filter { book ->
-        when (selectedFilter) {
-            LibraryFilter.ALL -> true
-            LibraryFilter.READING -> book.shelfStatus == ShelfStatus.AUTO && book.id in readBookIds
-            LibraryFilter.WANT -> book.shelfStatus == ShelfStatus.WANT
-            LibraryFilter.FINISHED -> book.shelfStatus == ShelfStatus.FINISHED
+    val visibleBooks = remember(books, selectedFilter, readBookIds, sortOrder) {
+        val filtered = books.filter { book ->
+            when (selectedFilter) {
+                LibraryFilter.ALL -> true
+                LibraryFilter.READING -> book.shelfStatus == ShelfStatus.AUTO && book.id in readBookIds
+                LibraryFilter.WANT -> book.shelfStatus == ShelfStatus.WANT
+                LibraryFilter.FINISHED -> book.shelfStatus == ShelfStatus.FINISHED
+            }
         }
+        if (sortOrder == LibrarySort.TITLE) filtered.sortedBy { it.title.lowercase() } else filtered
     }
-    val visibleBooks = if (sortOrder == LibrarySort.TITLE) filteredBooks.sortedBy { it.title.lowercase() } else filteredBooks
-    val continueBook = books.firstOrNull { it.id == continueBookId && it.shelfStatus != ShelfStatus.FINISHED }
+    val continueBook = remember(books, continueBookId) {
+        books.firstOrNull { it.id == continueBookId && it.shelfStatus != ShelfStatus.FINISHED }
+    }
     var pullOffset by remember { mutableFloatStateOf(0f) }
     val bookPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) viewModel.importEpubs(uris, context)
@@ -198,7 +212,20 @@ fun LibraryScreen(
                 viewModel.clearSearch()
                 isSearchRevealed = false
             }
-            ReaderPageTurnHandler.onKeyboardLibraryAddBooks = { showAddBooks = true }
+            ReaderPageTurnHandler.onKeyboardTabletAddBooks = { showAddBooks = true }
+            ReaderPageTurnHandler.onKeyboardLibraryShelf = { shortcut ->
+                val shelf = when (shortcut) {
+                    1 -> LibraryFilter.ALL
+                    2 -> LibraryFilter.READING
+                    3 -> LibraryFilter.WANT
+                    4 -> LibraryFilter.FINISHED
+                    else -> null
+                }
+                if (shelf != null) {
+                    selectFilter(shelf)
+                    viewModel.clearSearch()
+                }
+            }
         }
         onDispose {
             if (ReaderPageTurnHandler.onKeyboardLibrarySearch != null) {
@@ -207,8 +234,11 @@ fun LibraryScreen(
             if (ReaderPageTurnHandler.onKeyboardLibraryEscape != null) {
                 ReaderPageTurnHandler.onKeyboardLibraryEscape = null
             }
-            if (ReaderPageTurnHandler.onKeyboardLibraryAddBooks != null) {
-                ReaderPageTurnHandler.onKeyboardLibraryAddBooks = null
+            if (ReaderPageTurnHandler.onKeyboardTabletAddBooks != null) {
+                ReaderPageTurnHandler.onKeyboardTabletAddBooks = null
+            }
+            if (ReaderPageTurnHandler.onKeyboardLibraryShelf != null) {
+                ReaderPageTurnHandler.onKeyboardLibraryShelf = null
             }
         }
     }
