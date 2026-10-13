@@ -119,6 +119,7 @@ fun rememberKnuthAdjustments(
     fontSize: com.makemission.folio.ui.reader.FolioFontSize = com.makemission.folio.ui.reader.FolioFontSize.NORMAL,
     lineSpacing: com.makemission.folio.ui.reader.FolioLineSpacing = com.makemission.folio.ui.reader.FolioLineSpacing.NORMAL,
     margin: com.makemission.folio.ui.reader.FolioMargin = com.makemission.folio.ui.reader.FolioMargin.NORMAL,
+    contentWidthDp: Int? = null,
 ): Map<String, KnuthAdjustment> {
     val textMeasurer = rememberTextMeasurer()
     val configuration = LocalConfiguration.current
@@ -141,7 +142,7 @@ fun rememberKnuthAdjustments(
     return remember(
         screenWidthDp, screenHeightDp, orientation,
         fontScale, densityValue, bionicEnabled, isTabletLandscape, chaptersKey,
-        readingFont, fontSize, lineSpacing, margin,
+        readingFont, fontSize, lineSpacing, margin, contentWidthDp,
     ) {
         if (chapters.isEmpty()) return@remember emptyMap()
 
@@ -153,7 +154,7 @@ fun rememberKnuthAdjustments(
                 val totalH = outer + inner + 1.dp
                 ((screenWidthDp.dp - totalH) / 2).coerceAtLeast(120.dp)
             } else {
-                (screenWidthDp.dp - margin.horizontalDp * 2).coerceAtLeast(120.dp)
+                ((contentWidthDp?.coerceAtMost(screenWidthDp) ?: screenWidthDp).dp - margin.horizontalDp * 2).coerceAtLeast(120.dp)
             }
             wDp.toPx().toInt().coerceAtLeast(100)
         }

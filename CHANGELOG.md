@@ -8,6 +8,7 @@
 - Switched app and widget interface typography to bundled Inter for a consistent, San Francisco-inspired Android look; book text keeps the reader's selected typeface.
 - Added All, Reading, Want to Read and Finished shelves, book details and persisted shelf actions. A short Undo action reverses an accidental shelf move, and shelf/sort choices survive app launches.
 - Cached shelf filtering and sorting between relevant library changes to avoid repeated list work during unrelated UI updates.
+- Added a gentle animated week strip with a one-tap return to the latest book; reading activity stays on-device and sends no reminders.
 - Added a direct Choose books action to the empty library, simplifying first import without a Settings detour.
 - Added whole-device EPUB, MOBI and FB2 discovery, optional folder import, idle-aware background scanning, unchanged-file caching and duplicate detection.
 - Moved heavy chapter enrichment out of active use: it waits for idle time, healthy battery and available storage, processes one book at a time, and pauses when Android reports thermal pressure. Books remain readable as soon as import completes.
@@ -16,6 +17,8 @@
 - Added a Continue Reading home-screen widget with cover art, saved-position launch and a Library shortcut. The widget follows light and dark appearance and decodes cover art at a small size.
 - Made the empty Continue Reading widget open Add Books directly; when every book is finished, it says All Caught Up and returns to the shelf.
 - Added local support for readable unencrypted PalmDOC/MOBI6 books.
+- Improved EPUB chapter matching for encoded and parent-relative paths, recovered prose from converted div/section/pre layouts, and skipped embedded media while parsing to lower peak memory use.
+- Replaced unrelated sample text after a real book fails to parse with a clear explanation and a direct Choose file again action.
 
 ### Reading
 
@@ -34,6 +37,8 @@
 - Added hardware-keyboard navigation: Page Up/Page Down move through the book, Ctrl+F opens in-book search, Ctrl+K opens library search, and Escape clears or closes it.
 - Added Ctrl+O on tablets to open Add Books from the library; the interactive tour and What’s New explain the shortcut and empty-library import action.
 - Added Ctrl+1–4 on tablets to switch between All, Reading, Want to Read and Finished shelves.
+- Added Ctrl+J on tablets to open Contents in portrait or toggle the Contents rail in landscape; the weekly rhythm strip also gets a direct Continue action on tablets.
+- Centered tablet portrait reading in a comfortable 720dp column; page and paragraph measurements follow that width in both navigation modes.
 - Added a persistent tablet library density control to switch between roomy covers and a more compact grid.
 - Added a wide-tablet quick-look panel with cover, progress, shelf actions and a direct read action. Drag its divider to choose how much room the book grid and details get.
 - Library shelf and sort preferences now persist across app launches, so Folio returns to the view you chose.

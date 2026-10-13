@@ -42,7 +42,16 @@ private val updateSections = listOf(
             "Browse All, Reading, Want to Read and Finished shelves; open a book’s details to change its shelf status.",
             "Moved a book to the wrong shelf? Undo the change from the confirmation message. Your shelf and sort choices also survive rotation.",
             "Continue Reading shows your saved progress. Search books from the library or open the full-screen search inside a book.",
+            "A small This week in books strip shows which days you've read. Tablets get a one-tap Continue action there; your reading rhythm stays local and never sends reminders.",
             "An empty library now has a direct Choose books action, so the first import starts without a trip through Settings.",
+        ),
+    ),
+    UpdateSection(
+        title = "Books open with fewer surprises",
+        summary = "Folio now follows EPUB reading order more carefully and can recover more converted books with prose stored outside paragraph tags.",
+        details = listOf(
+            "The reader loads chapter text without pulling embedded images and fonts into memory, reducing peak memory use on large books.",
+            "If a file is missing or has no readable text, the reader explains what happened and offers Choose file again instead of showing unrelated sample text.",
         ),
     ),
     UpdateSection(
@@ -122,10 +131,11 @@ private val updateSections = listOf(
     ),
     UpdateSection(
         title = "A roomier tablet reader",
-        summary = "Landscape tablets get a two-page spread, a collapsible Contents rail, and a compact reader-settings popover.",
+        summary = "Portrait tablets keep reading in a centered column. Landscape opens a two-page spread with a collapsible Contents rail and compact reader controls.",
         details = listOf(
             "Drag the Contents divider to choose a width; Folio remembers it through rotation. Notes open in a split review layout.",
-            "With a hardware keyboard, Page Up and Page Down move through the book, Ctrl+F opens in-book search, Ctrl+1 through Ctrl+4 switch library shelves, Ctrl+O opens Add Books, Ctrl+K opens library search, and Escape clears or closes it.",
+            "With a hardware keyboard, Ctrl+J opens Contents in portrait or toggles the rail in landscape. Page Up and Page Down move through the book, Ctrl+F opens in-book search, Ctrl+1 through Ctrl+4 switch library shelves, Ctrl+O opens Add Books, and Ctrl+K searches the library.",
+            "The weekly reading strip also gives tablet readers a direct route back to their latest book.",
         ),
     ),
     UpdateSection(

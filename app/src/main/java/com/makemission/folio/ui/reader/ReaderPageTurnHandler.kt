@@ -20,6 +20,8 @@ object ReaderPageTurnHandler {
     var onKeyboardLibraryShelf: ((shortcut: Int) -> Unit)? = null
     /** Tablet-only keyboard shortcut bridge for Ctrl+O. */
     var onKeyboardTabletAddBooks: (() -> Unit)? = null
+    /** Tablet keyboard bridge: toggles the landscape Contents rail or opens the chapter list. */
+    var onKeyboardTabletContents: (() -> Unit)? = null
     /** Tablet keyboard bridge: clears the active library query or dismisses search. */
     var onKeyboardLibraryEscape: (() -> Unit)? = null
 

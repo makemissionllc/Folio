@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandVertically
@@ -106,6 +107,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.makemission.folio.data.model.Book
 import com.makemission.folio.data.epub.BookFileParser
 import com.makemission.folio.data.model.ShelfStatus
+import java.time.DayOfWeek
 import com.makemission.folio.data.settings.SettingsRepository
 import com.makemission.folio.data.work.DeviceScanScheduler
 import com.makemission.folio.data.scan.EpubScanner
@@ -179,6 +181,7 @@ fun LibraryScreen(
     }
     val readBookIds by viewModel.readBookIds.collectAsState()
     val continueBookId by viewModel.continueBookId.collectAsState()
+    val readingWeekDays by viewModel.readingWeekDays.collectAsState()
     val visibleBooks = remember(books, selectedFilter, readBookIds, sortOrder) {
         val filtered = books.filter { book ->
             when (selectedFilter) {
@@ -486,8 +489,9 @@ fun LibraryScreen(
                         compactTabletGrid = isTablet && compactTabletGrid,
                         header = {
                             LibraryShelfHeader(
-                                continueBook = if (isTablet) null else continueBook,
+                                continueBook = continueBook,
                                 onContinue = { continueBook?.let(onBookClick) },
+                                readingWeekDays = readingWeekDays,
                                 selectedFilter = selectedFilter,
                                 onSelectFilter = selectFilter,
                                 isTablet = isTablet,
@@ -704,6 +708,7 @@ private fun TabletBookPreviewPane(
 private fun LibraryShelfHeader(
     continueBook: Book?,
     onContinue: () -> Unit,
+    readingWeekDays: Set<DayOfWeek>,
     selectedFilter: LibraryFilter,
     onSelectFilter: (LibraryFilter) -> Unit,
     isTablet: Boolean,
@@ -736,6 +741,14 @@ private fun LibraryShelfHeader(
                     }
                 }
             }
+        }
+        ReadingRhythmCard(
+            activeDays = readingWeekDays,
+            continueBook = continueBook,
+            showContinueAction = isTablet,
+            onContinue = onContinue,
+        )
+        if (!isTablet) {
             continueBook?.let { book ->
                 Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     Text("Continue Reading", style = MaterialTheme.typography.titleMedium)
@@ -793,6 +806,77 @@ private fun LibraryShelfHeader(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadingRhythmCard(
+    activeDays: Set<DayOfWeek>,
+    continueBook: Book?,
+    showContinueAction: Boolean,
+    onContinue: () -> Unit,
+) {
+    val count = activeDays.size
+    AnimatedVisibility(
+        visible = true,
+        enter = fadeIn(tween(260)) + expandVertically(tween(280)),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().animateContentSize(tween(220)),
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f),
+        ) {
+            Column(
+                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FolioDoodle(FolioDoodleKind.SPARK, Modifier.size(18.dp), MaterialTheme.colorScheme.tertiary)
+                    Column(Modifier.weight(1f)) {
+                        Text("This week in books", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            when (count) {
+                                0 -> "A page or two is a lovely place to begin."
+                                1 -> "You picked up a book on 1 day. Keep it gentle."
+                                else -> "You picked up a book on $count days. Any page counts."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (showContinueAction && continueBook != null) {
+                        TextButton(onClick = onContinue, modifier = Modifier.sizeIn(minHeight = 44.dp)) {
+                            Text("Continue")
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    DayOfWeek.values().forEach { day ->
+                        val active = day in activeDays
+                        val dotColor by animateColorAsState(
+                            targetValue = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                            animationSpec = tween(240),
+                            label = "reading_week_day",
+                        )
+                        Surface(
+                            modifier = Modifier.weight(1f).height(28.dp).semantics {
+                                contentDescription = "${day.name.lowercase().replaceFirstChar { it.uppercase() }}: ${if (active) "read" else "no reading recorded"}"
+                            },
+                            shape = RoundedCornerShape(9.dp),
+                            color = dotColor,
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    day.name.lowercase().replaceFirstChar { it.uppercase() }.take(2),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = MaterialTheme.typography.labelSmall.fontSize * 0.85f),
+                                    color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }

@@ -137,6 +137,12 @@ class MainActivity : ComponentActivity() {
                 return true
             }
         }
+        if (event?.isCtrlPressed == true && keyCode == KeyEvent.KEYCODE_J) {
+            ReaderPageTurnHandler.onKeyboardTabletContents?.let { openContents ->
+                openContents()
+                return true
+            }
+        }
         if (event?.isCtrlPressed == true && keyCode == KeyEvent.KEYCODE_K) {
             ReaderPageTurnHandler.onKeyboardLibrarySearch?.let { openLibrarySearch ->
                 openLibrarySearch()

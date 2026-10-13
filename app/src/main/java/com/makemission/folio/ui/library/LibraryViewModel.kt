@@ -44,6 +44,10 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
 import java.security.MessageDigest
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 import com.makemission.folio.widget.ContinueReadingWidgetProvider
 
@@ -152,6 +156,20 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     val continueBookId: StateFlow<String?> = readingProgressDao.observeAll()
         .map { progress -> progress.maxByOrNull { it.lastReadMillis }?.bookId }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** Small local-only return cue for the current Monday–Sunday reading week. */
+    val readingWeekDays: StateFlow<Set<DayOfWeek>> = readingProgressDao.observeAll()
+        .map { progress ->
+            val zone = ZoneId.systemDefault()
+            val today = LocalDate.now(zone)
+            val monday = today.with(java.time.temporal.TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+            progress.mapNotNull { item ->
+                runCatching { Instant.ofEpochMilli(item.lastReadMillis).atZone(zone).toLocalDate() }.getOrNull()
+            }.filter { !it.isBefore(monday) && !it.isAfter(today) }
+                .map { it.dayOfWeek }
+                .toSet()
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
     val books: StateFlow<List<Book>> = combine(
         bookDao.observeAll(),

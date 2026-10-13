@@ -46,6 +46,7 @@ data class ReadingUiState(
     val restoredChapterIndex: Int = 0,
     val restoredParagraphIndex: Int = 0,
     val fileHash: String? = null,
+    val contentError: String? = null,
 )
 
 class ReadingViewModel(
@@ -111,12 +112,14 @@ class ReadingViewModel(
             // Priority order: stored file FIRST for real books, assets only for curated samples (no filePath)
             // Performance: disk I/O (ParsedBookCache + file parse) on Dispatchers.IO to avoid main-thread jank.
             var epub: EpubParser.EpubBook? = null
+            var contentError: String? = null
             if (epub == null && stored?.filePath != null && fileHash != null) {
                 epub = withContext(Dispatchers.IO) { ParsedBookCache.load(app, bookId, fileHash) }
                 if (epub != null) {
                     FolioLogger.i("Reading", "Parsed cache hit for $bookId")
                 }
             }
+            if (epub?.chapters.isNullOrEmpty()) epub = null
             // 2. Stored file (real books) — MUST be tried before assets
             if (epub == null && stored?.filePath != null) {
                 val f = java.io.File(stored.filePath)
@@ -129,10 +132,13 @@ class ReadingViewModel(
                         }
                     }
                     epub = parsed
-                    if (parsed == null) {
-                        FolioLogger.w("Reading", "Parse failed for stored file $bookId, will not fall back to sample.epub (real book)")
+                    if (parsed?.chapters.isNullOrEmpty()) {
+                        epub = null
+                        contentError = "Folio couldn't find readable text in this file. Choose it again or try another edition."
+                        FolioLogger.w("Reading", "Parse failed for stored file $bookId; showing a recovery action instead of sample text")
                     }
                 } else {
+                    contentError = "This book file is no longer available. Choose it again to continue reading."
                     FolioLogger.w("Reading", "Stored file missing/unreadable for $bookId: ${stored.filePath?.take(80)}")
                 }
             }
@@ -141,8 +147,11 @@ class ReadingViewModel(
                 FolioLogger.i("Reading", "No stored file for $bookId — trying assets/sample.epub (curated sample)")
                 epub = withContext(Dispatchers.IO) { EpubParser.loadFromAssetsOrNull(app) }
             }
-            if (epub == null) FolioLogger.w("Reading", "EPUB parse null for $bookId, using fallback")
-            val chapters = epub?.chapters ?: EpubParser.sampleFallbackChapters(bookTitle)
+            if (epub == null && stored?.filePath == null) {
+                FolioLogger.w("Reading", "Curated book content unavailable for $bookId, using built-in guide")
+            }
+            val chapters = epub?.chapters?.takeIf { it.isNotEmpty() }
+                ?: if (stored?.filePath != null) emptyList() else EpubParser.sampleFallbackChapters(bookTitle)
 
             // Prefer stored title/author when available (keeps library grid consistent)
             val displayTitle = stored?.title?.takeIf { it.isNotBlank() }
@@ -160,32 +169,34 @@ class ReadingViewModel(
                 restoredChapterIndex = chapterIdx,
                 restoredParagraphIndex = paraIdx,
                 fileHash = fileHash,
+                contentError = contentError,
             )
 
-            // Recently-read sorting (§6): bump lastReadMillis on open so Library sorts this book to top.
-            // This ensures opening alone counts as "recently read" even if user doesn't scroll far.
-            try {
-                withContext(Dispatchers.IO) {
-                    val now = System.currentTimeMillis()
-                    val existing = try { dao.get(bookId) } catch (_: Exception) { null }
-                    val toSave = if (existing != null) {
-                        existing.copy(lastReadMillis = now)
-                    } else {
-                        ReadingProgress(bookId = bookId, chapterIndex = chapterIdx, paragraphIndex = paraIdx, lastReadMillis = now)
+            if (chapters.isNotEmpty()) {
+                // Recently-read sorting (§6): bump lastReadMillis on open so Library sorts this book to top.
+                try {
+                    withContext(Dispatchers.IO) {
+                        val now = System.currentTimeMillis()
+                        val existing = try { dao.get(bookId) } catch (_: Exception) { null }
+                        val toSave = if (existing != null) {
+                            existing.copy(lastReadMillis = now)
+                        } else {
+                            ReadingProgress(bookId = bookId, chapterIndex = chapterIdx, paragraphIndex = paraIdx, lastReadMillis = now)
+                        }
+                        dao.upsert(toSave)
+                        ContinueReadingWidgetProvider.refresh(app, force = true)
                     }
-                    dao.upsert(toSave)
-                    ContinueReadingWidgetProvider.refresh(app, force = true)
+                } catch (e: Exception) {
+                    FolioLogger.w("Reading", "Failed to bump lastRead on open for $bookId: ${e.message}", e)
                 }
-            } catch (e: Exception) {
-                FolioLogger.w("Reading", "Failed to bump lastRead on open for $bookId: ${e.message}", e)
+
+                // X-Ray (§5): chapter-level progressive — prioritize current chapter, then next, then rest
+                launchProgressiveXRay(app, bookId, chapters, fileHash, chapterIdx)
+
+                // LCS re-anchoring (§5): if the EPUB file changed, relocate highlights
+                reanchorHighlightsIfNeeded(chapters)
+                observeInBookSearch()
             }
-
-            // X-Ray (§5): chapter-level progressive — prioritize current chapter, then next, then rest
-            launchProgressiveXRay(app, bookId, chapters, fileHash, chapterIdx)
-
-            // LCS re-anchoring (§5): if the EPUB file changed, relocate highlights
-            reanchorHighlightsIfNeeded(chapters)
-            observeInBookSearch()
         }
     }
 

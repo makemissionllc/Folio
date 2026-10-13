@@ -53,6 +53,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,13 +77,13 @@ private val tourStops = listOf(
     TourStop(
         "01 · YOUR LIBRARY", "Everything starts on one calm shelf",
         "Keep reading, find a book, or decide what to read next without digging through menus.",
-        listOf("All, Reading, Want to Read and Finished shelves", "Move a book between shelves with a quick Undo", "Your shelf and sort choices stay saved between visits"),
+        listOf("All, Reading, Want to Read and Finished shelves", "Move a book between shelves with a quick Undo", "A gentle week strip shows days you picked up a book; tap a day in this preview", "Your shelf and sort choices stay saved between visits"),
         TourDemo.LIBRARY,
     ),
     TourStop(
         "02 · ADD BOOKS", "Bring your books in your way",
         "Pick one or several EPUB, MOBI, FB2 or plain-text files, open a book from another app, or enable a device scan when you want Folio to find them.",
-        listOf("Choose books directly from the empty library; whole-device discovery includes EPUB, MOBI and FB2", "Scanning and chapter indexing wait for idle time and pause on a warm device", "File caching skips unchanged books; you can read as soon as import finishes"),
+        listOf("Choose books directly from the empty library; whole-device discovery includes EPUB, MOBI and FB2", "If a file has no readable text, choose it again from the reader instead of losing your place", "Scanning and chapter indexing wait for idle time and pause on a warm device", "File caching skips unchanged books; you can read as soon as import finishes"),
         TourDemo.IMPORT,
     ),
     TourStop(
@@ -123,7 +125,7 @@ private val tourStops = listOf(
     TourStop(
         "09 · TABLETS", "Use the space around the story",
         "Folio reshapes its library and reader for a wider screen. Drag the divider beside Quick look to give the book grid or details more room.",
-        listOf("Landscape two-page reading and a resizable Contents rail", "Page Up/Down turn pages; Ctrl+F searches inside a book", "Ctrl+1–4 switch library shelves: All, Reading, Want to Read and Finished", "Ctrl+O adds books; Ctrl+K searches the library; Escape clears or closes search"),
+        listOf("Tablet portrait keeps a centered reading column; landscape opens a two-page spread", "The weekly reading strip has a one-tap return to your latest book", "Ctrl+J opens Contents in portrait or toggles the rail in landscape", "Page Up/Down turn pages; Ctrl+F searches inside a book", "Ctrl+1–4 switch library shelves; Ctrl+O adds books; Ctrl+K searches the library"),
         TourDemo.TABLET,
     ),
     TourStop(
@@ -230,7 +232,7 @@ private fun TourStopPage(stop: TourStop, page: Int) {
 @Composable
 private fun TourDemoCard(demo: TourDemo, key: Int) {
     Card(
-        modifier = Modifier.fillMaxWidth().height(224.dp),
+        modifier = Modifier.fillMaxWidth().height(240.dp),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
     ) {
@@ -274,7 +276,33 @@ private fun LibraryDemo(key: Int) {
                 TextButton(onClick = { shelfChanged = false }) { Text("Undo") }
             }
         }
+        ReadingWeekDemo(key)
         Text("Your shelf and sort stay saved between visits.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun ReadingWeekDemo(key: Int) {
+    var daysRead by remember(key) { mutableStateOf(setOf(1, 3, 4)) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text("This week", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            listOf("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su").forEachIndexed { day, label ->
+                val selected = day in daysRead
+                Surface(
+                    modifier = Modifier.weight(1f).height(26.dp).clip(CircleShape).clickable {
+                        daysRead = if (selected) daysRead - day else daysRead + day
+                    }.semantics { contentDescription = "$label reading day, ${if (selected) "active" else "inactive"}; tap to toggle" },
+                    shape = CircleShape,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(label, style = MaterialTheme.typography.labelSmall, color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+        Text("Tap", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
     }
 }
 
@@ -429,7 +457,7 @@ private fun TabletDemo(key: Int) {
             Text("Resize quick look", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Slider(value = previewFraction, onValueChange = { previewFraction = it }, valueRange = 0.28f..0.52f, modifier = Modifier.weight(1f))
         }
-        Text("Two-page reader · Contents rail · Ctrl+1–4 shelves · Ctrl+O add · Ctrl+K search", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("Centered portrait text · two-page spread · Ctrl+J contents · Ctrl+1–4 shelves · Ctrl+O add", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

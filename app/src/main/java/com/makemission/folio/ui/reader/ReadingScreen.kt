@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -254,6 +255,7 @@ fun ReadingScreen(
     bookId: String,
     bookTitle: String,
     onBack: () -> Unit,
+    onReimport: () -> Unit = {},
     initialChapterIndex: Int? = null,
     initialParagraphIndex: Int? = null,
     modifier: Modifier = Modifier,
@@ -283,6 +285,7 @@ fun ReadingScreen(
         xrayIndex = xrayIndex,
         isXRayLoading = isXRayLoading,
         onBack = onBack,
+        onReimport = onReimport,
         onSaveProgress = viewModel::saveProgress,
         onAddHighlight = { pts, pressures, tilts, ch ->
             viewModel.addHighlight(pts, pressures, tilts, ch, color = highlightColorOuter.color, style = highlightStyleOuter.name)
@@ -319,6 +322,7 @@ private fun ReadingScreenContent(
     xrayIndex: Map<Int, List<com.makemission.folio.data.xray.XRayTerm>>,
     isXRayLoading: Boolean,
     onBack: () -> Unit,
+    onReimport: () -> Unit = {},
     onSaveProgress: (Int, Int) -> Unit,
     onAddHighlight: (List<Offset>, List<Float>, List<Float>, Int) -> Unit,
     onAddHighlightWithAnchor: (List<Offset>, List<Float>, List<Float>, Int, String, Color, String) -> Unit = { _, _, _, _, _, _, _ -> },
@@ -371,19 +375,24 @@ private fun ReadingScreenContent(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val keyboardOverlayVisible = showInBookSearch || showMenu || showBookmarks || showHighlights || showChapters || showXRay || dictPopup != null || lassoCapture != null || aiPassage != null
-    DisposableEffect(isTabletDevice, keyboardOverlayVisible) {
+    DisposableEffect(isTabletDevice, keyboardOverlayVisible, isTabletLandscape) {
         if (isTabletDevice && !keyboardOverlayVisible) {
             ReaderPageTurnHandler.onKeyboardPageKey = { isForward ->
                 ReaderPageTurnHandler.onVolumeKey?.invoke(!isForward)
             }
             ReaderPageTurnHandler.onKeyboardSearch = { showInBookSearch = true }
+            ReaderPageTurnHandler.onKeyboardTabletContents = {
+                if (isTabletLandscape) showTabletContents = !showTabletContents else showChapters = true
+            }
         } else {
             ReaderPageTurnHandler.onKeyboardPageKey = null
             ReaderPageTurnHandler.onKeyboardSearch = null
+            ReaderPageTurnHandler.onKeyboardTabletContents = null
         }
         onDispose {
             ReaderPageTurnHandler.onKeyboardPageKey = null
             ReaderPageTurnHandler.onKeyboardSearch = null
+            ReaderPageTurnHandler.onKeyboardTabletContents = null
         }
     }
 
@@ -1035,11 +1044,19 @@ private fun ReadingScreenContent(
                             textAlign = TextAlign.Center,
                         )
                         Text(
-                            text = "This book appears to be empty — try another title or re-import the file.",
+                            text = uiState.contentError ?: "This book has no readable text. Choose the file again or try another edition.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
                         )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = onReimport, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
+                                Text("Choose file again")
+                            }
+                            TextButton(onClick = onBack, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
+                                Text("Back to library")
+                            }
+                        }
                     }
                 }
             } else {
@@ -1205,6 +1222,7 @@ private fun ReadingScreenContent(
                                     margin = readingMargin,
                                     highlightColor = highlightColorPref.color,
                                     highlightStyle = highlightStylePref.name,
+                                    contentWidthDp = if (isTabletDevice) 720 else null,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -1265,6 +1283,7 @@ private fun ReadingScreenContent(
                                     margin = readingMargin,
                                     highlightColor = highlightColorPref.color,
                                     highlightStyle = highlightStylePref.name,
+                                    contentWidthDp = if (isTabletDevice) 720 else null,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -1602,6 +1621,7 @@ private fun SingleColumnReadingContent(
     margin: FolioMargin = FolioMargin.NORMAL,
     highlightColor: Color = FolioHighlightColor.AMBER.color,
     highlightStyle: String = "FILL",
+    contentWidthDp: Int? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -1632,6 +1652,7 @@ private fun SingleColumnReadingContent(
         fontSize = fontSize,
         lineSpacing = lineSpacing,
         margin = margin,
+        contentWidthDp = contentWidthDp,
     )
     // Current page updates on scroll but totalPages stays cached
     val currentPage by remember {
@@ -1646,6 +1667,7 @@ private fun SingleColumnReadingContent(
         fontSize = fontSize,
         lineSpacing = lineSpacing,
         margin = margin,
+        contentWidthDp = contentWidthDp,
     )
 
     val progress by remember {
@@ -1733,10 +1755,12 @@ private fun SingleColumnReadingContent(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
+        val columnWidthModifier = if (contentWidthDp != null) {
+            Modifier.widthIn(max = contentWidthDp.dp).fillMaxHeight().fillMaxWidth().align(Alignment.Center)
+        } else Modifier.fillMaxSize()
         LazyColumn(
             state = listState,
-            modifier = Modifier
-                .fillMaxSize()
+            modifier = columnWidthModifier
                 .padding(horizontal = margin.horizontalDp)
                 .pointerInput(Unit) {
                     detectTapGestures(onTap = { onToggleChrome() })
@@ -2599,6 +2623,7 @@ private fun ChapterSwipePhoneContent(
     margin: FolioMargin = FolioMargin.NORMAL,
     highlightColor: Color = FolioHighlightColor.AMBER.color,
     highlightStyle: String = "FILL",
+    contentWidthDp: Int? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -2650,8 +2675,8 @@ private fun ChapterSwipePhoneContent(
     }
 
     // True-Page (whole-book, disk-cached) — pageFor uses global flat
-    val truePageInfo = rememberTruePageState(chapters = chapters, isTabletLandscape = false, bionicEnabled = bionicEnabled, bookId = bookId, fileHash = fileHash, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing, margin = margin)
-    val knuthAdjustments = rememberKnuthAdjustments(chapters = chapters, isTabletLandscape = false, bionicEnabled = bionicEnabled, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing, margin = margin)
+    val truePageInfo = rememberTruePageState(chapters = chapters, isTabletLandscape = false, bionicEnabled = bionicEnabled, bookId = bookId, fileHash = fileHash, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing, margin = margin, contentWidthDp = contentWidthDp)
+    val knuthAdjustments = rememberKnuthAdjustments(chapters = chapters, isTabletLandscape = false, bionicEnabled = bionicEnabled, readingFont = readingFont, fontSize = fontSize, lineSpacing = lineSpacing, margin = margin, contentWidthDp = contentWidthDp)
     // Progress + time remaining based on global flat (current chapter offset + within)
     val currentFlatOffset = remember(chapters, currentPage) {
         var off = 0
@@ -2723,8 +2748,9 @@ private fun ChapterSwipePhoneContent(
             Box(modifier = Modifier.fillMaxSize()) {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier
-                        .fillMaxSize()
+                    modifier = (if (contentWidthDp != null) {
+                        Modifier.widthIn(max = contentWidthDp.dp).fillMaxHeight().fillMaxWidth().align(Alignment.Center)
+                    } else Modifier.fillMaxSize())
                         .padding(horizontal = margin.horizontalDp)
                         .pointerInput(Unit) {
                             detectTapGestures(onTap = { onToggleChrome() })

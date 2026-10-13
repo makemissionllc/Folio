@@ -268,6 +268,10 @@ fun FolioNavHost(
                 bookId = bookId,
                 bookTitle = bookTitle.ifBlank { "Reading" },
                 onBack = { navController.popBackStack() },
+                onReimport = {
+                    navController.popBackStack(FolioRoute.Library.route, inclusive = false)
+                    ReaderPageTurnHandler.requestLibraryAddBooks()
+                },
                 initialChapterIndex = ch.takeIf { it >= 0 },
                 initialParagraphIndex = para.takeIf { it >= 0 },
             )

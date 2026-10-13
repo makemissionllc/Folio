@@ -44,14 +44,15 @@ data class TruePageInfo(
 }
 
 /**
- * Phone: single-column. Tablet: two-column spread — [isTabletLandscape]
- * doubles the per-screen height (physical page turns).
+ * Phone and tablet portrait use one centered column; tablet landscape uses a
+ * two-column spread, where [isTabletLandscape] doubles the per-screen height.
  *
  * @param chapters whole book
  * @param isTabletLandscape true for landscape >=840dp spread
  * @param bionicEnabled affects measure (bold first syllable slightly wider)
  * @param bookId optional for disk caching (smart cache with hash invalidation)
  * @param fileHash optional file hash for cache invalidation (reuses dedup)
+ * @param contentWidthDp optional centered column width for tablet portrait layouts
  */
 @Composable
 fun rememberTruePageState(
@@ -64,6 +65,7 @@ fun rememberTruePageState(
     fontSize: com.makemission.folio.ui.reader.FolioFontSize = com.makemission.folio.ui.reader.FolioFontSize.NORMAL,
     lineSpacing: com.makemission.folio.ui.reader.FolioLineSpacing = com.makemission.folio.ui.reader.FolioLineSpacing.NORMAL,
     margin: com.makemission.folio.ui.reader.FolioMargin = com.makemission.folio.ui.reader.FolioMargin.NORMAL,
+    contentWidthDp: Int? = null,
 ): TruePageInfo {
     val textMeasurer = rememberTextMeasurer()
     val configuration = LocalConfiguration.current
@@ -87,15 +89,15 @@ fun rememberTruePageState(
     }
 
     val context = LocalContext.current
-    val configKey = remember(screenWidthDp, screenHeightDp, orientation, fontScale, densityValue, bionicEnabled, isTabletLandscape, chaptersKey, readingFont, fontSize, lineSpacing, margin) {
-        TruePageCache.configKey(screenWidthDp, screenHeightDp, orientation, fontScale, densityValue, bionicEnabled, isTabletLandscape, chaptersKey) + "_${readingFont.name}_${fontSize.name}_${lineSpacing.name}_${margin.name}"
+    val configKey = remember(screenWidthDp, screenHeightDp, orientation, fontScale, densityValue, bionicEnabled, isTabletLandscape, chaptersKey, readingFont, fontSize, lineSpacing, margin, contentWidthDp) {
+        TruePageCache.configKey(screenWidthDp, screenHeightDp, orientation, fontScale, densityValue, bionicEnabled, isTabletLandscape, chaptersKey) + "_${readingFont.name}_${fontSize.name}_${lineSpacing.name}_${margin.name}_cw${contentWidthDp ?: 0}"
     }
 
     return remember(
         screenWidthDp, screenHeightDp, orientation,
         fontScale, densityValue, bionicEnabled,
         isTabletLandscape, chaptersKey, configKey, bookId, fileHash,
-        readingFont, fontSize, lineSpacing, margin,
+        readingFont, fontSize, lineSpacing, margin, contentWidthDp,
     ) {
         if (chapters.isEmpty()) {
             return@remember TruePageInfo(totalPages = 1, pageForFlatIndex = { 1 })
@@ -132,7 +134,7 @@ fun rememberTruePageState(
                 val totalH = outer + inner + 1.dp
                 ((screenWidthDp.dp - totalH) / 2).coerceAtLeast(120.dp)
             } else {
-                (screenWidthDp.dp - margin.horizontalDp * 2).coerceAtLeast(120.dp)
+                ((contentWidthDp?.coerceAtMost(screenWidthDp) ?: screenWidthDp).dp - margin.horizontalDp * 2).coerceAtLeast(120.dp)
             }
             widthDp.toPx().toInt().coerceAtLeast(100)
         }
