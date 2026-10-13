@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -29,6 +30,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun EmptyLibraryState(
     modifier: Modifier = Modifier,
+    onAddBooks: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -51,11 +53,17 @@ fun EmptyLibraryState(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Add a book in Settings → Library\nor let an idle scan find EPUB, MOBI and FB2 —\nthe built-in guide is already here.",
+            text = "Choose a book to get started, or enable device scanning in Settings to find EPUB, MOBI and FB2 books while your device is idle. The built-in guide is already here.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+        if (onAddBooks != null) {
+            Spacer(modifier = Modifier.height(20.dp))
+            Button(onClick = onAddBooks) {
+                Text("Choose books")
+            }
+        }
     }
 }
 

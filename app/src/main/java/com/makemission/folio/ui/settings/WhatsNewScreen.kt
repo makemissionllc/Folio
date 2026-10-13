@@ -42,6 +42,7 @@ private val updateSections = listOf(
             "Browse All, Reading, Want to Read and Finished shelves; open a book’s details to change its shelf status.",
             "Moved a book to the wrong shelf? Undo the change from the confirmation message. Your shelf and sort choices also survive rotation.",
             "Continue Reading shows your saved progress. Search books from the library or open the full-screen search inside a book.",
+            "An empty library now has a direct Choose books action, so the first import starts without a trip through Settings.",
         ),
     ),
     UpdateSection(
@@ -124,7 +125,7 @@ private val updateSections = listOf(
         summary = "Landscape tablets get a two-page spread, a collapsible Contents rail, and a compact reader-settings popover.",
         details = listOf(
             "Drag the Contents divider to choose a width; Folio remembers it through rotation. Notes open in a split review layout.",
-            "With a hardware keyboard, Page Up and Page Down move through the book, Ctrl+F opens in-book search, Ctrl+K opens library search, and Escape clears or closes it.",
+            "With a hardware keyboard, Page Up and Page Down move through the book, Ctrl+F opens in-book search, Ctrl+O opens Add Books, Ctrl+K opens library search, and Escape clears or closes it.",
         ),
     ),
     UpdateSection(

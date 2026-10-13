@@ -198,6 +198,7 @@ fun LibraryScreen(
                 viewModel.clearSearch()
                 isSearchRevealed = false
             }
+            ReaderPageTurnHandler.onKeyboardLibraryAddBooks = { showAddBooks = true }
         }
         onDispose {
             if (ReaderPageTurnHandler.onKeyboardLibrarySearch != null) {
@@ -205,6 +206,9 @@ fun LibraryScreen(
             }
             if (ReaderPageTurnHandler.onKeyboardLibraryEscape != null) {
                 ReaderPageTurnHandler.onKeyboardLibraryEscape = null
+            }
+            if (ReaderPageTurnHandler.onKeyboardLibraryAddBooks != null) {
+                ReaderPageTurnHandler.onKeyboardLibraryAddBooks = null
             }
         }
     }
@@ -432,7 +436,10 @@ fun LibraryScreen(
                         },
                         onClear = viewModel::clearSearch,
                     )
-                    books.isEmpty() -> EmptyLibraryState(modifier = Modifier.fillMaxSize())
+                    books.isEmpty() -> EmptyLibraryState(
+                        modifier = Modifier.fillMaxSize(),
+                        onAddBooks = { showAddBooks = true },
+                    )
                     else -> BookGrid(
                         books = visibleBooks,
                         onBookClick = { book ->

@@ -113,6 +113,12 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (event?.isCtrlPressed == true && keyCode == KeyEvent.KEYCODE_O) {
+            ReaderPageTurnHandler.onKeyboardLibraryAddBooks?.let { openAddBooks ->
+                openAddBooks()
+                return true
+            }
+        }
         if (event?.isCtrlPressed == true && keyCode == KeyEvent.KEYCODE_K) {
             ReaderPageTurnHandler.onKeyboardLibrarySearch?.let { openLibrarySearch ->
                 openLibrarySearch()

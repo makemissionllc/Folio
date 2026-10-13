@@ -13,6 +13,8 @@ object ReaderPageTurnHandler {
     var onKeyboardSearch: (() -> Unit)? = null
     /** Tablet keyboard bridge: opens the library search field. */
     var onKeyboardLibrarySearch: (() -> Unit)? = null
+    /** Tablet keyboard bridge: opens the library's Add Books sheet. */
+    var onKeyboardLibraryAddBooks: (() -> Unit)? = null
     /** Tablet keyboard bridge: clears the active library query or dismisses search. */
     var onKeyboardLibraryEscape: (() -> Unit)? = null
 }

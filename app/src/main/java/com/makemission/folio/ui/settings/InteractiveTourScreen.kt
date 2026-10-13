@@ -81,7 +81,7 @@ private val tourStops = listOf(
     TourStop(
         "02 · ADD BOOKS", "Bring your books in your way",
         "Pick one or several EPUB, MOBI, FB2 or plain-text files, open a book from another app, or enable a device scan when you want Folio to find them.",
-        listOf("Whole-device discovery includes EPUB, MOBI and FB2; plain text stays manual so notes are not swept in", "Scanning and chapter indexing wait for idle time and pause on a warm device", "File caching skips unchanged books; you can read as soon as import finishes"),
+        listOf("Choose books directly from the empty library; whole-device discovery includes EPUB, MOBI and FB2", "Scanning and chapter indexing wait for idle time and pause on a warm device", "File caching skips unchanged books; you can read as soon as import finishes"),
         TourDemo.IMPORT,
     ),
     TourStop(
@@ -123,7 +123,7 @@ private val tourStops = listOf(
     TourStop(
         "09 · TABLETS", "Use the space around the story",
         "Folio reshapes its library and reader for a wider screen. Drag the divider beside Quick look to give the book grid or details more room.",
-        listOf("Landscape two-page reading and a resizable Contents rail", "Page Up/Down turn pages; Ctrl+F searches inside a book", "Ctrl+K searches the library; Escape clears or closes search"),
+        listOf("Landscape two-page reading and a resizable Contents rail", "Page Up/Down turn pages; Ctrl+F searches inside a book", "Ctrl+O opens Add Books; Ctrl+K searches the library; Escape clears or closes search"),
         TourDemo.TABLET,
     ),
     TourStop(
@@ -429,7 +429,7 @@ private fun TabletDemo(key: Int) {
             Text("Resize quick look", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Slider(value = previewFraction, onValueChange = { previewFraction = it }, valueRange = 0.28f..0.52f, modifier = Modifier.weight(1f))
         }
-        Text("Two-page reader · Contents rail · split notes · Ctrl+K / Esc search", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("Two-page reader · Contents rail · Ctrl+O add · Ctrl+K search · Esc close", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
